@@ -8,16 +8,21 @@ export const TimelineRuler = ({ timelineWidth }: TimelineRulerProps) => {
   const { zoom, playheadTime, setPlayheadTime } = useEditorStore();
 
   const handleRulerClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Get the exact click coordinate relative to the ticks container
     const rect = e.currentTarget.getBoundingClientRect();
-    const clickX = e.clientX - rect.left + e.currentTarget.scrollLeft;
+    const clickX = e.clientX - rect.left;
     const newTime = Math.max(0, clickX / zoom);
     setPlayheadTime(newTime);
   };
 
   return (
-    <div className="timeline-ruler" onClick={handleRulerClick} style={{ cursor: 'pointer' }}>
+    <div className="timeline-ruler">
       <div className="timeline-ruler-empty"></div>
-      <div className="timeline-ruler-ticks" style={{ width: `${timelineWidth}px`, backgroundSize: `${zoom}px 100%` }}>
+      <div 
+        className="timeline-ruler-ticks" 
+        onClick={handleRulerClick} 
+        style={{ width: `${timelineWidth}px`, backgroundSize: `${zoom}px 100%`, cursor: 'pointer' }}
+      >
         {/* Playhead Scrubber Line */}
         <div style={{
           position: 'absolute',

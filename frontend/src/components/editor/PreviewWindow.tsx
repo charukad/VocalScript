@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useEditorStore } from '../../store/editorStore';
+import type { TimelineClip } from '../../types';
 
 export const PreviewWindow = () => {
   const { clips, playheadTime, setPlayheadTime, isPlaying, isProcessing, srtContent, mediaUrl } = useEditorStore();
@@ -8,9 +9,31 @@ export const PreviewWindow = () => {
   const lastUpdateRef = useRef<number>(0);
   const audioRefs = useRef<{ [id: string]: HTMLAudioElement }>({});
   const videoRefs = useRef<{ [id: string]: HTMLVideoElement }>({});
+  const pendingPlays = useRef<{ [id: string]: boolean }>({});
+  
+  // Memoize object URLs to prevent continuous reloading
+  const objectUrlsRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    const currentIds = new Set(clips.map(c => c.id));
+    Object.keys(objectUrlsRef.current).forEach(id => {
+      if (!currentIds.has(id)) {
+        URL.revokeObjectURL(objectUrlsRef.current[id]);
+        delete objectUrlsRef.current[id];
+      }
+    });
+  }, [clips]);
+
+  const getObjectURL = (clip: TimelineClip) => {
+    if (!objectUrlsRef.current[clip.id]) {
+      objectUrlsRef.current[clip.id] = URL.createObjectURL(clip.file);
+    }
+    return objectUrlsRef.current[clip.id];
+  };
 
   const activeVisualClip = clips.find(c => c.type === 'visual' && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration);
 
+  // Playback Loop
   useEffect(() => {
     if (isPlaying) {
       lastUpdateRef.current = performance.now();
@@ -19,21 +42,23 @@ export const PreviewWindow = () => {
         const deltaSec = (time - lastUpdateRef.current) / 1000;
         lastUpdateRef.current = time;
         
-        setPlayheadTime(useEditorStore.getState().playheadTime + deltaSec);
-        const currentPlayhead = useEditorStore.getState().playheadTime;
+        const currentPlayhead = useEditorStore.getState().playheadTime + deltaSec;
+        setPlayheadTime(currentPlayhead);
         
-        // Sync HTML Media Elements
         clips.forEach(clip => {
           const mediaEl = clip.type === 'audio' ? audioRefs.current[clip.id] : videoRefs.current[clip.id];
           if (mediaEl) {
             const isWithinClip = currentPlayhead >= clip.startTime && currentPlayhead <= clip.startTime + clip.duration;
             if (isWithinClip) {
-              if (mediaEl.paused && !mediaEl.ended) {
+              if (mediaEl.paused && !mediaEl.ended && !pendingPlays.current[clip.id]) {
                 const expectedTime = currentPlayhead - clip.startTime;
                 if (Math.abs(mediaEl.currentTime - expectedTime) > 0.5) {
                   mediaEl.currentTime = expectedTime;
                 }
-                mediaEl.play().catch(e => console.error("Playback error:", e));
+                pendingPlays.current[clip.id] = true;
+                mediaEl.play()
+                  .then(() => { pendingPlays.current[clip.id] = false; })
+                  .catch(e => { pendingPlays.current[clip.id] = false; });
               }
             } else {
               if (!mediaEl.paused) mediaEl.pause();
@@ -56,21 +81,22 @@ export const PreviewWindow = () => {
     };
   }, [isPlaying, clips, setPlayheadTime]);
 
+  // Scrubbing when Paused
+  useEffect(() => {
+    if (!isPlaying) {
+      clips.forEach(clip => {
+        const mediaEl = clip.type === 'audio' ? audioRefs.current[clip.id] : videoRefs.current[clip.id];
+        if (mediaEl) {
+          if (playheadTime >= clip.startTime && playheadTime <= clip.startTime + clip.duration) {
+             mediaEl.currentTime = playheadTime - clip.startTime;
+          }
+        }
+      });
+    }
+  }, [playheadTime, isPlaying, clips]);
+
   return (
     <div className="preview-window">
-      {/* Hidden Media Elements for Live Playback */}
-      <div style={{ display: 'none' }}>
-        {clips.map(clip => {
-          const url = URL.createObjectURL(clip.file);
-          if (clip.type === 'audio') {
-            return <audio key={`audio-${clip.id}`} ref={el => { if (el) audioRefs.current[clip.id] = el; }} src={url} preload="auto" />;
-          } else if (clip.type === 'visual' && !clip.file.type.startsWith('image')) {
-            return <video key={`video-${clip.id}`} ref={el => { if (el) videoRefs.current[clip.id] = el; }} src={url} preload="auto" />;
-          }
-          return null;
-        })}
-      </div>
-
       <div className="panel-header">Live Preview</div>
       <div className="preview-content">
         {isProcessing ? (
@@ -78,19 +104,31 @@ export const PreviewWindow = () => {
             <div className="spinner"></div>
             <div style={{ color: 'var(--text-secondary)' }}>Processing media & generating subtitles...</div>
           </div>
-        ) : activeVisualClip ? (
-          activeVisualClip.file.type.startsWith('image') ? (
-            <img src={URL.createObjectURL(activeVisualClip.file)} style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />
-          ) : (
-            <video 
-              src={URL.createObjectURL(activeVisualClip.file)} 
-              style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} 
-              ref={el => { if (el) { el.currentTime = playheadTime - activeVisualClip.startTime; } }}
-            />
-          )
-        ) : srtContent ? (
+        ) : (
           <>
-            {mediaUrl && (
+            {/* Render all videos visibly but toggle display so they are controlled by the central sync loop */}
+            {clips.filter(c => c.type === 'visual' && !c.file.type.startsWith('image')).map(clip => (
+              <video 
+                key={`video-${clip.id}`} 
+                ref={el => { if (el) videoRefs.current[clip.id] = el; }} 
+                src={getObjectURL(clip)} 
+                preload="auto"
+                style={{ 
+                  maxWidth: '100%', 
+                  maxHeight: '400px', 
+                  borderRadius: '8px',
+                  display: activeVisualClip?.id === clip.id ? 'block' : 'none' 
+                }} 
+              />
+            ))}
+
+            {/* Images */}
+            {activeVisualClip?.file.type.startsWith('image') && (
+              <img src={getObjectURL(activeVisualClip)} style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />
+            )}
+
+            {/* If no visuals but exported media exists */}
+            {!activeVisualClip && srtContent && mediaUrl && (
               <div className="audio-player-container" style={{ display: 'flex', justifyContent: 'center' }}>
                 {mediaUrl.endsWith('.mp4') ? (
                   <video controls src={mediaUrl} style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />
@@ -99,13 +137,28 @@ export const PreviewWindow = () => {
                 )}
               </div>
             )}
-            <div className="srt-preview">{srtContent}</div>
+
+            {/* No Visuals Placeholder */}
+            {!activeVisualClip && !srtContent && (
+              <div className="audio-visualizer-placeholder" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>No Visuals at current time</span>
+              </div>
+            )}
+
+            {/* Subtitles Preview */}
+            {srtContent && !activeVisualClip && (
+              <div className="srt-preview">{srtContent}</div>
+            )}
           </>
-        ) : (
-          <div className="audio-visualizer-placeholder" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>No Visuals at current time</span>
-          </div>
         )}
+
+        {/* Hidden audio tags */}
+        <div style={{ display: 'none' }}>
+          {clips.filter(c => c.type === 'audio').map(clip => (
+            <audio key={`audio-${clip.id}`} ref={el => { if (el) audioRefs.current[clip.id] = el; }} src={getObjectURL(clip)} preload="auto" />
+          ))}
+        </div>
+
         <div style={{ marginTop: '1rem', color: 'var(--text-highlight)' }}>
           {new Date(playheadTime * 1000).toISOString().substring(11, 19)}
         </div>
