@@ -1,12 +1,12 @@
 import { create } from 'zustand';
 import type { MediaAsset, TimelineClip, TimelineTrack, MediaType } from '../types';
-import { getMediaDuration } from '../lib/utils/media';
+import { getMediaDuration, generateThumbnail } from '../lib/utils/media';
 import { exportTimeline } from '../lib/api/client';
 
 type EditorState = {
   // Media Pool
   assets: MediaAsset[];
-  addAssets: (files: File[]) => void;
+  addAssets: (files: File[]) => Promise<void>;
   removeAsset: (id: string) => void;
 
   // Timeline Tracks
@@ -42,18 +42,32 @@ type EditorState = {
 export const useEditorStore = create<EditorState>((set, get) => ({
   // --- Media Pool ---
   assets: [],
-  addAssets: (files: File[]) => {
+  addAssets: async (files: File[]) => {
     const newAssets: MediaAsset[] = [];
     for (const f of files) {
+      let mediaKind: 'audio' | 'video' | 'image' | null = null;
+      let type: MediaType = 'visual';
+
       if (f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|m4a|flac|ogg|aac)$/i)) {
-        newAssets.push({ id: Math.random().toString(36).substring(7), file: f, type: 'audio' });
-      } else if (f.type.startsWith('video/') || f.type.startsWith('image/') || f.name.match(/\.(mp4|mov|mkv|avi|webm|jpg|jpeg|png|webp|gif)$/i)) {
-        newAssets.push({ id: Math.random().toString(36).substring(7), file: f, type: 'visual' });
-      } else {
-        const ext = f.name.split('.').pop()?.toLowerCase();
-        if (['mp4','mov','mkv','avi','jpg','png'].includes(ext || '')) {
-            newAssets.push({ id: Math.random().toString(36).substring(7), file: f, type: 'visual' });
-        }
+        mediaKind = 'audio';
+        type = 'audio';
+      } else if (f.type.startsWith('video/') || f.name.match(/\.(mp4|mov|mkv|avi|webm)$/i)) {
+        mediaKind = 'video';
+        type = 'visual';
+      } else if (f.type.startsWith('image/') || f.name.match(/\.(jpg|jpeg|png|webp|gif)$/i)) {
+        mediaKind = 'image';
+        type = 'visual';
+      }
+
+      if (mediaKind) {
+        const thumbnailUrl = await generateThumbnail(f, mediaKind);
+        newAssets.push({
+          id: Math.random().toString(36).substring(7),
+          file: f,
+          type,
+          mediaKind,
+          thumbnailUrl
+        });
       }
     }
     set(state => ({ assets: [...state.assets, ...newAssets] }));
@@ -167,7 +181,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   exportSequence: async () => {
     set({ isProcessing: true });
     try {
-      const data = await exportTimeline(get().clips);
+      const state = get();
+      const data = await exportTimeline(state.clips, state.tracks);
       
       const srtBlob = new Blob([data.srtContent], { type: 'text/plain' });
       const srtUrl = window.URL.createObjectURL(srtBlob);
