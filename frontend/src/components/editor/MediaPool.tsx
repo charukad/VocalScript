@@ -1,8 +1,57 @@
 import { useRef, useState } from 'react';
+import { useDraggable } from '@dnd-kit/core';
 import { useEditorStore } from '../../store/editorStore';
+import type { MediaAsset } from '../../types';
+
+const DraggableAsset = ({ asset }: { asset: MediaAsset }) => {
+  const { addAssetToTimeline, removeAsset } = useEditorStore();
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: asset.id,
+    data: { type: 'pool-asset', assetType: asset.type }
+  });
+
+  const style = {
+    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+    zIndex: isDragging ? 100 : 1,
+    opacity: isDragging ? 0.5 : 1,
+    borderColor: asset.type === 'visual' ? 'var(--accent-color)' : 'transparent',
+    cursor: 'grab'
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="asset-item" {...attributes} {...listeners}>
+      {asset.type === 'visual' ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ pointerEvents: 'none' }}>
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <circle cx="8.5" cy="8.5" r="1.5"></circle>
+          <polyline points="21 15 16 10 5 21"></polyline>
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ pointerEvents: 'none' }}>
+          <path d="M9 18V5l12-2v13"></path>
+          <circle cx="6" cy="18" r="3"></circle>
+          <circle cx="18" cy="16" r="3"></circle>
+        </svg>
+      )}
+      <span className="asset-item-name" title={asset.file.name}>{asset.file.name}</span>
+      <button className="btn-icon" title="Add to Timeline" onPointerDown={(e) => { e.stopPropagation(); addAssetToTimeline(asset); }} style={{ padding: '2px', marginLeft: 'auto' }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </button>
+      <button className="btn-icon" title="Delete from Pool" onPointerDown={(e) => { e.stopPropagation(); removeAsset(asset.id); }} style={{ padding: '2px', color: 'var(--error-color)' }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+  );
+};
 
 export const MediaPool = () => {
-  const { assets, addAssets, addAssetToTimeline, removeAsset } = useEditorStore();
+  const { assets, addAssets } = useEditorStore();
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -48,34 +97,7 @@ export const MediaPool = () => {
         
         <div className="asset-list">
           {assets.map(asset => (
-            <div key={`asset-${asset.id}`} className="asset-item" style={{ borderColor: asset.type === 'visual' ? 'var(--accent-color)' : 'transparent' }}>
-              {asset.type === 'visual' ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                  <polyline points="21 15 16 10 5 21"></polyline>
-                </svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 18V5l12-2v13"></path>
-                  <circle cx="6" cy="18" r="3"></circle>
-                  <circle cx="18" cy="16" r="3"></circle>
-                </svg>
-              )}
-              <span className="asset-item-name" title={asset.file.name}>{asset.file.name}</span>
-              <button className="btn-icon" title="Add to Timeline" onClick={() => addAssetToTimeline(asset)} style={{ padding: '2px', marginLeft: 'auto' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-              </button>
-              <button className="btn-icon" title="Delete from Pool" onClick={() => removeAsset(asset.id)} style={{ padding: '2px', color: 'var(--error-color)' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
-            </div>
+            <DraggableAsset key={`asset-${asset.id}`} asset={asset} />
           ))}
           {assets.length === 0 && (
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textAlign: 'center', marginTop: '1rem' }}>

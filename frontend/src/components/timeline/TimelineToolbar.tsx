@@ -23,6 +23,9 @@ export const TimelineToolbar = () => {
           )}
           {isPlaying ? 'Pause' : 'Play'}
         </button>
+        <div style={{ width: '1px', height: '20px', backgroundColor: 'var(--border-color)', margin: '0 0.5rem' }}></div>
+        <button className="btn-secondary" onClick={() => useEditorStore.getState().addTrack('visual')}>+ Video Track</button>
+        <button className="btn-secondary" onClick={() => useEditorStore.getState().addTrack('audio')}>+ Audio Track</button>
       </div>
       <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto', alignItems: 'center' }}>
         <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Zoom:</span>

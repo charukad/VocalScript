@@ -1,60 +1,71 @@
-import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import type { DragEndEvent } from '@dnd-kit/core';
+import { useDroppable } from '@dnd-kit/core';
 import { useEditorStore } from '../../store/editorStore';
 import { DraggableClip } from './DraggableClip';
 import { TimelineToolbar } from './TimelineToolbar';
 import { TimelineRuler } from './TimelineRuler';
+import type { TimelineTrack } from '../../types';
+
+interface TrackProps {
+  track: TimelineTrack;
+  timelineWidth: number;
+}
+
+const Track = ({ track, timelineWidth }: TrackProps) => {
+  const { clips, zoom, removeClip, setSelectedClip } = useEditorStore();
+  const { setNodeRef, isOver } = useDroppable({
+    id: track.id,
+    data: { type: 'timeline-track', trackType: track.type }
+  });
+
+  const trackClips = clips.filter(c => c.trackId === track.id);
+
+  return (
+    <div 
+      ref={setNodeRef}
+      className="timeline-track" 
+      style={{ 
+        height: '60px', 
+        backgroundColor: isOver ? 'rgba(255,255,255,0.05)' : (track.type === 'visual' ? 'rgba(0,0,0,0.1)' : 'var(--bg-app)')
+      }}
+      onClick={() => setSelectedClip(null)} // Click empty space to deselect
+    >
+      <div className="track-header" style={{ borderColor: 'transparent' }}>
+        <span className="track-title" style={{ color: track.type === 'visual' ? 'var(--text-highlight)' : 'var(--accent-color)' }}>
+          {track.name}
+        </span>
+      </div>
+      <div className="track-content" style={{ width: `${timelineWidth}px` }}>
+        {trackClips.map(clip => (
+          <DraggableClip key={clip.id} clip={clip} zoom={zoom} onRemove={removeClip} />
+        ))}
+      </div>
+    </div>
+  );
+};
 
 export const TimelinePanel = () => {
-  const { clips, zoom, removeClip, updateClipStartTime } = useEditorStore();
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
-  );
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, delta } = event;
-    updateClipStartTime(active.id as string, delta.x);
-  };
+  const { tracks, clips, zoom, setZoom, selectedClipId, removeClip } = useEditorStore();
 
   const maxTime = clips.reduce((max, clip) => Math.max(max, clip.startTime + clip.duration), 60);
   const timelineWidth = Math.max(maxTime * zoom + 200, 1000);
 
-  const visualClips = clips.filter(c => c.type === 'visual');
-  const audioClips = clips.filter(c => c.type === 'audio');
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      // Mac trackpad pinch maps to ctrlKey + wheel
+      const zoomDelta = e.deltaY > 0 ? -2 : 2;
+      setZoom(Math.max(5, Math.min(100, zoom + zoomDelta)));
+    }
+  };
 
   return (
-    <div className="timeline-panel">
+    <div className="timeline-panel" onWheel={handleWheel}>
       <TimelineToolbar />
-      
       <div className="timeline-tracks-container">
         <TimelineRuler timelineWidth={timelineWidth} />
-        
-        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-          {/* Visual Track */}
-          <div className="timeline-track" style={{ height: '60px', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-            <div className="track-header" style={{ borderColor: 'transparent' }}>
-              <span className="track-title" style={{ color: 'var(--text-highlight)' }}>Visual (V1)</span>
-            </div>
-            <div className="track-content" style={{ width: `${timelineWidth}px` }}>
-              {visualClips.map(clip => (
-                <DraggableClip key={clip.id} clip={clip} zoom={zoom} onRemove={removeClip} />
-              ))}
-            </div>
-          </div>
-
-          {/* Audio Track */}
-          <div className="timeline-track">
-            <div className="track-header">
-              <span className="track-title" style={{ color: 'var(--accent-color)' }}>Audio (A1)</span>
-            </div>
-            <div className="track-content" style={{ width: `${timelineWidth}px` }}>
-              {audioClips.map(clip => (
-                <DraggableClip key={clip.id} clip={clip} zoom={zoom} onRemove={removeClip} />
-              ))}
-            </div>
-          </div>
-        </DndContext>
+        {tracks.map(track => (
+          <Track key={track.id} track={track} timelineWidth={timelineWidth} />
+        ))}
       </div>
     </div>
   );

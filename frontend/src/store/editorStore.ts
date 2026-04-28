@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { MediaAsset, TimelineClip } from '../types';
+import type { MediaAsset, TimelineClip, TimelineTrack, MediaType } from '../types';
 import { getMediaDuration } from '../lib/utils/media';
 import { exportTimeline } from '../lib/api/client';
 
@@ -9,13 +9,20 @@ type EditorState = {
   addAssets: (files: File[]) => void;
   removeAsset: (id: string) => void;
 
-  // Timeline
+  // Timeline Tracks
+  tracks: TimelineTrack[];
+  addTrack: (type: MediaType) => void;
+
+  // Timeline Clips
   clips: TimelineClip[];
+  selectedClipId: string | null;
+  setSelectedClip: (id: string | null) => void;
   zoom: number;
   setZoom: (zoom: number) => void;
-  addAssetToTimeline: (asset: MediaAsset) => Promise<void>;
+  addAssetToTimeline: (asset: MediaAsset, trackId?: string, startTimeX?: number) => Promise<void>;
   removeClip: (id: string) => void;
   updateClipStartTime: (id: string, deltaX: number) => void;
+  updateClipTrack: (id: string, trackId: string, deltaX: number) => void;
 
   // Playback
   isPlaying: boolean;
@@ -58,33 +65,87 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }));
   },
 
-  // --- Timeline ---
+  // --- Timeline Tracks ---
+  tracks: [
+    { id: 'v1', name: 'V1', type: 'visual', order: 0 },
+    { id: 'a1', name: 'A1', type: 'audio', order: 1 }
+  ],
+  addTrack: (type: MediaType) => {
+    set(state => {
+      const typeTracks = state.tracks.filter(t => t.type === type);
+      const newName = `${type === 'visual' ? 'V' : 'A'}${typeTracks.length + 1}`;
+      const newTrack: TimelineTrack = {
+        id: Math.random().toString(36).substring(7),
+        name: newName,
+        type,
+        order: state.tracks.length
+      };
+      return { tracks: [...state.tracks, newTrack] };
+    });
+  },
+
+  // --- Timeline Clips ---
   clips: [],
+  selectedClipId: null,
+  setSelectedClip: (id: string | null) => set({ selectedClipId: id }),
   zoom: 20,
   setZoom: (zoom) => set({ zoom }),
-  addAssetToTimeline: async (asset: MediaAsset) => {
-    const duration = await getMediaDuration(asset.file, asset.type);
+  
+  addAssetToTimeline: async (asset: MediaAsset, trackId?: string, startTimeX?: number) => {
     const state = get();
-    const maxTime = state.clips.reduce((max, clip) => Math.max(max, clip.startTime + clip.duration), 0);
+    const duration = await getMediaDuration(asset.file, asset.type);
+    
+    // Find appropriate track
+    let targetTrackId = trackId;
+    if (!targetTrackId) {
+      const matchingTrack = state.tracks.find(t => t.type === asset.type);
+      if (matchingTrack) targetTrackId = matchingTrack.id;
+    }
+    
+    if (!targetTrackId) return; // No track available
+
+    let targetStartTime = 0;
+    if (startTimeX !== undefined) {
+      targetStartTime = startTimeX / state.zoom;
+    } else {
+      // Append to the end of the target track
+      const trackClips = state.clips.filter(c => c.trackId === targetTrackId);
+      targetStartTime = trackClips.reduce((max, clip) => Math.max(max, clip.startTime + clip.duration), 0);
+    }
     
     const newClip: TimelineClip = {
       id: Math.random().toString(36).substring(7),
       assetId: asset.id,
+      trackId: targetTrackId,
       file: asset.file,
       type: asset.type,
       duration: asset.type === 'visual' && asset.file.type.startsWith('image') ? 10 : duration,
-      startTime: maxTime
+      startTime: Math.max(0, targetStartTime)
     };
     
     set({ clips: [...state.clips, newClip] });
   },
+  
   removeClip: (id: string) => set(state => ({ clips: state.clips.filter(c => c.id !== id) })),
+  
   updateClipStartTime: (id: string, deltaX: number) => {
     set(state => ({
       clips: state.clips.map(clip => {
         if (clip.id === id) {
           const timeDelta = deltaX / state.zoom;
           return { ...clip, startTime: Math.max(0, clip.startTime + timeDelta) };
+        }
+        return clip;
+      })
+    }));
+  },
+
+  updateClipTrack: (id: string, trackId: string, deltaX: number) => {
+    set(state => ({
+      clips: state.clips.map(clip => {
+        if (clip.id === id) {
+          const timeDelta = deltaX / state.zoom;
+          return { ...clip, trackId, startTime: Math.max(0, clip.startTime + timeDelta) };
         }
         return clip;
       })
