@@ -45,13 +45,15 @@ function SortableClip({ id, file, onRemove }: { id: string, file: File, onRemove
 }
 
 function App() {
-  const [files, setFiles] = useState<{id: string, file: File}[]>([])
+  const [audioFiles, setAudioFiles] = useState<{id: string, file: File}[]>([])
+  const [visualFile, setVisualFile] = useState<File | null>(null)
+  
   const [isDragging, setIsDragging] = useState(false)
-  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
   
   const [srtContent, setSrtContent] = useState<string | null>(null)
   const [srtDownloadUrl, setSrtDownloadUrl] = useState<string | null>(null)
-  const [mergedAudioUrl, setMergedAudioUrl] = useState<string | null>(null)
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null)
   const [isCopied, setIsCopied] = useState(false)
   
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -83,29 +85,41 @@ function App() {
     if (e.target.files && e.target.files.length > 0) {
       handleFilesSelection(Array.from(e.target.files))
     }
-    // Reset input so the same file can be uploaded again if removed
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   const handleFilesSelection = (newFiles: File[]) => {
-    const validFiles = newFiles.filter(f => f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|m4a|flac|ogg)$/i))
-    if (validFiles.length > 0) {
-      const fileObjects = validFiles.map(f => ({
-        id: Math.random().toString(36).substring(7),
-        file: f
-      }));
-      setFiles(prev => [...prev, ...fileObjects])
+    const newAudio = []
+    let newVisual = null
+    
+    for (const f of newFiles) {
+      if (f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|m4a|flac|ogg)$/i)) {
+        newAudio.push({ id: Math.random().toString(36).substring(7), file: f })
+      } else if (f.type.startsWith('video/') || f.type.startsWith('image/') || f.name.match(/\.(mp4|mov|jpg|jpeg|png)$/i)) {
+        newVisual = f // Take the last visual file if multiple are uploaded
+      }
+    }
+    
+    if (newAudio.length > 0) {
+      setAudioFiles(prev => [...prev, ...newAudio])
+    }
+    if (newVisual) {
+      setVisualFile(newVisual)
     }
   }
 
-  const removeFile = (id: string) => {
-    setFiles(prev => prev.filter(f => f.id !== id))
+  const removeAudioFile = (id: string) => {
+    setAudioFiles(prev => prev.filter(f => f.id !== id))
+  }
+  
+  const removeVisualFile = () => {
+    setVisualFile(null)
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
-      setFiles((items) => {
+      setAudioFiles((items) => {
         const oldIndex = items.findIndex(i => i.id === active.id);
         const newIndex = items.findIndex(i => i.id === over.id);
         return arrayMove(items, oldIndex, newIndex);
@@ -113,23 +127,26 @@ function App() {
     }
   }
 
-  const handleTranscribe = async () => {
-    if (files.length === 0) return
-    setIsTranscribing(true)
+  const handleExport = async () => {
+    if (audioFiles.length === 0) return
+    setIsProcessing(true)
     try {
       const formData = new FormData()
-      files.forEach(fObj => formData.append('files', fObj.file))
+      audioFiles.forEach(fObj => formData.append('files', fObj.file))
+      if (visualFile) {
+        formData.append('visual_file', visualFile)
+      }
 
       const response = await fetch('/api/transcribe', {
         method: 'POST',
         body: formData,
       })
 
-      if (!response.ok) throw new Error('Transcription failed')
+      if (!response.ok) throw new Error('Processing failed')
 
       const data = await response.json()
       setSrtContent(data.srtContent)
-      setMergedAudioUrl(data.audioUrl)
+      setMediaUrl(data.mediaUrl)
       
       const srtBlob = new Blob([data.srtContent], { type: 'text/plain' })
       setSrtDownloadUrl(window.URL.createObjectURL(srtBlob))
@@ -137,7 +154,7 @@ function App() {
       console.error(err)
       alert(err.message || 'An error occurred')
     } finally {
-      setIsTranscribing(false)
+      setIsProcessing(false)
     }
   }
 
@@ -149,8 +166,9 @@ function App() {
     }
   }
 
-  const totalSize = files.reduce((acc, curr) => acc + curr.file.size, 0)
-  const formattedSize = (totalSize / (1024 * 1024)).toFixed(2)
+  const totalAudioSize = audioFiles.reduce((acc, curr) => acc + curr.file.size, 0)
+  const visualSize = visualFile ? visualFile.size : 0
+  const formattedSize = ((totalAudioSize + visualSize) / (1024 * 1024)).toFixed(2)
 
   return (
     <div className="editor-layout">
@@ -158,24 +176,29 @@ function App() {
       <div className="navbar">
         <div className="brand">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-            <path d="M2 17l10 5 10-5"></path>
-            <path d="M2 12l10 5 10-5"></path>
+            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+            <line x1="7" y1="2" x2="7" y2="22"></line>
+            <line x1="17" y1="2" x2="17" y2="22"></line>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+            <line x1="2" y1="7" x2="7" y2="7"></line>
+            <line x1="2" y1="17" x2="7" y2="17"></line>
+            <line x1="17" y1="17" x2="22" y2="17"></line>
+            <line x1="17" y1="7" x2="22" y2="7"></line>
           </svg>
-          NeuralScribe Editor
+          NeuralScribe Video Editor
         </div>
         <div className="nav-actions">
-          {mergedAudioUrl && (
-            <a href={mergedAudioUrl} download="merged_audio.mp3" className="btn-secondary" style={{textDecoration: 'none'}}>
-              Export Audio
+          {mediaUrl && (
+            <a href={mediaUrl} download={visualFile ? "export.mp4" : "export.mp3"} className="btn-secondary" style={{textDecoration: 'none'}}>
+              Download {visualFile ? "Video" : "Audio"}
             </a>
           )}
           <button 
             className="btn-primary" 
-            onClick={handleTranscribe} 
-            disabled={files.length === 0 || isTranscribing}
+            onClick={handleExport} 
+            disabled={audioFiles.length === 0 || isProcessing}
           >
-            {isTranscribing ? 'Processing...' : 'Export & Transcribe'}
+            {isProcessing ? 'Processing...' : 'Export & Transcribe'}
           </button>
         </div>
       </div>
@@ -200,19 +223,29 @@ function App() {
                   <line x1="12" y1="3" x2="12" y2="15"></line>
                 </svg>
               </div>
-              <div>Import Media</div>
+              <div>Import Audio/Video/Images</div>
             </div>
             <input 
               type="file" 
               ref={fileInputRef} 
               onChange={handleFileChange} 
-              accept="audio/*" 
+              accept="audio/*,video/*,image/*" 
               multiple
               style={{ display: 'none' }} 
             />
             
             <div className="asset-list">
-              {files.map(f => (
+              {visualFile && (
+                <div className="asset-item" style={{ borderColor: 'var(--accent-color)' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                  </svg>
+                  <span className="asset-item-name">{visualFile.name}</span>
+                </div>
+              )}
+              {audioFiles.map(f => (
                 <div key={`asset-${f.id}`} className="asset-item">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M9 18V5l12-2v13"></path>
@@ -230,22 +263,28 @@ function App() {
         <div className="preview-window">
           <div className="panel-header">Preview</div>
           <div className="preview-content">
-            {isTranscribing ? (
+            {isProcessing ? (
               <div className="status-indicator">
                 <div className="spinner"></div>
-                <div style={{ color: 'var(--text-secondary)' }}>Processing audio & generating subtitles...</div>
+                <div style={{ color: 'var(--text-secondary)' }}>Processing media & generating subtitles...</div>
               </div>
             ) : srtContent ? (
               <>
-                {mergedAudioUrl && (
-                  <div className="audio-player-container">
-                    <audio controls src={mergedAudioUrl} style={{ width: '100%' }} />
+                {mediaUrl && (
+                  <div className="audio-player-container" style={{ display: 'flex', justifyContent: 'center' }}>
+                    {mediaUrl.endsWith('.mp4') ? (
+                      <video controls src={mediaUrl} style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />
+                    ) : (
+                      <audio controls src={mediaUrl} style={{ width: '100%' }} />
+                    )}
                   </div>
                 )}
                 <div className="srt-preview">{srtContent}</div>
               </>
             ) : (
-              <div className="audio-visualizer-placeholder"></div>
+              <div className="audio-visualizer-placeholder" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>No Media Exported</span>
+              </div>
             )}
           </div>
         </div>
@@ -255,15 +294,19 @@ function App() {
           <div className="panel-header">Inspector</div>
           <div className="panel-content">
             <div className="prop-group">
-              <span className="prop-label">Total Clips</span>
-              <span className="prop-value">{files.length}</span>
+              <span className="prop-label">Visual Track</span>
+              <span className="prop-value">{visualFile ? 'Active (Video/Image)' : 'None'}</span>
+            </div>
+            <div className="prop-group">
+              <span className="prop-label">Audio Tracks</span>
+              <span className="prop-value">{audioFiles.length} clips</span>
             </div>
             <div className="prop-group">
               <span className="prop-label">Total Size</span>
               <span className="prop-value">{formattedSize} MB</span>
             </div>
             {srtContent && (
-              <div className="prop-group">
+              <div className="prop-group" style={{ marginTop: '2rem' }}>
                 <span className="prop-label">Subtitles</span>
                 <button className="btn-secondary" onClick={handleCopy} style={{width: '100%', marginBottom: '0.5rem'}}>
                   {isCopied ? 'Copied!' : 'Copy SRT Text'}
@@ -285,12 +328,31 @@ function App() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" strokeWidth="2">
             <polygon points="5 3 19 12 5 21 5 3"></polygon>
           </svg>
-          <span style={{fontSize: '0.85rem', color: 'var(--text-secondary)'}}>Sequence 1</span>
+          <span style={{fontSize: '0.85rem', color: 'var(--text-secondary)'}}>Main Sequence</span>
         </div>
         <div className="timeline-tracks-container">
+          
+          {/* Visual Track */}
+          <div className="timeline-track" style={{ height: '60px', backgroundColor: 'rgba(0,0,0,0.1)' }}>
+            <div className="track-header" style={{ borderColor: 'transparent' }}>
+              <span className="track-title" style={{ color: 'var(--text-highlight)' }}>Visual (V1)</span>
+            </div>
+            <div className="track-content" style={{ padding: '0 10px' }}>
+              {visualFile ? (
+                <div className="clip-item" style={{ width: '100%', backgroundColor: '#6236FF', borderColor: '#4827c1' }}>
+                  <div className="clip-name">{visualFile.name}</div>
+                  <button className="clip-remove" onClick={removeVisualFile}>✕</button>
+                </div>
+              ) : (
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Drag an image or video to Media Pool to set Visual Track</span>
+              )}
+            </div>
+          </div>
+
+          {/* Audio Track */}
           <div className="timeline-track">
             <div className="track-header">
-              <span className="track-title">Audio 1</span>
+              <span className="track-title" style={{ color: 'var(--accent-color)' }}>Audio (A1)</span>
             </div>
             <div className="track-content">
               <DndContext 
@@ -299,27 +361,20 @@ function App() {
                 onDragEnd={handleDragEnd}
               >
                 <SortableContext 
-                  items={files.map(f => f.id)}
+                  items={audioFiles.map(f => f.id)}
                   strategy={horizontalListSortingStrategy}
                 >
-                  {files.map((fObj) => (
+                  {audioFiles.map((fObj) => (
                     <SortableClip 
                       key={fObj.id} 
                       id={fObj.id} 
                       file={fObj.file} 
-                      onRemove={removeFile}
+                      onRemove={removeAudioFile}
                     />
                   ))}
                 </SortableContext>
               </DndContext>
             </div>
-          </div>
-          {/* Empty Track Placeholder */}
-          <div className="timeline-track">
-            <div className="track-header">
-              <span className="track-title">Audio 2</span>
-            </div>
-            <div className="track-content"></div>
           </div>
         </div>
       </div>
