@@ -88,8 +88,32 @@ export const PreviewWindow = () => {
         clips.forEach(clip => {
           const mediaEl = clip.type === 'audio' ? audioRefs.current[clip.id] : videoRefs.current[clip.id];
           if (mediaEl) {
+            // Mute flag
+            const isMuted = clip.audio?.mute ?? false;
+            if (mediaEl.muted !== isMuted) mediaEl.muted = isMuted;
+
             const isWithinClip = currentPlayhead >= clip.startTime && currentPlayhead <= clip.startTime + clip.duration;
             if (isWithinClip) {
+              // --- Volume Envelope ---
+              const baseVol = (clip.audio?.volume ?? 100) / 100;
+              const relTime = currentPlayhead - clip.startTime; // position within clip
+              const fadeIn = clip.audio?.fadeIn ?? 0;
+              const fadeOut = clip.audio?.fadeOut ?? 0;
+              const clipDur = clip.duration;
+
+              let envMultiplier = 1.0;
+              if (fadeIn > 0 && relTime < fadeIn) {
+                // Ramp up: 0 → 1 over fadeIn seconds
+                envMultiplier = Math.min(1, relTime / fadeIn);
+              }
+              if (fadeOut > 0 && relTime > clipDur - fadeOut) {
+                // Ramp down: 1 → 0 over fadeOut seconds
+                const fadeOutProgress = (clipDur - relTime) / fadeOut;
+                envMultiplier = Math.min(envMultiplier, Math.max(0, fadeOutProgress));
+              }
+              const targetVol = Math.max(0, Math.min(1, baseVol * envMultiplier));
+              if (Math.abs(mediaEl.volume - targetVol) > 0.005) mediaEl.volume = targetVol;
+
               if (mediaEl.paused && !mediaEl.ended && !pendingPlays.current[clip.id]) {
                 const expectedTime = currentPlayhead - clip.startTime + (clip.mediaOffset || 0);
                 if (Math.abs(mediaEl.currentTime - expectedTime) > 0.5) {
@@ -102,6 +126,9 @@ export const PreviewWindow = () => {
               }
             } else {
               if (!mediaEl.paused) mediaEl.pause();
+              // Reset volume to base when outside clip so it's correct when it plays next
+              const baseVol = (clip.audio?.volume ?? 100) / 100;
+              if (mediaEl.volume !== baseVol) mediaEl.volume = Math.max(0, Math.min(1, baseVol));
             }
           }
         });

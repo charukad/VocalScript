@@ -37,16 +37,35 @@ class FFmpegMediaCompiler(IMediaCompiler):
                     in_idx = input_idx_map[clip.file_id]
                     node_name = f"a_{track.id}_{i}"
                     
+                    # Effective volume: use audio blueprint; 0 if muted
+                    effective_volume = 0.0 if clip.audio.mute else (clip.audio.volume / 100.0)
+                    
                     # Trim, reset timestamps, volume
                     filter_complex.append(
                         f"[{in_idx}:a]atrim=start={clip.in_point}:duration={clip.duration},"
-                        f"asetpts=PTS-STARTPTS,volume={clip.volume}[{node_name}_t]"
+                        f"asetpts=PTS-STARTPTS,volume={effective_volume:.3f}[{node_name}_v]"
                     )
                     
-                    # Delay to start_time
+                    # Fade In
+                    fade_node = f"{node_name}_v"
+                    if clip.audio.fadeIn > 0:
+                        filter_complex.append(
+                            f"[{fade_node}]afade=t=in:st=0:d={clip.audio.fadeIn:.2f}[{node_name}_fi]"
+                        )
+                        fade_node = f"{node_name}_fi"
+                    
+                    # Fade Out
+                    if clip.audio.fadeOut > 0:
+                        fade_out_start = max(0, clip.duration - clip.audio.fadeOut)
+                        filter_complex.append(
+                            f"[{fade_node}]afade=t=out:st={fade_out_start:.2f}:d={clip.audio.fadeOut:.2f}[{node_name}_fo]"
+                        )
+                        fade_node = f"{node_name}_fo"
+                    
+                    # Delay to start_time on timeline
                     delay_ms = int(clip.start_time * 1000)
                     filter_complex.append(
-                        f"[{node_name}_t]adelay={delay_ms}|{delay_ms}[{node_name}_out]"
+                        f"[{fade_node}]adelay={delay_ms}|{delay_ms}[{node_name}_out]"
                     )
                     audio_outs.append(f"[{node_name}_out]")
 

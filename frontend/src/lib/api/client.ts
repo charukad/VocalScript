@@ -25,6 +25,12 @@ type ClipBlueprint = {
     exposure: number;
     temperature: number;
   };
+  audio: {
+    volume: number;
+    mute: boolean;
+    fadeIn: number;
+    fadeOut: number;
+  };
 };
 
 type TrackBlueprint = {
@@ -60,7 +66,8 @@ export const exportTimeline = async (clips: TimelineClip[], tracks: TimelineTrac
         in_point: c.mediaOffset || 0.0,
         volume: 1.0,    // Hardcoded until Phase 4 Volume UI is built
         transform: c.transform || { scale: 100, rotation: 0, flipX: false, flipY: false },
-        color: c.color || { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 }
+        color: c.color || { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 },
+        audio: c.audio || { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 }
       }))
   }));
 

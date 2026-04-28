@@ -33,10 +33,16 @@ export type TimelineClip = {
     flipY: boolean;
   };
   color?: {
-    brightness: number; // 0 to 200 (100 is normal)
-    contrast: number;   // 0 to 200 (100 is normal)
-    saturation: number; // 0 to 200 (100 is normal)
-    exposure: number;   // -100 to 100 (0 is normal)
-    temperature: number; // -100 to 100 (0 is normal)
+    brightness: number;
+    contrast: number;
+    saturation: number;
+    exposure: number;
+    temperature: number;
+  };
+  audio?: {
+    volume: number;    // 0–200 (100 = normal)
+    mute: boolean;
+    fadeIn: number;   // seconds
+    fadeOut: number;  // seconds
   };
 };

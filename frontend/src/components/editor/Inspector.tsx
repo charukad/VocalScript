@@ -14,7 +14,7 @@ const formatSize = (bytes: number): string => {
 };
 
 export const Inspector = () => {
-  const { clips, tracks, selectedClipId, updateClipTransform, updateClipColor, exportSequence, isProcessing, srtDownloadUrl } = useEditorStore();
+  const { clips, tracks, selectedClipId, updateClipTransform, updateClipColor, updateClipAudio, exportSequence, isProcessing, srtDownloadUrl } = useEditorStore();
 
   const selectedClip = clips.find(c => c.id === selectedClipId);
   const track = selectedClip ? tracks.find(t => t.id === selectedClip.trackId) : null;
@@ -208,6 +208,81 @@ export const Inspector = () => {
               onClick={() => updateClipColor(selectedClip.id, { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 })}
             >
               Reset Colors
+            </button>
+          </div>
+        )}
+
+        {/* Audio Controls — shown for every clip type */}
+        {selectedClip && (
+          <div className="inspector-section">
+            <div className="inspector-section-title">Audio</div>
+
+            {/* Volume */}
+            <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+              <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                <span className="inspector-label">Volume</span>
+                <span className="inspector-value">{Math.round(selectedClip.audio?.volume ?? 100)}%</span>
+              </div>
+              <input
+                type="range" min={0} max={200}
+                value={selectedClip.audio?.volume ?? 100}
+                onChange={(e) => updateClipAudio(selectedClip.id, { volume: Number(e.target.value) })}
+                style={{ width: '100%', cursor: 'pointer' }}
+              />
+            </div>
+
+            {/* Mute */}
+            <div className="inspector-row" style={{ marginBottom: '0.9rem' }}>
+              <span className="inspector-label">Mute</span>
+              <button
+                className="btn-secondary"
+                style={{
+                  padding: '0.25rem 0.75rem',
+                  fontSize: '0.72rem',
+                  backgroundColor: selectedClip.audio?.mute ? 'var(--error-color)' : undefined,
+                  color: selectedClip.audio?.mute ? '#fff' : undefined,
+                  borderColor: selectedClip.audio?.mute ? 'var(--error-color)' : undefined,
+                }}
+                onClick={() => updateClipAudio(selectedClip.id, { mute: !(selectedClip.audio?.mute ?? false) })}
+              >
+                {selectedClip.audio?.mute ? '🔇 Muted' : '🔊 Active'}
+              </button>
+            </div>
+
+            {/* Fade In */}
+            <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+              <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                <span className="inspector-label">Fade In</span>
+                <span className="inspector-value">{(selectedClip.audio?.fadeIn ?? 0).toFixed(1)}s</span>
+              </div>
+              <input
+                type="range" min={0} max={Math.min(5, selectedClip.duration / 2)} step={0.1}
+                value={selectedClip.audio?.fadeIn ?? 0}
+                onChange={(e) => updateClipAudio(selectedClip.id, { fadeIn: Number(e.target.value) })}
+                style={{ width: '100%', cursor: 'pointer' }}
+              />
+            </div>
+
+            {/* Fade Out */}
+            <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+              <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                <span className="inspector-label">Fade Out</span>
+                <span className="inspector-value">{(selectedClip.audio?.fadeOut ?? 0).toFixed(1)}s</span>
+              </div>
+              <input
+                type="range" min={0} max={Math.min(5, selectedClip.duration / 2)} step={0.1}
+                value={selectedClip.audio?.fadeOut ?? 0}
+                onChange={(e) => updateClipAudio(selectedClip.id, { fadeOut: Number(e.target.value) })}
+                style={{ width: '100%', cursor: 'pointer' }}
+              />
+            </div>
+
+            <button
+              className="btn-secondary"
+              style={{ width: '100%', fontSize: '0.7rem' }}
+              onClick={() => updateClipAudio(selectedClip.id, { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 })}
+            >
+              Reset Audio
             </button>
           </div>
         )}

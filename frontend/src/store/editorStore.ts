@@ -27,6 +27,7 @@ type EditorState = {
   splitClip: (id: string, splitTime: number) => void;
   updateClipTransform: (id: string, transformData: Partial<TimelineClip['transform']>) => void;
   updateClipColor: (id: string, colorData: Partial<TimelineClip['color']>) => void;
+  updateClipAudio: (id: string, audioData: Partial<TimelineClip['audio']>) => void;
 
   // Playback
   isPlaying: boolean;
@@ -163,7 +164,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       startTime: Math.max(0, targetStartTime),
       mediaOffset: 0,
       transform: { scale: 100, rotation: 0, flipX: false, flipY: false },
-      color: { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 }
+      color: { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 },
+      audio: { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 }
     };
     
     set({ clips: [...state.clips, newClip] });
@@ -271,6 +273,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             color: {
               ...(clip.color || { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 }),
               ...colorData
+            }
+          };
+        }
+        return clip;
+      })
+    }));
+  },
+
+  updateClipAudio: (id: string, audioData: Partial<TimelineClip['audio']>) => {
+    set(state => ({
+      clips: state.clips.map(clip => {
+        if (clip.id === id) {
+          return {
+            ...clip,
+            audio: {
+              ...(clip.audio || { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 }),
+              ...audioData
             }
           };
         }
