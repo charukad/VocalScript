@@ -3,3 +3,4 @@ uvicorn
 faster-whisper
 python-multipart
 pydantic
+pydub

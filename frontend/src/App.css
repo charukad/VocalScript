@@ -225,3 +225,112 @@
 .copy-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.2);
 }
+
+.timeline-container {
+  margin-top: 2rem;
+  width: 100%;
+  text-align: left;
+}
+
+.timeline-title {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  margin-bottom: 1rem;
+  font-weight: 500;
+}
+
+.timeline-track {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  padding: 0.5rem;
+  min-height: 100px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+}
+
+.timeline-item {
+  display: flex;
+  align-items: center;
+  min-width: 250px;
+  max-width: 300px;
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  user-select: none;
+}
+
+.drag-handle {
+  cursor: grab;
+  color: var(--text-secondary);
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.drag-handle:hover {
+  color: var(--text-primary);
+}
+
+.timeline-item-content {
+  flex: 1;
+  overflow: hidden;
+  margin: 0 0.5rem;
+}
+
+.timeline-item-name {
+  font-weight: 500;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.timeline-item-size {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.remove-btn {
+  background: transparent;
+  border: none;
+  color: var(--error-color);
+  cursor: pointer;
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.remove-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.audio-player-container {
+  width: 100%;
+  margin: 1rem 0;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  padding: 0.5rem;
+  border: 1px solid var(--border-color);
+}
+
+.audio-player-container audio {
+  height: 40px;
+  outline: none;
+}
+
+.audio-player-container audio::-webkit-media-controls-panel {
+  background: var(--surface-color);
+}
+
