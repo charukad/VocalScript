@@ -108,6 +108,36 @@ class FFmpegMediaCompiler(IMediaCompiler):
                     filter_complex.append(f"[{out_node}]{','.join(tf_filters)}[v_tf_{i}]")
                     out_node = f"v_tf_{i}"
                 
+                # 3. Apply Color Grading (FFmpeg eq filter)
+                # eq: brightness (-1..1), contrast (0..2), saturation (0..3)
+                # We receive 0-200 scale where 100=normal, map accordingly
+                br = (clip.color.brightness / 100.0) - 1.0   # 0=-1, 100=0, 200=+1
+                con = clip.color.contrast / 100.0             # 0=0, 100=1.0, 200=2.0
+                sat = clip.color.saturation / 100.0           # 0=0, 100=1.0, 200=2.0
+                # Exposure: add to brightness offset
+                br += clip.color.exposure / 100.0             # +/-1 bonus on exposure
+                br = max(-1.0, min(1.0, br))                  # clamp to valid range
+                
+                color_filters = []
+                color_changed = (
+                    clip.color.brightness != 100 or clip.color.contrast != 100 or
+                    clip.color.saturation != 100 or clip.color.exposure != 0
+                )
+                if color_changed:
+                    color_filters.append(f"eq=brightness={br:.3f}:contrast={con:.3f}:saturation={sat:.3f}")
+                
+                # Temperature: use colorbalance to shift warm/cool
+                if clip.color.temperature != 0:
+                    t = clip.color.temperature / 100.0   # -1..1
+                    # warm = more red/less blue; cool = less red/more blue
+                    rs = t * 0.15
+                    bs = -t * 0.15
+                    color_filters.append(f"colorbalance=rs={rs:.3f}:gs=0:bs={bs:.3f}:rm={rs:.3f}:gm=0:bm={bs:.3f}:rh={rs:.3f}:gh=0:bh={bs:.3f}")
+                
+                if color_filters:
+                    filter_complex.append(f"[{out_node}]{','.join(color_filters)}[v_color_{i}]")
+                    out_node = f"v_color_{i}"
+                
                 # Overlay at start_time
                 next_out = f"base_{i+1}"
                 filter_complex.append(

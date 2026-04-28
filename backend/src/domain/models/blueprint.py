@@ -7,6 +7,13 @@ class TransformBlueprint(BaseModel):
     flipX: bool = False
     flipY: bool = False
 
+class ColorBlueprint(BaseModel):
+    brightness: float = 100.0
+    contrast: float = 100.0
+    saturation: float = 100.0
+    exposure: float = 0.0
+    temperature: float = 0.0
+
 class ClipBlueprint(BaseModel):
     file_id: str
     start_time: float # where it sits on the timeline in seconds
@@ -14,6 +21,7 @@ class ClipBlueprint(BaseModel):
     in_point: float = 0.0 # offset within the media file itself
     volume: float = 1.0   # 0.0 to 1.0+
     transform: TransformBlueprint = TransformBlueprint()
+    color: ColorBlueprint = ColorBlueprint()
     
 class TrackBlueprint(BaseModel):
     id: str

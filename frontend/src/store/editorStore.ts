@@ -26,6 +26,7 @@ type EditorState = {
   trimClip: (id: string, newStartTime: number, newDuration: number, newMediaOffset: number) => void;
   splitClip: (id: string, splitTime: number) => void;
   updateClipTransform: (id: string, transformData: Partial<TimelineClip['transform']>) => void;
+  updateClipColor: (id: string, colorData: Partial<TimelineClip['color']>) => void;
 
   // Playback
   isPlaying: boolean;
@@ -161,7 +162,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       duration: asset.type === 'visual' && asset.file.type.startsWith('image') ? 10 : duration,
       startTime: Math.max(0, targetStartTime),
       mediaOffset: 0,
-      transform: { scale: 100, rotation: 0, flipX: false, flipY: false }
+      transform: { scale: 100, rotation: 0, flipX: false, flipY: false },
+      color: { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 }
     };
     
     set({ clips: [...state.clips, newClip] });
@@ -252,6 +254,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             transform: {
               ...(clip.transform || { scale: 100, rotation: 0, flipX: false, flipY: false }),
               ...transformData
+            }
+          };
+        }
+        return clip;
+      })
+    }));
+  },
+
+  updateClipColor: (id: string, colorData: Partial<TimelineClip['color']>) => {
+    set(state => ({
+      clips: state.clips.map(clip => {
+        if (clip.id === id) {
+          return {
+            ...clip,
+            color: {
+              ...(clip.color || { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 }),
+              ...colorData
             }
           };
         }

@@ -32,4 +32,11 @@ export type TimelineClip = {
     flipX: boolean;
     flipY: boolean;
   };
+  color?: {
+    brightness: number; // 0 to 200 (100 is normal)
+    contrast: number;   // 0 to 200 (100 is normal)
+    saturation: number; // 0 to 200 (100 is normal)
+    exposure: number;   // -100 to 100 (0 is normal)
+    temperature: number; // -100 to 100 (0 is normal)
+  };
 };

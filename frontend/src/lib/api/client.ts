@@ -18,6 +18,13 @@ type ClipBlueprint = {
     flipX: boolean;
     flipY: boolean;
   };
+  color: {
+    brightness: number;
+    contrast: number;
+    saturation: number;
+    exposure: number;
+    temperature: number;
+  };
 };
 
 type TrackBlueprint = {
@@ -51,8 +58,9 @@ export const exportTimeline = async (clips: TimelineClip[], tracks: TimelineTrac
         start_time: c.startTime,
         duration: c.duration,
         in_point: c.mediaOffset || 0.0,
-        volume: 1.0,    // Hardcoded until Phase 2 Volume UI is built
-        transform: c.transform || { scale: 100, rotation: 0, flipX: false, flipY: false }
+        volume: 1.0,    // Hardcoded until Phase 4 Volume UI is built
+        transform: c.transform || { scale: 100, rotation: 0, flipX: false, flipY: false },
+        color: c.color || { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 }
       }))
   }));
 

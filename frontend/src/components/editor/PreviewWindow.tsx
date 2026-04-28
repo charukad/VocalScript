@@ -39,6 +39,24 @@ export const PreviewWindow = () => {
     return objectUrlsRef.current[clip.id];
   };
 
+  const buildCssFilter = (clip: TimelineClip): string => {
+    const c = clip.color;
+    if (!c) return '';
+    // brightness & contrast: CSS expects % (100% = normal)
+    // saturation: CSS expects % (100% = normal)
+    // exposure: treat as brightness offset (-100..100 mapped to 0..2)
+    const exposureMult = 1 + (c.exposure / 100);
+    const brightnessVal = ((c.brightness / 100) * exposureMult);
+    // temperature: hue-rotate trick — warm (+) shifts hue slightly positive, cool (-) negative
+    const hueShift = c.temperature * 0.3; // subtle: ±30deg at extremes
+    return [
+      `brightness(${brightnessVal.toFixed(3)})`,
+      `contrast(${(c.contrast / 100).toFixed(3)})`,
+      `saturate(${(c.saturation / 100).toFixed(3)})`,
+      `hue-rotate(${hueShift.toFixed(1)}deg)`,
+    ].join(' ');
+  };
+
   const activeVisualClip = clips.find(c => c.type === 'visual' && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration);
 
   const maxTime = clips.reduce((max, clip) => {
@@ -145,7 +163,8 @@ export const PreviewWindow = () => {
                   borderRadius: '4px',
                   display: activeVisualClip?.id === clip.id ? 'block' : 'none',
                   transform: activeVisualClip?.id === clip.id ? `scale(${clip.transform?.scale ? clip.transform.scale / 100 : 1}) rotate(${clip.transform?.rotation || 0}deg) scaleX(${clip.transform?.flipX ? -1 : 1}) scaleY(${clip.transform?.flipY ? -1 : 1})` : undefined,
-                  transition: 'transform 0.1s ease-out'
+                  filter: activeVisualClip?.id === clip.id ? buildCssFilter(clip) : undefined,
+                  transition: 'transform 0.1s ease-out, filter 0.1s ease-out'
                 }} 
               />
             ))}
@@ -160,7 +179,8 @@ export const PreviewWindow = () => {
                   objectFit: 'contain', 
                   borderRadius: '4px',
                   transform: `scale(${activeVisualClip.transform?.scale ? activeVisualClip.transform.scale / 100 : 1}) rotate(${activeVisualClip.transform?.rotation || 0}deg) scaleX(${activeVisualClip.transform?.flipX ? -1 : 1}) scaleY(${activeVisualClip.transform?.flipY ? -1 : 1})`,
-                  transition: 'transform 0.1s ease-out'
+                  filter: buildCssFilter(activeVisualClip),
+                  transition: 'transform 0.1s ease-out, filter 0.1s ease-out'
                 }} 
               />
             )}

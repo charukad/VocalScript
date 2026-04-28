@@ -14,7 +14,7 @@ const formatSize = (bytes: number): string => {
 };
 
 export const Inspector = () => {
-  const { clips, tracks, selectedClipId, updateClipTransform, exportSequence, isProcessing, srtDownloadUrl } = useEditorStore();
+  const { clips, tracks, selectedClipId, updateClipTransform, updateClipColor, exportSequence, isProcessing, srtDownloadUrl } = useEditorStore();
 
   const selectedClip = clips.find(c => c.id === selectedClipId);
   const track = selectedClip ? tracks.find(t => t.id === selectedClip.trackId) : null;
@@ -168,6 +168,46 @@ export const Inspector = () => {
               onClick={() => updateClipTransform(selectedClip.id, { scale: 100, rotation: 0, flipX: false, flipY: false })}
             >
               Reset Transform
+            </button>
+          </div>
+        )}
+
+        {/* Color Grading Controls */}
+        {selectedClip && selectedClip.type === 'visual' && (
+          <div className="inspector-section">
+            <div className="inspector-section-title">Color Grading</div>
+
+            {([
+              { key: 'brightness', label: 'Brightness', min: 0, max: 200, unit: '%' },
+              { key: 'contrast',   label: 'Contrast',   min: 0, max: 200, unit: '%' },
+              { key: 'saturation', label: 'Saturation', min: 0, max: 200, unit: '%' },
+              { key: 'exposure',   label: 'Exposure',   min: -100, max: 100, unit: '' },
+              { key: 'temperature',label: 'Temperature',min: -100, max: 100, unit: '' },
+            ] as const).map(({ key, label, min, max, unit }) => {
+              const val = selectedClip.color?.[key] ?? (key === 'brightness' || key === 'contrast' || key === 'saturation' ? 100 : 0);
+              return (
+                <div key={key} className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+                  <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                    <span className="inspector-label">{label}</span>
+                    <span className="inspector-value">{Math.round(val)}{unit}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={min} max={max}
+                    value={val}
+                    onChange={(e) => updateClipColor(selectedClip.id, { [key]: Number(e.target.value) })}
+                    style={{ width: '100%', cursor: 'pointer' }}
+                  />
+                </div>
+              );
+            })}
+
+            <button
+              className="btn-secondary"
+              style={{ width: '100%', marginTop: '0.5rem', fontSize: '0.7rem' }}
+              onClick={() => updateClipColor(selectedClip.id, { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 })}
+            >
+              Reset Colors
             </button>
           </div>
         )}
