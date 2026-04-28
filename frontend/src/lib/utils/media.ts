@@ -11,7 +11,11 @@ export const getMediaDuration = (file: File, type: MediaType): Promise<number> =
     const media = type === 'audio' ? new Audio(url) : document.createElement('video');
     
     media.onloadedmetadata = () => {
-      resolve(media.duration);
+      let duration = media.duration;
+      if (isNaN(duration) || !isFinite(duration)) {
+        duration = 5;
+      }
+      resolve(duration);
       URL.revokeObjectURL(url);
     };
     
@@ -43,7 +47,11 @@ export const generateThumbnail = (file: File, mediaKind: 'audio' | 'video' | 'im
       video.src = url;
 
       video.onloadeddata = () => {
-        video.currentTime = Math.min(1.0, video.duration / 2); // grab a frame 1s in
+        let duration = video.duration;
+        if (isNaN(duration) || !isFinite(duration)) {
+          duration = 5;
+        }
+        video.currentTime = Math.min(1.0, duration / 2); // grab a frame 1s in
       };
 
       video.onseeked = () => {
@@ -65,5 +73,82 @@ export const generateThumbnail = (file: File, mediaKind: 'audio' | 'video' | 'im
         URL.revokeObjectURL(url);
       };
     }
+  });
+};
+
+export const generateWaveform = async (file: File, samples: number = 200): Promise<number[]> => {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    
+    const channelData = audioBuffer.getChannelData(0); // Use first channel
+    const blockSize = Math.floor(channelData.length / samples);
+    const waveform: number[] = [];
+
+    for (let i = 0; i < samples; i++) {
+      const start = i * blockSize;
+      let min = 1.0;
+      let max = -1.0;
+      
+      for (let j = 0; j < blockSize; j++) {
+        const datum = channelData[start + j];
+        if (datum < min) min = datum;
+        if (datum > max) max = datum;
+      }
+      // Calculate amplitude
+      waveform.push(Math.max(Math.abs(min), Math.abs(max)));
+    }
+    
+    // Normalize to 0-1
+    const maxAmplitude = Math.max(...waveform);
+    return waveform.map(amp => maxAmplitude > 0 ? amp / maxAmplitude : 0);
+  } catch (error) {
+    console.error("Waveform generation failed:", error);
+    return [];
+  }
+};
+
+export const generateFilmstrip = (file: File, duration: number, framesCount: number = 10): Promise<string[]> => {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.muted = true;
+    video.src = url;
+    
+    const frames: string[] = [];
+    const interval = duration / framesCount;
+    let currentFrame = 0;
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    video.onloadeddata = () => {
+      canvas.width = 160; // low res for filmstrip performance
+      canvas.height = 90;
+      video.currentTime = 0.1; // start slightly in
+    };
+
+    video.onseeked = () => {
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        frames.push(canvas.toDataURL('image/jpeg', 0.5));
+      }
+      
+      currentFrame++;
+      if (currentFrame < framesCount) {
+        // seek to next frame
+        video.currentTime = Math.min(duration, currentFrame * interval);
+      } else {
+        // Done
+        resolve(frames);
+        URL.revokeObjectURL(url);
+      }
+    };
+
+    video.onerror = () => {
+      resolve(frames);
+      URL.revokeObjectURL(url);
+    };
   });
 };

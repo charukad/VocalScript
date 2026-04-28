@@ -2,8 +2,16 @@ import { useEffect, useRef } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import type { TimelineClip } from '../../types';
 
+const formatTimecode = (seconds: number): string => {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const f = Math.floor((seconds % 1) * 30); // 30fps frame count
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}:${String(f).padStart(2,'0')}`;
+};
+
 export const PreviewWindow = () => {
-  const { clips, playheadTime, setPlayheadTime, isPlaying, isProcessing, srtContent, mediaUrl } = useEditorStore();
+  const { clips, playheadTime, setPlayheadTime, isPlaying, isProcessing, srtContent, mediaUrl, togglePlayback, setIsPlaying } = useEditorStore();
   
   const animationRef = useRef<number | null>(null);
   const lastUpdateRef = useRef<number>(0);
@@ -33,6 +41,12 @@ export const PreviewWindow = () => {
 
   const activeVisualClip = clips.find(c => c.type === 'visual' && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration);
 
+  const maxTime = clips.reduce((max, clip) => {
+    const end = clip.startTime + clip.duration;
+    if (isNaN(end) || !isFinite(end)) return max;
+    return Math.max(max, end);
+  }, 0);
+
   // Playback Loop
   useEffect(() => {
     if (isPlaying) {
@@ -43,6 +57,14 @@ export const PreviewWindow = () => {
         lastUpdateRef.current = time;
         
         const currentPlayhead = useEditorStore.getState().playheadTime + deltaSec;
+
+        // Stop at end of timeline
+        if (maxTime > 0 && currentPlayhead >= maxTime) {
+          setPlayheadTime(maxTime);
+          setIsPlaying(false);
+          return;
+        }
+
         setPlayheadTime(currentPlayhead);
         
         clips.forEach(clip => {
@@ -51,14 +73,14 @@ export const PreviewWindow = () => {
             const isWithinClip = currentPlayhead >= clip.startTime && currentPlayhead <= clip.startTime + clip.duration;
             if (isWithinClip) {
               if (mediaEl.paused && !mediaEl.ended && !pendingPlays.current[clip.id]) {
-                const expectedTime = currentPlayhead - clip.startTime;
+                const expectedTime = currentPlayhead - clip.startTime + (clip.mediaOffset || 0);
                 if (Math.abs(mediaEl.currentTime - expectedTime) > 0.5) {
                   mediaEl.currentTime = expectedTime;
                 }
                 pendingPlays.current[clip.id] = true;
                 mediaEl.play()
                   .then(() => { pendingPlays.current[clip.id] = false; })
-                  .catch(e => { pendingPlays.current[clip.id] = false; });
+                  .catch(() => { pendingPlays.current[clip.id] = false; });
               }
             } else {
               if (!mediaEl.paused) mediaEl.pause();
@@ -79,7 +101,7 @@ export const PreviewWindow = () => {
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
     };
-  }, [isPlaying, clips, setPlayheadTime]);
+  }, [isPlaying, clips, setPlayheadTime, setIsPlaying, maxTime]);
 
   // Scrubbing when Paused
   useEffect(() => {
@@ -88,12 +110,15 @@ export const PreviewWindow = () => {
         const mediaEl = clip.type === 'audio' ? audioRefs.current[clip.id] : videoRefs.current[clip.id];
         if (mediaEl) {
           if (playheadTime >= clip.startTime && playheadTime <= clip.startTime + clip.duration) {
-             mediaEl.currentTime = playheadTime - clip.startTime;
+             mediaEl.currentTime = playheadTime - clip.startTime + (clip.mediaOffset || 0);
           }
         }
       });
     }
   }, [playheadTime, isPlaying, clips]);
+
+  const handleSkipBack = () => setPlayheadTime(0);
+  const handleSkipForward = () => { if (maxTime > 0) setPlayheadTime(maxTime); };
 
   return (
     <div className="preview-window">
@@ -115,23 +140,36 @@ export const PreviewWindow = () => {
                 preload="auto"
                 style={{ 
                   maxWidth: '100%', 
-                  maxHeight: '400px', 
-                  borderRadius: '8px',
-                  display: activeVisualClip?.id === clip.id ? 'block' : 'none' 
+                  maxHeight: '100%',
+                  objectFit: 'contain',
+                  borderRadius: '4px',
+                  display: activeVisualClip?.id === clip.id ? 'block' : 'none',
+                  transform: activeVisualClip?.id === clip.id ? `scale(${clip.transform?.scale ? clip.transform.scale / 100 : 1}) rotate(${clip.transform?.rotation || 0}deg) scaleX(${clip.transform?.flipX ? -1 : 1}) scaleY(${clip.transform?.flipY ? -1 : 1})` : undefined,
+                  transition: 'transform 0.1s ease-out'
                 }} 
               />
             ))}
 
             {/* Images */}
             {activeVisualClip?.file.type.startsWith('image') && (
-              <img src={getObjectURL(activeVisualClip)} style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />
+              <img 
+                src={getObjectURL(activeVisualClip)} 
+                style={{ 
+                  maxWidth: '100%', 
+                  maxHeight: '100%', 
+                  objectFit: 'contain', 
+                  borderRadius: '4px',
+                  transform: `scale(${activeVisualClip.transform?.scale ? activeVisualClip.transform.scale / 100 : 1}) rotate(${activeVisualClip.transform?.rotation || 0}deg) scaleX(${activeVisualClip.transform?.flipX ? -1 : 1}) scaleY(${activeVisualClip.transform?.flipY ? -1 : 1})`,
+                  transition: 'transform 0.1s ease-out'
+                }} 
+              />
             )}
 
             {/* If no visuals but exported media exists */}
             {!activeVisualClip && srtContent && mediaUrl && (
               <div className="audio-player-container" style={{ display: 'flex', justifyContent: 'center' }}>
                 {mediaUrl.endsWith('.mp4') ? (
-                  <video controls src={mediaUrl} style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />
+                  <video controls src={mediaUrl} style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: '4px' }} />
                 ) : (
                   <audio controls src={mediaUrl} style={{ width: '100%' }} />
                 )}
@@ -140,8 +178,14 @@ export const PreviewWindow = () => {
 
             {/* No Visuals Placeholder */}
             {!activeVisualClip && !srtContent && (
-              <div className="audio-visualizer-placeholder" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>No Visuals at current time</span>
+              <div className="no-visual-placeholder">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--text-secondary)', opacity: 0.4 }}>
+                  <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+                  <line x1="7" y1="2" x2="7" y2="22"></line>
+                  <line x1="17" y1="2" x2="17" y2="22"></line>
+                  <line x1="2" y1="12" x2="22" y2="12"></line>
+                </svg>
+                <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', opacity: 0.6 }}>No visuals at current time</span>
               </div>
             )}
 
@@ -158,10 +202,38 @@ export const PreviewWindow = () => {
             <audio key={`audio-${clip.id}`} ref={el => { if (el) audioRefs.current[clip.id] = el; }} src={getObjectURL(clip)} preload="auto" />
           ))}
         </div>
+      </div>
 
-        <div style={{ marginTop: '1rem', color: 'var(--text-highlight)' }}>
-          {new Date(playheadTime * 1000).toISOString().substring(11, 19)}
+      {/* Transport Controls Bar */}
+      <div className="preview-transport">
+        <div className="transport-timecode">{formatTimecode(playheadTime)}</div>
+        <div className="transport-controls">
+          <button className="btn-icon transport-btn" onClick={handleSkipBack} title="Go to Start">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="19 20 9 12 19 4 19 20"></polygon>
+              <line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" strokeWidth="2"></line>
+            </svg>
+          </button>
+          <button className="btn-primary transport-play" onClick={togglePlayback} title={isPlaying ? 'Pause' : 'Play'}>
+            {isPlaying ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16"></rect>
+                <rect x="14" y="4" width="4" height="16"></rect>
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+            )}
+          </button>
+          <button className="btn-icon transport-btn" onClick={handleSkipForward} title="Go to End">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 4 15 12 5 20 5 4"></polygon>
+              <line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" strokeWidth="2"></line>
+            </svg>
+          </button>
         </div>
+        <div className="transport-duration">{formatTimecode(maxTime)}</div>
       </div>
     </div>
   );

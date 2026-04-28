@@ -1,3 +1,4 @@
+import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { useEditorStore } from '../../store/editorStore';
 import { DraggableClip } from './DraggableClip';
@@ -18,21 +19,33 @@ const Track = ({ track, timelineWidth }: TrackProps) => {
   });
 
   const trackClips = clips.filter(c => c.trackId === track.id);
+  const isVisual = track.type === 'visual';
 
   return (
     <div 
       ref={setNodeRef}
-      className="timeline-track" 
+      className={`timeline-track ${isOver ? 'track-hover' : ''}`}
       style={{ 
-        height: '60px', 
-        backgroundColor: isOver ? 'rgba(255,255,255,0.05)' : (track.type === 'visual' ? 'rgba(0,0,0,0.1)' : 'var(--bg-app)')
+        backgroundColor: isOver ? 'rgba(0, 122, 204, 0.08)' : undefined
       }}
-      onClick={() => setSelectedClip(null)} // Click empty space to deselect
+      onClick={() => setSelectedClip(null)}
     >
-      <div className="track-header" style={{ borderColor: 'transparent' }}>
-        <span className="track-title" style={{ color: track.type === 'visual' ? 'var(--text-highlight)' : 'var(--accent-color)' }}>
-          {track.name}
-        </span>
+      <div className="track-header">
+        <div className="track-header-top">
+          <span className="track-title" style={{ color: isVisual ? '#a78bfa' : '#60a5fa' }}>
+            {track.name}
+          </span>
+        </div>
+        <div className="track-controls">
+          <button className="track-ctrl-btn" title="Mute">M</button>
+          <button className="track-ctrl-btn" title="Solo">S</button>
+          <button className="track-ctrl-btn" title="Lock">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+          </button>
+        </div>
       </div>
       <div className="track-content" style={{ width: `${timelineWidth}px` }}>
         {trackClips.map(clip => (
@@ -44,15 +57,25 @@ const Track = ({ track, timelineWidth }: TrackProps) => {
 };
 
 export const TimelinePanel = () => {
-  const { tracks, clips, zoom, setZoom, selectedClipId, removeClip } = useEditorStore();
+  const { tracks, clips, zoom, setZoom } = useEditorStore();
 
-  const maxTime = clips.reduce((max, clip) => Math.max(max, clip.startTime + clip.duration), 60);
-  const timelineWidth = Math.max(maxTime * zoom + 200, 1000);
+  const maxTime = clips.reduce((max, clip) => {
+    const end = clip.startTime + clip.duration;
+    if (isNaN(end) || !isFinite(end)) return max;
+    return Math.max(max, end);
+  }, 10);
+  // Add 30 seconds of padding so the user can always scroll/click beyond the last clip
+  const timelineWidth = Math.max((maxTime + 30) * zoom, 1000);
+
+  const sortedTracks = React.useMemo(() => {
+    const visualTracks = tracks.filter(t => t.type === 'visual').sort((a, b) => b.order - a.order);
+    const audioTracks = tracks.filter(t => t.type === 'audio').sort((a, b) => a.order - b.order);
+    return { visualTracks, audioTracks };
+  }, [tracks]);
 
   const handleWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
-      // Mac trackpad pinch maps to ctrlKey + wheel
       const zoomDelta = e.deltaY > 0 ? -2 : 2;
       setZoom(Math.max(5, Math.min(100, zoom + zoomDelta)));
     }
@@ -63,7 +86,21 @@ export const TimelinePanel = () => {
       <TimelineToolbar />
       <div className="timeline-tracks-container">
         <TimelineRuler timelineWidth={timelineWidth} />
-        {tracks.map(track => (
+        
+        {/* Visual Tracks */}
+        {sortedTracks.visualTracks.map(track => (
+          <Track key={track.id} track={track} timelineWidth={timelineWidth} />
+        ))}
+
+        {/* Separator between Video and Audio */}
+        {sortedTracks.visualTracks.length > 0 && sortedTracks.audioTracks.length > 0 && (
+          <div className="track-separator">
+            <div className="track-separator-line"></div>
+          </div>
+        )}
+
+        {/* Audio Tracks */}
+        {sortedTracks.audioTracks.map(track => (
           <Track key={track.id} track={track} timelineWidth={timelineWidth} />
         ))}
       </div>

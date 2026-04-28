@@ -79,23 +79,39 @@ class FFmpegMediaCompiler(IMediaCompiler):
                 # Since we don't know file type easily here, we'll try to apply both logic safely 
                 # or assume frontend passes correct durations.
                 
-                # Trim and reset pts
+                # 1. Trim, reset pts, and fit to base canvas size
                 filter_complex.append(
                     f"[{in_idx}:v]trim=start={clip.in_point}:duration={clip.duration},"
-                    f"setpts=PTS-STARTPTS[v_trim_{i}]"
+                    f"setpts=PTS-STARTPTS,"
+                    f"scale={blueprint.width}:{blueprint.height}:force_original_aspect_ratio=decrease,"
+                    f"pad={blueprint.width}:{blueprint.height}:(ow-iw)/2:(oh-ih)/2,"
+                    f"setsar=1[v_base_{i}]"
                 )
                 
-                # Scale and pad to fit canvas
-                filter_complex.append(
-                    f"[v_trim_{i}]scale={blueprint.width}:{blueprint.height}:force_original_aspect_ratio=decrease,"
-                    f"pad={blueprint.width}:{blueprint.height}:(ow-iw)/2:(oh-ih)/2,"
-                    f"setsar=1[v_scaled_{i}]"
-                )
+                # 2. Apply User Transforms (Flip, Rotate, Scale/Zoom)
+                tf_filters = []
+                if clip.transform.flipX:
+                    tf_filters.append("hflip")
+                if clip.transform.flipY:
+                    tf_filters.append("vflip")
+                if clip.transform.rotation != 0:
+                    tf_filters.append(f"rotate={clip.transform.rotation}*PI/180:c=black@0:ow='max(iw,ih)':oh='max(iw,ih)'")
+                
+                scale_factor = clip.transform.scale / 100.0
+                if scale_factor != 1.0 or clip.transform.rotation != 0:
+                    tf_filters.append(f"scale=iw*{scale_factor}:ih*{scale_factor}")
+                    # After zooming or rotating, we must crop back to the canvas size
+                    tf_filters.append(f"crop={blueprint.width}:{blueprint.height}")
+                
+                out_node = f"v_base_{i}"
+                if tf_filters:
+                    filter_complex.append(f"[{out_node}]{','.join(tf_filters)}[v_tf_{i}]")
+                    out_node = f"v_tf_{i}"
                 
                 # Overlay at start_time
                 next_out = f"base_{i+1}"
                 filter_complex.append(
-                    f"[{last_out}][v_scaled_{i}]overlay=enable='between(t,{clip.start_time},{clip.start_time+clip.duration})'[ {next_out}]"
+                    f"[{last_out}][{out_node}]overlay=enable='between(t,{clip.start_time},{clip.start_time+clip.duration})'[ {next_out}]"
                 )
                 last_out = next_out
             

@@ -12,6 +12,12 @@ type ClipBlueprint = {
   duration: number;
   in_point: number;
   volume: number;
+  transform: {
+    scale: number;
+    rotation: number;
+    flipX: boolean;
+    flipY: boolean;
+  };
 };
 
 type TrackBlueprint = {
@@ -44,8 +50,9 @@ export const exportTimeline = async (clips: TimelineClip[], tracks: TimelineTrac
         file_id: c.id + '_' + c.file.name, // Ensure unique IDs 
         start_time: c.startTime,
         duration: c.duration,
-        in_point: 0.0, // Hardcoded until Phase 1 Trimming UI is built
-        volume: 1.0    // Hardcoded until Phase 2 Volume UI is built
+        in_point: c.mediaOffset || 0.0,
+        volume: 1.0,    // Hardcoded until Phase 2 Volume UI is built
+        transform: c.transform || { scale: 100, rotation: 0, flipX: false, flipY: false }
       }))
   }));
 

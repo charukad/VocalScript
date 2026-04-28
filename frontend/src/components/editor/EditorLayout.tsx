@@ -34,6 +34,10 @@ export const EditorLayout = () => {
       } else if ((e.code === 'Backspace' || e.code === 'Delete') && selectedClipId) {
         e.preventDefault();
         removeClip(selectedClipId);
+      } else if (e.code === 'KeyK' && (e.metaKey || e.ctrlKey) && selectedClipId) {
+        e.preventDefault();
+        const state = useEditorStore.getState();
+        state.splitClip(selectedClipId, state.playheadTime);
       }
     };
     window.addEventListener('keydown', handleKeyDown);

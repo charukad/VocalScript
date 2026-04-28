@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { MediaAsset, TimelineClip, TimelineTrack, MediaType } from '../types';
-import { getMediaDuration, generateThumbnail } from '../lib/utils/media';
+import { getMediaDuration, generateThumbnail, generateWaveform, generateFilmstrip } from '../lib/utils/media';
 import { exportTimeline } from '../lib/api/client';
 
 type EditorState = {
@@ -23,6 +23,9 @@ type EditorState = {
   removeClip: (id: string) => void;
   updateClipStartTime: (id: string, deltaX: number) => void;
   updateClipTrack: (id: string, trackId: string, deltaX: number) => void;
+  trimClip: (id: string, newStartTime: number, newDuration: number, newMediaOffset: number) => void;
+  splitClip: (id: string, splitTime: number) => void;
+  updateClipTransform: (id: string, transformData: Partial<TimelineClip['transform']>) => void;
 
   // Playback
   isPlaying: boolean;
@@ -61,13 +64,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       if (mediaKind) {
         const thumbnailUrl = await generateThumbnail(f, mediaKind);
-        newAssets.push({
+        const newAsset: MediaAsset = {
           id: Math.random().toString(36).substring(7),
           file: f,
           type,
           mediaKind,
           thumbnailUrl
-        });
+        };
+        newAssets.push(newAsset);
+
+        // Async background generation of rich visuals
+        if (mediaKind === 'audio') {
+          generateWaveform(f, 200).then(waveform => {
+            set(state => ({
+              assets: state.assets.map(a => a.id === newAsset.id ? { ...a, waveform } : a)
+            }));
+          });
+        } else if (mediaKind === 'video') {
+          getMediaDuration(f, 'visual').then(duration => {
+            if (duration > 0 && duration !== Infinity) {
+              // Create enough thumbnails to cover the length roughly (max 50)
+              const framesCount = Math.min(50, Math.max(5, Math.ceil(duration / 2)));
+              generateFilmstrip(f, duration, framesCount).then(filmstrip => {
+                set(state => ({
+                  assets: state.assets.map(a => a.id === newAsset.id ? { ...a, filmstrip } : a)
+                }));
+              });
+            }
+          });
+        }
       }
     }
     set(state => ({ assets: [...state.assets, ...newAssets] }));
@@ -134,7 +159,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       file: asset.file,
       type: asset.type,
       duration: asset.type === 'visual' && asset.file.type.startsWith('image') ? 10 : duration,
-      startTime: Math.max(0, targetStartTime)
+      startTime: Math.max(0, targetStartTime),
+      mediaOffset: 0,
+      transform: { scale: 100, rotation: 0, flipX: false, flipY: false }
     };
     
     set({ clips: [...state.clips, newClip] });
@@ -160,6 +187,73 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         if (clip.id === id) {
           const timeDelta = deltaX / state.zoom;
           return { ...clip, trackId, startTime: Math.max(0, clip.startTime + timeDelta) };
+        }
+        return clip;
+      })
+    }));
+  },
+
+  trimClip: (id: string, newStartTime: number, newDuration: number, newMediaOffset: number) => {
+    set(state => ({
+      clips: state.clips.map(clip => {
+        if (clip.id === id) {
+          return {
+            ...clip,
+            startTime: Math.max(0, newStartTime),
+            duration: Math.max(0.1, newDuration), // Prevent 0-length clips
+            mediaOffset: Math.max(0, newMediaOffset)
+          };
+        }
+        return clip;
+      })
+    }));
+  },
+
+  splitClip: (id: string, splitTime: number) => {
+    set(state => {
+      const clipIndex = state.clips.findIndex(c => c.id === id);
+      if (clipIndex === -1) return state;
+      
+      const clip = state.clips[clipIndex];
+      // Verify splitTime is within the clip bounds
+      if (splitTime <= clip.startTime || splitTime >= clip.startTime + clip.duration) {
+        alert("Playhead must be placed somewhere over the selected clip to split it.");
+        return state;
+      }
+
+      const splitOffset = splitTime - clip.startTime;
+      
+      const clip1: TimelineClip = {
+        ...clip,
+        duration: splitOffset
+      };
+      
+      const clip2: TimelineClip = {
+        ...clip,
+        id: Math.random().toString(36).substring(7),
+        startTime: splitTime,
+        duration: clip.duration - splitOffset,
+        mediaOffset: clip.mediaOffset + splitOffset
+      };
+
+      const newClips = [...state.clips];
+      newClips.splice(clipIndex, 1, clip1, clip2);
+
+      return { clips: newClips };
+    });
+  },
+
+  updateClipTransform: (id: string, transformData: Partial<TimelineClip['transform']>) => {
+    set(state => ({
+      clips: state.clips.map(clip => {
+        if (clip.id === id) {
+          return {
+            ...clip,
+            transform: {
+              ...(clip.transform || { scale: 100, rotation: 0, flipX: false, flipY: false }),
+              ...transformData
+            }
+          };
         }
         return clip;
       })
