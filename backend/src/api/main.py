@@ -9,7 +9,11 @@ from pydantic import ValidationError
 from backend.src.domain.models.blueprint import TimelineBlueprint
 from backend.src.infrastructure.ffmpeg_compiler import FFmpegMediaCompiler
 from backend.src.infrastructure.faster_whisper_service import FasterWhisperService
+from backend.src.infrastructure.local_llm_service import LocalLLMService
 from backend.src.domain.services.export_orchestrator import ExportOrchestrator
+from backend.src.domain.services.storyboard_service import StoryboardService
+from backend.src.api.generation import build_generation_router
+from backend.src.config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,6 +31,9 @@ app.add_middleware(
 compiler = FFmpegMediaCompiler()
 whisper_engine = FasterWhisperService(model_size="tiny", device="cpu", compute_type="int8")
 orchestrator = ExportOrchestrator(compiler, whisper_engine)
+local_llm_service = LocalLLMService(settings.llm)
+storyboard_service = StoryboardService(local_llm_service)
+app.include_router(build_generation_router(storyboard_service, whisper_engine))
 
 @app.post("/api/export")
 async def export_sequence(

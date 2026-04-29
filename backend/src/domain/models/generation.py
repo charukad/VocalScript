@@ -73,6 +73,9 @@ class StoryboardResponse(ApiModel):
     scenes: List[StoryboardScene]
     provider: ProviderName = "meta"
     used_llm_mode: str = Field(default="rule_based", alias="usedLlmMode")
+    transcript: str = ""
+    segments: List[TranscriptSlice] = Field(default_factory=list)
+    duration: float = 0.0
 
 
 class GenerationJob(ApiModel):

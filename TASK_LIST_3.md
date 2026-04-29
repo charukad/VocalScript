@@ -18,13 +18,13 @@ Manual tests after Phase 1:
 
 ## Phase 2: Storyboard Backend MVP
 
-- [ ] Add generation/storyboard backend models.
-- [ ] Add transcript-to-scenes rule-based storyboard service.
-- [ ] Add optional Ollama local LLM service.
-- [ ] Add optional LM Studio/OpenAI-compatible local server support.
-- [ ] Add JSON validation and timing repair for LLM output.
-- [ ] Add endpoint to create storyboard from existing transcript.
-- [ ] Add endpoint to create storyboard from audio/transcription result.
+- [x] Add generation/storyboard backend models.
+- [x] Add transcript-to-scenes rule-based storyboard service.
+- [x] Add optional Ollama local LLM service.
+- [x] Add optional LM Studio/OpenAI-compatible local server support.
+- [x] Add JSON validation and timing repair for LLM output.
+- [x] Add endpoint to create storyboard from existing transcript.
+- [x] Add endpoint to create storyboard from audio/transcription result.
 
 Manual tests after Phase 2:
 
@@ -199,7 +199,7 @@ Manual tests after Phase 10:
 ## Recommended Build Order
 
 - [x] Phase 1: Contracts And Architecture
-- [ ] Phase 2: Storyboard Backend MVP
+- [x] Phase 2: Storyboard Backend MVP
 - [ ] Phase 3: Storyboard Frontend UI
 - [ ] Phase 4: Generation Queue Backend
 - [ ] Phase 5: Chrome Extension Bridge MVP
