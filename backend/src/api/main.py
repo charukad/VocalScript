@@ -14,7 +14,10 @@ from backend.src.infrastructure.ffmpeg_compiler import FFmpegMediaCompiler
 from backend.src.infrastructure.faster_whisper_service import FasterWhisperService
 from backend.src.infrastructure.local_llm_service import LocalLLMService
 from backend.src.domain.services.export_orchestrator import ExportOrchestrator, generate_srt
+from backend.src.domain.services.browser_bridge_service import BrowserBridgeService
+from backend.src.domain.services.generation_queue_service import GenerationQueueService
 from backend.src.domain.services.storyboard_service import StoryboardService
+from backend.src.api.browser_bridge import build_browser_bridge_router
 from backend.src.api.generation import build_generation_router
 from backend.src.config import settings
 
@@ -36,7 +39,10 @@ whisper_engine = FasterWhisperService(model_size="tiny", device="cpu", compute_t
 orchestrator = ExportOrchestrator(compiler, whisper_engine)
 local_llm_service = LocalLLMService(settings.llm)
 storyboard_service = StoryboardService(local_llm_service)
-app.include_router(build_generation_router(storyboard_service, whisper_engine))
+generation_queue_service = GenerationQueueService(settings.browser_bridge.generated_media_dir)
+browser_bridge_service = BrowserBridgeService()
+app.include_router(build_generation_router(storyboard_service, whisper_engine, generation_queue_service))
+app.include_router(build_browser_bridge_router(browser_bridge_service, settings.browser_bridge.session_token))
 
 def _format_vtt_timestamp(seconds: float) -> str:
     safe = max(0.0, seconds)

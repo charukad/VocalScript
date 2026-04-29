@@ -17,6 +17,10 @@ export const MESSAGE_TYPES = Object.freeze({
   JOB_RESULT: "job.result",
   JOB_ERROR: "job.error",
   HEARTBEAT: "worker.heartbeat",
+  BRIDGE_HELLO: "bridge.hello",
+  BRIDGE_READY_ACK: "bridge.ready_ack",
+  BRIDGE_HEARTBEAT_ACK: "bridge.heartbeat_ack",
+  BRIDGE_ERROR: "bridge.error",
 });
 
 export const JOB_STATUSES = Object.freeze({
@@ -50,6 +54,14 @@ export function createWorkerReadyMessage(workerId, providers) {
     workerId,
     version: BRIDGE_PROTOCOL_VERSION,
     providers,
+  };
+}
+
+export function createHeartbeatMessage(workerId) {
+  return {
+    type: MESSAGE_TYPES.HEARTBEAT,
+    workerId,
+    sentAt: new Date().toISOString(),
   };
 }
 

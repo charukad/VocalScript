@@ -72,15 +72,17 @@ Manual tests after Phase 3:
 
 ## Phase 4: Generation Queue Backend
 
-- [ ] Add generation job queue service.
-- [ ] Add queued/running/completed/failed/canceled statuses.
-- [ ] Add job create endpoint.
-- [ ] Add job list endpoint.
-- [ ] Add job cancel endpoint.
-- [ ] Add job retry endpoint.
-- [ ] Add generated media storage folder.
-- [ ] Add endpoint for extension to submit job result.
-- [ ] Add endpoint for frontend to fetch generated media.
+- [x] Add generation job queue service.
+- [x] Add queued/running/completed/failed/canceled statuses.
+- [x] Add job create endpoint.
+- [x] Add job list endpoint.
+- [x] Add job cancel endpoint.
+- [x] Add job retry endpoint.
+- [x] Add generated media storage folder.
+- [x] Add endpoint for extension to submit job result.
+- [x] Add endpoint for frontend to fetch generated media.
+- [x] Add worker claim endpoint.
+- [x] Add job status update endpoint.
 
 Manual tests after Phase 4:
 
@@ -214,7 +216,7 @@ Manual tests after Phase 10:
 - [x] Phase 1: Contracts And Architecture
 - [x] Phase 2: Storyboard Backend MVP
 - [x] Phase 3: Storyboard Frontend UI
-- [ ] Phase 4: Generation Queue Backend
+- [x] Phase 4: Generation Queue Backend
 - [ ] Phase 5: Chrome Extension Bridge MVP
 - [ ] Phase 6: Provider Adapter MVP
 - [ ] Phase 7: Timeline Import

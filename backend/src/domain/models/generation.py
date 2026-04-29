@@ -31,6 +31,7 @@ ProviderRuntimeStatus = Literal[
     "failed",
     "manual_action_required",
 ]
+BridgeConnectionStatus = Literal["connected", "disconnected"]
 
 
 class ApiModel(BaseModel):
@@ -92,11 +93,50 @@ class GenerationJob(ApiModel):
     metadata: Dict[str, str] = Field(default_factory=dict)
 
 
+class GenerationJobCreateRequest(ApiModel):
+    scenes: List[StoryboardScene]
+    provider: ProviderName = "meta"
+
+
+class GenerationJobListResponse(ApiModel):
+    jobs: List[GenerationJob]
+
+
+class GenerationJobStatusUpdate(ApiModel):
+    status: GenerationJobStatus
+    error: Optional[str] = None
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
+class GenerationJobClaimRequest(ApiModel):
+    provider: Optional[ProviderName] = None
+    worker_id: Optional[str] = Field(default=None, alias="workerId")
+
+
+class GenerationJobResultRequest(ApiModel):
+    media_url: str = Field(alias="mediaUrl")
+    media_type: Optional[GeneratedMediaType] = Field(default=None, alias="mediaType")
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
 class BridgeWorkerRegistration(ApiModel):
     type: Literal["worker.ready"] = "worker.ready"
     worker_id: str = Field(alias="workerId")
     version: str
     providers: List[ProviderName]
+
+
+class BridgeWorkerSnapshot(ApiModel):
+    worker_id: str = Field(alias="workerId")
+    version: str
+    providers: List[ProviderName]
+    status: BridgeConnectionStatus
+    connected_at: str = Field(alias="connectedAt")
+    last_seen_at: str = Field(alias="lastSeenAt")
+
+
+class BridgeStatusResponse(ApiModel):
+    workers: List[BridgeWorkerSnapshot]
 
 
 class BridgeJobStart(ApiModel):

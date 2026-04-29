@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "NeuralScribe Bridge",
+  "version": "0.1.0",
+  "description": "Connects NeuralScribe to the local backend and browser generation providers.",
+  "action": {
+    "default_title": "Open NeuralScribe Bridge"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "ws://127.0.0.1/*",
+    "https://www.meta.ai/*",
+    "https://grok.com/*"
+  ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}
