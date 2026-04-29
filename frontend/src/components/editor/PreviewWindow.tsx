@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import type { TimelineClip } from '../../types';
+import { getKeyframedValue } from '../../lib/utils/keyframes';
 
 const formatTimecode = (seconds: number): string => {
   const h = Math.floor(seconds / 3600);
@@ -65,6 +66,15 @@ export const PreviewWindow = () => {
   };
 
   const activeVisualClip = clips.find(c => c.type === 'visual' && isTrackActive(c.trackId) && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration);
+  const getVisualStyle = (clip: TimelineClip) => {
+    const scale = getKeyframedValue(clip, 'scale', playheadTime, clip.transform?.scale ?? 100);
+    const rotation = getKeyframedValue(clip, 'rotation', playheadTime, clip.transform?.rotation ?? 0);
+    const opacity = getKeyframedValue(clip, 'opacity', playheadTime, clip.transform?.opacity ?? 100);
+    return {
+      transform: `scale(${scale / 100}) rotate(${rotation}deg) scaleX(${clip.transform?.flipX ? -1 : 1}) scaleY(${clip.transform?.flipY ? -1 : 1})`,
+      opacity: Math.max(0, Math.min(1, opacity / 100)),
+    };
+  };
 
   const maxTime = clips.reduce((max, clip) => {
     const end = clip.startTime + clip.duration;
@@ -102,7 +112,7 @@ export const PreviewWindow = () => {
             const isWithinClip = currentPlayhead >= clip.startTime && currentPlayhead <= clip.startTime + clip.duration;
             if (isWithinClip) {
               // --- Volume Envelope ---
-              const baseVol = (clip.audio?.volume ?? 100) / 100;
+              const baseVol = getKeyframedValue(clip, 'volume', currentPlayhead, clip.audio?.volume ?? 100) / 100;
               const relTime = currentPlayhead - clip.startTime; // position within clip
               const fadeIn = clip.audio?.fadeIn ?? 0;
               const fadeOut = clip.audio?.fadeOut ?? 0;
@@ -196,9 +206,9 @@ export const PreviewWindow = () => {
                   objectFit: 'contain',
                   borderRadius: '4px',
                   display: activeVisualClip?.id === clip.id ? 'block' : 'none',
-                  transform: activeVisualClip?.id === clip.id ? `scale(${clip.transform?.scale ? clip.transform.scale / 100 : 1}) rotate(${clip.transform?.rotation || 0}deg) scaleX(${clip.transform?.flipX ? -1 : 1}) scaleY(${clip.transform?.flipY ? -1 : 1})` : undefined,
+                  ...(activeVisualClip?.id === clip.id ? getVisualStyle(clip) : {}),
                   filter: activeVisualClip?.id === clip.id ? buildCssFilter(clip) : undefined,
-                  transition: 'transform 0.1s ease-out, filter 0.1s ease-out'
+                  transition: 'transform 0.1s ease-out, filter 0.1s ease-out, opacity 0.1s ease-out'
                 }} 
               />
             ))}
@@ -212,9 +222,9 @@ export const PreviewWindow = () => {
                   maxHeight: '100%', 
                   objectFit: 'contain', 
                   borderRadius: '4px',
-                  transform: `scale(${activeVisualClip.transform?.scale ? activeVisualClip.transform.scale / 100 : 1}) rotate(${activeVisualClip.transform?.rotation || 0}deg) scaleX(${activeVisualClip.transform?.flipX ? -1 : 1}) scaleY(${activeVisualClip.transform?.flipY ? -1 : 1})`,
+                  ...getVisualStyle(activeVisualClip),
                   filter: buildCssFilter(activeVisualClip),
-                  transition: 'transform 0.1s ease-out, filter 0.1s ease-out'
+                  transition: 'transform 0.1s ease-out, filter 0.1s ease-out, opacity 0.1s ease-out'
                 }} 
               />
             )}
@@ -243,6 +253,7 @@ export const PreviewWindow = () => {
                         : 'transparent',
                       padding: td.bgOpacity > 0 ? '0.2em 0.4em' : '0',
                       borderRadius: td.bgOpacity > 0 ? '4px' : '0',
+                      opacity: getKeyframedValue(clip, 'opacity', playheadTime, clip.transform?.opacity ?? 100) / 100,
                       whiteSpace: 'pre-wrap',
                       maxWidth: '90%',
                       pointerEvents: 'none',

@@ -1,4 +1,20 @@
 import { useEditorStore } from '../../store/editorStore';
+import type { KeyframeProperty } from '../../types';
+
+type KeyframeMeta = {
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  unit: string;
+};
+
+const KEYFRAME_META: Record<KeyframeProperty, KeyframeMeta> = {
+  scale: { label: 'Scale', min: 10, max: 300, step: 1, unit: '%' },
+  rotation: { label: 'Rotation', min: -180, max: 180, step: 1, unit: 'deg' },
+  opacity: { label: 'Opacity', min: 0, max: 100, step: 1, unit: '%' },
+  volume: { label: 'Volume', min: 0, max: 200, step: 1, unit: '%' },
+};
 
 const formatDuration = (seconds: number): string => {
   if (isNaN(seconds) || !isFinite(seconds)) return '—';
@@ -31,11 +47,27 @@ export const Inspector = () => {
     vttDownloadUrl,
     captions,
     updateCaptionText,
-    createTextClipsFromCaptions
+    createTextClipsFromCaptions,
+    playheadTime,
+    addKeyframe,
+    updateKeyframe,
+    removeKeyframe
   } = useEditorStore();
 
   const selectedClip = clips.find(c => c.id === selectedClipId);
   const track = selectedClip ? tracks.find(t => t.id === selectedClip.trackId) : null;
+  const selectedClipTime = selectedClip
+    ? Math.max(0, Math.min(selectedClip.duration, playheadTime - selectedClip.startTime))
+    : 0;
+  const hasPlayableAudio = Boolean(selectedClip && (selectedClip.type === 'audio' || (selectedClip.type === 'visual' && !selectedClip.file.type.startsWith('image'))));
+  const keyframeProperties: KeyframeProperty[] = selectedClip
+    ? [
+        ...(selectedClip.type === 'visual' ? (['scale', 'rotation'] as KeyframeProperty[]) : []),
+        ...(selectedClip.type === 'visual' || selectedClip.type === 'text' ? (['opacity'] as KeyframeProperty[]) : []),
+        ...(hasPlayableAudio ? (['volume'] as KeyframeProperty[]) : []),
+      ]
+    : [];
+  const sortedKeyframes = [...(selectedClip?.keyframes ?? [])].sort((a, b) => a.time - b.time || a.property.localeCompare(b.property));
 
   const totalSequenceDuration = clips.reduce((max, clip) => {
     const end = clip.startTime + clip.duration;
@@ -168,6 +200,21 @@ export const Inspector = () => {
               />
             </div>
 
+            {/* Opacity */}
+            <div className="inspector-control-group" style={{ marginBottom: '1rem' }}>
+              <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                <span className="inspector-label">Opacity</span>
+                <span className="inspector-value">{Math.round(selectedClip.transform?.opacity ?? 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0" max="100"
+                value={selectedClip.transform?.opacity ?? 100}
+                onChange={(e) => updateClipTransform(selectedClip.id, { opacity: Number(e.target.value) })}
+                style={{ width: '100%', cursor: 'pointer' }}
+              />
+            </div>
+
             {/* Flip Options */}
             <div className="inspector-row">
               <span className="inspector-label">Flip</span>
@@ -207,7 +254,7 @@ export const Inspector = () => {
             <button 
               className="btn-secondary" 
               style={{ width: '100%', marginTop: '1rem', fontSize: '0.7rem' }}
-              onClick={() => updateClipTransform(selectedClip.id, { scale: 100, rotation: 0, flipX: false, flipY: false })}
+              onClick={() => updateClipTransform(selectedClip.id, { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false })}
             >
               Reset Transform
             </button>
@@ -326,6 +373,76 @@ export const Inspector = () => {
             >
               Reset Audio
             </button>
+          </div>
+        )}
+
+        {/* Keyframe Controls */}
+        {selectedClip && keyframeProperties.length > 0 && (
+          <div className="inspector-section">
+            <div className="inspector-section-title">Keyframes</div>
+            <div className="inspector-row" style={{ marginBottom: '0.65rem' }}>
+              <span className="inspector-label">Playhead In Clip</span>
+              <span className="inspector-value">{selectedClipTime.toFixed(2)}s</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.45rem', marginBottom: '0.8rem' }}>
+              {keyframeProperties.map(property => (
+                <button
+                  key={property}
+                  className="btn-secondary"
+                  style={{ fontSize: '0.68rem', padding: '0.4rem 0.35rem' }}
+                  onClick={() => addKeyframe(selectedClip.id, property)}
+                  title={`Add ${KEYFRAME_META[property].label} keyframe at the playhead`}
+                >
+                  Add {KEYFRAME_META[property].label}
+                </button>
+              ))}
+            </div>
+
+            {sortedKeyframes.length === 0 ? (
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', textAlign: 'center', padding: '0.5rem 0' }}>
+                No keyframes on this clip
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                {sortedKeyframes.map(keyframe => {
+                  const meta = KEYFRAME_META[keyframe.property];
+                  return (
+                    <div key={keyframe.id} style={{ display: 'grid', gridTemplateColumns: '1fr 64px 70px 28px', gap: '0.35rem', alignItems: 'center' }}>
+                      <span className="inspector-label">{meta.label}</span>
+                      <input
+                        aria-label={`${meta.label} keyframe time`}
+                        type="number"
+                        min={0}
+                        max={selectedClip.duration}
+                        step={0.1}
+                        value={Number(keyframe.time.toFixed(2))}
+                        onChange={e => updateKeyframe(selectedClip.id, keyframe.id, { time: Number(e.target.value) })}
+                        style={{ width: '100%', padding: '0.28rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '5px', color: 'var(--text-primary)', fontSize: '0.7rem' }}
+                      />
+                      <input
+                        aria-label={`${meta.label} keyframe value`}
+                        type="number"
+                        min={meta.min}
+                        max={meta.max}
+                        step={meta.step}
+                        value={Number(keyframe.value.toFixed(2))}
+                        onChange={e => updateKeyframe(selectedClip.id, keyframe.id, { value: Number(e.target.value) })}
+                        title={meta.unit}
+                        style={{ width: '100%', padding: '0.28rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '5px', color: 'var(--text-primary)', fontSize: '0.7rem' }}
+                      />
+                      <button
+                        className="btn-icon"
+                        onClick={() => removeKeyframe(selectedClip.id, keyframe.id)}
+                        title="Remove keyframe"
+                        style={{ border: '1px solid var(--border-color)', color: 'var(--text-secondary)' }}
+                      >
+                        x
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

@@ -34,6 +34,16 @@ export type TextData = {
   bgOpacity: number;    // 0–1
 };
 
+export type KeyframeProperty = 'scale' | 'rotation' | 'opacity' | 'volume';
+
+export type Keyframe = {
+  id: string;
+  property: KeyframeProperty;
+  time: number;         // seconds from clip start
+  value: number;
+  easing: 'linear';
+};
+
 export type TimelineClip = {
   id: string;
   assetId: string;
@@ -46,6 +56,7 @@ export type TimelineClip = {
   transform?: {
     scale: number;
     rotation: number;
+    opacity?: number;
     flipX: boolean;
     flipY: boolean;
   };
@@ -63,6 +74,7 @@ export type TimelineClip = {
     fadeOut: number;
   };
   textData?: TextData;
+  keyframes?: Keyframe[];
 };
 
 export type ExportSettings = {

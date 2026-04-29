@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import type { MediaAsset, TimelineClip, TimelineTrack, MediaType, TextData, ExportSettings, CaptionSegment } from '../types';
+import type { MediaAsset, TimelineClip, TimelineTrack, MediaType, TextData, ExportSettings, CaptionSegment, KeyframeProperty } from '../types';
 import { getMediaDuration, generateThumbnail, generateWaveform, generateFilmstrip } from '../lib/utils/media';
 import { exportTimeline } from '../lib/api/client';
+import { clampKeyframeTime, getClipPropertyValue, getKeyframedValue } from '../lib/utils/keyframes';
 
 const DEFAULT_TEXT_DATA: TextData = {
   content: 'Text Here',
@@ -31,6 +32,7 @@ const cloneClips = (clips: TimelineClip[]) => clips.map(clip => ({
   color: clip.color ? { ...clip.color } : undefined,
   audio: clip.audio ? { ...clip.audio } : undefined,
   textData: clip.textData ? { ...clip.textData } : undefined,
+  keyframes: clip.keyframes ? clip.keyframes.map(keyframe => ({ ...keyframe })) : undefined,
 }));
 
 const cloneTracks = (tracks: TimelineTrack[]) => tracks.map(track => ({ ...track }));
@@ -142,6 +144,9 @@ type EditorState = {
   updateClipColor: (id: string, colorData: Partial<TimelineClip['color']>) => void;
   updateClipAudio: (id: string, audioData: Partial<TimelineClip['audio']>) => void;
   updateClipText: (id: string, textData: Partial<TextData>) => void;
+  addKeyframe: (id: string, property: KeyframeProperty, time?: number, value?: number) => void;
+  updateKeyframe: (id: string, keyframeId: string, updates: Partial<Pick<NonNullable<TimelineClip['keyframes']>[number], 'time' | 'value'>>) => void;
+  removeKeyframe: (id: string, keyframeId: string) => void;
   undo: () => void;
   redo: () => void;
   historyPast: TimelineSnapshot[];
@@ -309,7 +314,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       duration: asset.type === 'visual' && asset.file.type.startsWith('image') ? 10 : duration,
       startTime: Math.max(0, targetStartTime),
       mediaOffset: 0,
-      transform: { scale: 100, rotation: 0, flipX: false, flipY: false },
+      transform: { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false },
       color: { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 },
       audio: { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 }
     };
@@ -330,6 +335,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       startTime,
       mediaOffset: 0,
       audio: { volume: 0, mute: true, fadeIn: 0, fadeOut: 0 },
+      transform: { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false },
       textData: { ...DEFAULT_TEXT_DATA }
     };
     set({ ...withHistory(state), clips: [...state.clips, newClip], selectedClipId: newClip.id });
@@ -417,13 +423,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         return state;
       }
       const splitOffset = splitTime - clip.startTime;
-      const clip1: TimelineClip = { ...clip, duration: splitOffset };
+      const clip1: TimelineClip = {
+        ...clip,
+        duration: splitOffset,
+        keyframes: clip.keyframes
+          ?.filter(keyframe => keyframe.time <= splitOffset)
+          .map(keyframe => ({ ...keyframe }))
+      };
       const clip2: TimelineClip = {
         ...clip,
         id: Math.random().toString(36).substring(7),
         startTime: splitTime,
         duration: clip.duration - splitOffset,
-        mediaOffset: clip.mediaOffset + splitOffset
+        mediaOffset: clip.mediaOffset + splitOffset,
+        keyframes: clip.keyframes
+          ?.filter(keyframe => keyframe.time >= splitOffset)
+          .map(keyframe => ({ ...keyframe, id: Math.random().toString(36).substring(7), time: keyframe.time - splitOffset }))
       };
       const newClips = [...state.clips];
       newClips.splice(clipIndex, 1, clip1, clip2);
@@ -439,7 +454,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           if (isTrackLocked(state.tracks, clip.trackId)) return clip;
           return {
             ...clip,
-            transform: { ...(clip.transform || { scale: 100, rotation: 0, flipX: false, flipY: false }), ...transformData }
+            transform: { ...(clip.transform || { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false }), ...transformData }
           };
         }
         return clip;
@@ -492,6 +507,78 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }
         return clip;
       })
+    }));
+  },
+
+  addKeyframe: (id, property, time, value) => {
+    set(state => {
+      const clip = state.clips.find(candidate => candidate.id === id);
+      if (!clip || isTrackLocked(state.tracks, clip.trackId)) return state;
+
+      const relativeTime = clampKeyframeTime(clip, time ?? state.playheadTime - clip.startTime);
+      const nextKeyframe = {
+        id: Math.random().toString(36).substring(7),
+        property,
+        time: Number(relativeTime.toFixed(3)),
+        value: value ?? getKeyframedValue(clip, property, state.playheadTime, getClipPropertyValue(clip, property)),
+        easing: 'linear' as const,
+      };
+
+      return {
+        ...withHistory(state),
+        clips: state.clips.map(candidate => {
+          if (candidate.id !== id) return candidate;
+          const existing = candidate.keyframes ?? [];
+          const duplicateIndex = existing.findIndex(keyframe =>
+            keyframe.property === property && Math.abs(keyframe.time - nextKeyframe.time) < 0.033
+          );
+          const keyframes = duplicateIndex >= 0
+            ? existing.map((keyframe, index) => index === duplicateIndex ? { ...keyframe, value: nextKeyframe.value } : keyframe)
+            : [...existing, nextKeyframe];
+
+          return {
+            ...candidate,
+            keyframes: keyframes.sort((a, b) => a.time - b.time || a.property.localeCompare(b.property)),
+          };
+        }),
+      };
+    });
+  },
+
+  updateKeyframe: (id, keyframeId, updates) => {
+    set(state => ({
+      ...withHistory(state),
+      clips: state.clips.map(clip => {
+        if (clip.id !== id) return clip;
+        if (isTrackLocked(state.tracks, clip.trackId)) return clip;
+        return {
+          ...clip,
+          keyframes: (clip.keyframes ?? [])
+            .map(keyframe => keyframe.id === keyframeId
+              ? {
+                  ...keyframe,
+                  value: updates.value ?? keyframe.value,
+                  time: updates.time === undefined ? keyframe.time : Number(clampKeyframeTime(clip, updates.time).toFixed(3)),
+                }
+              : keyframe
+            )
+            .sort((a, b) => a.time - b.time || a.property.localeCompare(b.property)),
+        };
+      }),
+    }));
+  },
+
+  removeKeyframe: (id, keyframeId) => {
+    set(state => ({
+      ...withHistory(state),
+      clips: state.clips.map(clip => {
+        if (clip.id !== id) return clip;
+        if (isTrackLocked(state.tracks, clip.trackId)) return clip;
+        return {
+          ...clip,
+          keyframes: (clip.keyframes ?? []).filter(keyframe => keyframe.id !== keyframeId),
+        };
+      }),
     }));
   },
 
@@ -618,6 +705,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           startTime: caption.start,
           mediaOffset: 0,
           audio: { volume: 0, mute: true, fadeIn: 0, fadeOut: 0 },
+          transform: { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false },
           textData: {
             ...DEFAULT_TEXT_DATA,
             content: caption.text,
