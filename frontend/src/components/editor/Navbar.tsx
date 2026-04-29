@@ -3,6 +3,7 @@ import { useEditorStore } from '../../store/editorStore';
 export const Navbar = () => {
   const { clips, isProcessing, openExportModal, mediaUrl, assets } = useEditorStore();
   const visualAsset = assets.find(a => a.type === 'visual');
+  const exportedAudioOnly = mediaUrl?.endsWith('.mp3');
 
   return (
     <div className="navbar">
@@ -21,8 +22,8 @@ export const Navbar = () => {
       </div>
       <div className="nav-actions">
         {mediaUrl && (
-          <a href={mediaUrl} download={visualAsset ? "export.mp4" : "export.mp3"} className="btn-secondary" style={{textDecoration: 'none'}}>
-            Download {visualAsset ? "Video" : "Audio"}
+          <a href={mediaUrl} download={exportedAudioOnly || !visualAsset ? "export.mp3" : "export.mp4"} className="btn-secondary" style={{textDecoration: 'none'}}>
+            Download {exportedAudioOnly || !visualAsset ? "Audio" : "Video"}
           </a>
         )}
         <button 

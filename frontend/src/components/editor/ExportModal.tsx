@@ -18,9 +18,16 @@ const QUALITIES = [
   { value: 'compressed', label: 'Compressed',     desc: 'Smallest file, good for web sharing' },
 ] as const;
 
+const PRESETS = [
+  { label: 'YouTube', settings: { resolution: '1080p', aspectRatio: '16:9', quality: 'standard', format: 'video' } },
+  { label: 'Shorts', settings: { resolution: '1080p', aspectRatio: '9:16', quality: 'standard', format: 'video' } },
+  { label: 'Square', settings: { resolution: '1080p', aspectRatio: '1:1', quality: 'standard', format: 'video' } },
+  { label: 'Audio', settings: { resolution: '1080p', aspectRatio: '16:9', quality: 'standard', format: 'audio' } },
+] as const;
+
 export const ExportModal = () => {
   const {
-    closeExportModal, exportSettings, setExportSettings, exportSequence, isProcessing, clips
+    closeExportModal, exportSettings, setExportSettings, exportSequence, cancelExport, isProcessing, clips, exportStatus
   } = useEditorStore();
 
   const res = RESOLUTIONS.find(r => r.value === exportSettings.resolution) ?? RESOLUTIONS[1];
@@ -44,7 +51,7 @@ export const ExportModal = () => {
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
           <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-            Export Video
+            Export
           </h2>
           <button
             onClick={closeExportModal}
@@ -52,8 +59,51 @@ export const ExportModal = () => {
           >✕</button>
         </div>
 
-        {/* Resolution */}
+        {/* Presets */}
         <div style={{ marginBottom: '1.5rem' }}>
+          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Presets
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.45rem' }}>
+            {PRESETS.map(preset => (
+              <button
+                key={preset.label}
+                className="btn-secondary"
+                onClick={() => setExportSettings(preset.settings)}
+                style={{ padding: '0.45rem 0.35rem', fontSize: '0.72rem' }}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Format */}
+        <div style={{ marginBottom: '1.5rem' }}>
+          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Format
+          </label>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            {(['video', 'audio'] as const).map(format => (
+              <button
+                key={format}
+                onClick={() => setExportSettings({ format })}
+                style={{
+                  flex: 1, padding: '0.6rem', borderRadius: '8px', cursor: 'pointer',
+                  border: `2px solid ${exportSettings.format === format ? 'var(--accent-color)' : 'var(--border-color)'}`,
+                  background: exportSettings.format === format ? 'rgba(99,54,255,0.15)' : 'var(--surface-3)',
+                  color: exportSettings.format === format ? 'var(--accent-color)' : 'var(--text-secondary)',
+                  fontSize: '0.8rem', fontWeight: 600, textTransform: 'capitalize'
+                }}
+              >
+                {format === 'video' ? 'Video + captions' : 'Audio only'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Resolution */}
+        <div style={{ marginBottom: '1.5rem', opacity: exportSettings.format === 'audio' ? 0.45 : 1 }}>
           <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Resolution
           </label>
@@ -62,6 +112,7 @@ export const ExportModal = () => {
               <button
                 key={r.value}
                 onClick={() => setExportSettings({ resolution: r.value })}
+                disabled={exportSettings.format === 'audio'}
                 style={{
                   flex: 1, padding: '0.6rem', borderRadius: '8px', cursor: 'pointer',
                   border: `2px solid ${exportSettings.resolution === r.value ? 'var(--accent-color)' : 'var(--border-color)'}`,
@@ -78,7 +129,7 @@ export const ExportModal = () => {
         </div>
 
         {/* Aspect Ratio */}
-        <div style={{ marginBottom: '1.5rem' }}>
+        <div style={{ marginBottom: '1.5rem', opacity: exportSettings.format === 'audio' ? 0.45 : 1 }}>
           <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Aspect Ratio
           </label>
@@ -87,6 +138,7 @@ export const ExportModal = () => {
               <button
                 key={ar.value}
                 onClick={() => setExportSettings({ aspectRatio: ar.value })}
+                disabled={exportSettings.format === 'audio'}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '0.75rem',
                   padding: '0.65rem 0.85rem', borderRadius: '8px', cursor: 'pointer', textAlign: 'left',
@@ -132,10 +184,15 @@ export const ExportModal = () => {
         {/* Summary + Export */}
         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1.25rem' }}>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-            Output: <strong style={{ color: 'var(--text-primary)' }}>{res.label}</strong> · {exportSettings.aspectRatio} · {exportSettings.quality} quality
+            Output: <strong style={{ color: 'var(--text-primary)' }}>{exportSettings.format === 'audio' ? 'MP3 audio' : res.label}</strong> · {exportSettings.format === 'audio' ? 'audio only' : exportSettings.aspectRatio} · {exportSettings.quality} quality
             <br />
             {clips.length} clip{clips.length !== 1 ? 's' : ''} in sequence
           </div>
+          {exportStatus && (
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+              {exportStatus}
+            </div>
+          )}
           <button
             className="btn-primary"
             style={{ width: '100%', padding: '0.75rem', fontSize: '0.9rem', fontWeight: 600 }}
@@ -144,6 +201,15 @@ export const ExportModal = () => {
           >
             {isProcessing ? 'Exporting...' : 'Export & Transcribe'}
           </button>
+          {isProcessing && (
+            <button
+              className="btn-secondary"
+              style={{ width: '100%', padding: '0.65rem', marginTop: '0.5rem' }}
+              onClick={cancelExport}
+            >
+              Cancel Export
+            </button>
+          )}
         </div>
       </div>
     </div>

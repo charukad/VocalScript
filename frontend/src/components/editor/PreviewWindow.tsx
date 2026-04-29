@@ -11,7 +11,7 @@ const formatTimecode = (seconds: number): string => {
 };
 
 export const PreviewWindow = () => {
-  const { clips, playheadTime, setPlayheadTime, isPlaying, isProcessing, srtContent, mediaUrl, togglePlayback, setIsPlaying } = useEditorStore();
+  const { clips, tracks, playheadTime, setPlayheadTime, isPlaying, isProcessing, srtContent, mediaUrl, togglePlayback, setIsPlaying } = useEditorStore();
   
   const animationRef = useRef<number | null>(null);
   const lastUpdateRef = useRef<number>(0);
@@ -57,7 +57,14 @@ export const PreviewWindow = () => {
     ].join(' ');
   };
 
-  const activeVisualClip = clips.find(c => c.type === 'visual' && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration);
+  const isTrackActive = (trackId: string) => {
+    const track = tracks.find(t => t.id === trackId);
+    if (!track || track.muted) return false;
+    const hasSoloForType = tracks.some(t => t.type === track.type && t.solo);
+    return !hasSoloForType || Boolean(track.solo);
+  };
+
+  const activeVisualClip = clips.find(c => c.type === 'visual' && isTrackActive(c.trackId) && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration);
 
   const maxTime = clips.reduce((max, clip) => {
     const end = clip.startTime + clip.duration;
@@ -89,7 +96,7 @@ export const PreviewWindow = () => {
           const mediaEl = clip.type === 'audio' ? audioRefs.current[clip.id] : videoRefs.current[clip.id];
           if (mediaEl) {
             // Mute flag
-            const isMuted = clip.audio?.mute ?? false;
+            const isMuted = (clip.audio?.mute ?? false) || !isTrackActive(clip.trackId);
             if (mediaEl.muted !== isMuted) mediaEl.muted = isMuted;
 
             const isWithinClip = currentPlayhead >= clip.startTime && currentPlayhead <= clip.startTime + clip.duration;
@@ -146,7 +153,7 @@ export const PreviewWindow = () => {
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
     };
-  }, [isPlaying, clips, setPlayheadTime, setIsPlaying, maxTime]);
+  }, [isPlaying, clips, tracks, setPlayheadTime, setIsPlaying, maxTime]);
 
   // Scrubbing when Paused
   useEffect(() => {
@@ -177,7 +184,7 @@ export const PreviewWindow = () => {
         ) : (
           <>
             {/* Render all videos visibly but toggle display so they are controlled by the central sync loop */}
-            {clips.filter(c => c.type === 'visual' && !c.file.type.startsWith('image')).map(clip => (
+            {clips.filter(c => c.type === 'visual' && isTrackActive(c.trackId) && !c.file.type.startsWith('image')).map(clip => (
               <video 
                 key={`video-${clip.id}`} 
                 ref={el => { if (el) videoRefs.current[clip.id] = el; }} 
@@ -214,7 +221,7 @@ export const PreviewWindow = () => {
 
             {/* Text Overlays */}
             {clips
-              .filter(c => c.type === 'text' && c.textData && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration)
+              .filter(c => c.type === 'text' && isTrackActive(c.trackId) && c.textData && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration)
               .map(clip => {
                 const td = clip.textData!;
                 return (

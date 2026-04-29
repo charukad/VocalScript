@@ -79,16 +79,29 @@ type TimelineBlueprint = {
   width: number;
   height: number;
   crf: number;
+  audio_only: boolean;
   tracks: TrackBlueprint[];
 };
 
-export const exportTimeline = async (clips: TimelineClip[], tracks: TimelineTrack[], settings: ExportSettings): Promise<ExportResponse> => {
+const isTrackActive = (track: TimelineTrack, tracks: TimelineTrack[]) => {
+  if (track.muted) return false;
+  const hasSoloForType = tracks.some(t => t.type === track.type && t.solo);
+  return !hasSoloForType || Boolean(track.solo);
+};
+
+export const exportTimeline = async (
+  clips: TimelineClip[],
+  tracks: TimelineTrack[],
+  settings: ExportSettings,
+  signal?: AbortSignal
+): Promise<ExportResponse> => {
   if (clips.length === 0) {
     throw new Error("Timeline is empty");
   }
 
   // 1. Build Blueprint
-  const blueprintTracks: TrackBlueprint[] = tracks.map(t => ({
+  const activeTracks = tracks.filter(t => isTrackActive(t, tracks));
+  const blueprintTracks: TrackBlueprint[] = activeTracks.map(t => ({
     id: t.id,
     name: t.name,
     type: t.type,
@@ -126,6 +139,7 @@ export const exportTimeline = async (clips: TimelineClip[], tracks: TimelineTrac
     width,
     height,
     crf,
+    audio_only: settings.format === 'audio',
     tracks: blueprintTracks
   };
 
@@ -145,6 +159,7 @@ export const exportTimeline = async (clips: TimelineClip[], tracks: TimelineTrac
   const response = await fetch('http://localhost:8000/api/export', {
     method: 'POST',
     body: formData,
+    signal,
   });
 
   if (!response.ok) {

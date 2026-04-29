@@ -55,4 +55,5 @@ class TimelineBlueprint(BaseModel):
     width: int = 1920
     height: int = 1080
     crf: int = 23
+    audio_only: bool = False
     tracks: List[TrackBlueprint]

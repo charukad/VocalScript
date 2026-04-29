@@ -18,7 +18,9 @@ export const EditorLayout = () => {
     selectedClipId,
     removeClip,
     togglePlayback,
-    showExportModal
+    showExportModal,
+    undo,
+    redo
   } = useEditorStore();
   
   const sensors = useSensors(
@@ -33,6 +35,12 @@ export const EditorLayout = () => {
       if (e.code === 'Space') {
         e.preventDefault();
         togglePlayback();
+      } else if (e.code === 'KeyZ' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((e.code === 'KeyZ' && (e.metaKey || e.ctrlKey) && e.shiftKey) || (e.code === 'KeyY' && (e.metaKey || e.ctrlKey))) {
+        e.preventDefault();
+        redo();
       } else if ((e.code === 'Backspace' || e.code === 'Delete') && selectedClipId) {
         e.preventDefault();
         removeClip(selectedClipId);
@@ -44,7 +52,7 @@ export const EditorLayout = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedClipId, removeClip, togglePlayback]);
+  }, [selectedClipId, removeClip, togglePlayback, undo, redo]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over, delta } = event;

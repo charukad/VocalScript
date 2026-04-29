@@ -13,25 +13,25 @@
 
 ## Phase 2: Caption Workflow
 
-- [ ] Add an editable transcript/subtitle panel.
-- [ ] Add subtitle style controls.
-- [ ] Support burned-in subtitles in exported video.
-- [ ] Support `.srt` and `.vtt` downloads.
+- [x] Add an editable transcript/subtitle panel.
+- [x] Add subtitle style controls.
+- [x] Support burned-in subtitles in exported video.
+- [x] Support `.srt` and `.vtt` downloads.
 - [ ] Add line wrapping and subtitle length controls.
 
 ## Phase 3: Timeline Editing
 
-- [ ] Add undo/redo.
-- [ ] Add snapping/magnet mode.
+- [x] Add undo/redo.
+- [x] Add snapping/magnet mode.
 - [ ] Add ripple delete and gap closing.
-- [ ] Make track mute/solo/lock controls functional.
-- [ ] Add precise time inputs for clip start and duration.
+- [x] Make track mute/solo/lock controls functional.
+- [x] Add precise time inputs for clip start and duration.
 
 ## Phase 4: Export And Project Reliability
 
-- [ ] Add export progress and cancel state.
-- [ ] Add export presets for YouTube, Shorts/Reels, and square video.
-- [ ] Add audio-only export.
+- [x] Add export progress and cancel state.
+- [x] Add export presets for YouTube, Shorts/Reels, and square video.
+- [x] Add audio-only export.
 - [ ] Add project save/load.
 - [ ] Add autosave and recent projects.
 - [ ] Warn when media files are missing.

@@ -12,10 +12,11 @@ interface TrackProps {
 }
 
 const Track = ({ track, timelineWidth }: TrackProps) => {
-  const { clips, zoom, removeClip, setSelectedClip } = useEditorStore();
+  const { clips, zoom, removeClip, setSelectedClip, updateTrack } = useEditorStore();
   const { setNodeRef, isOver } = useDroppable({
     id: track.id,
-    data: { type: 'timeline-track', trackType: track.type }
+    data: { type: 'timeline-track', trackType: track.type },
+    disabled: Boolean(track.locked)
   });
 
   const trackClips = clips.filter(c => c.trackId === track.id);
@@ -39,9 +40,25 @@ const Track = ({ track, timelineWidth }: TrackProps) => {
           </span>
         </div>
         <div className="track-controls">
-          <button className="track-ctrl-btn" title="Mute">M</button>
-          <button className="track-ctrl-btn" title="Solo">S</button>
-          <button className="track-ctrl-btn" title="Lock">
+          <button
+            className={`track-ctrl-btn ${track.muted ? 'active' : ''}`}
+            title="Mute Track"
+            onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { muted: !track.muted }); }}
+          >
+            M
+          </button>
+          <button
+            className={`track-ctrl-btn ${track.solo ? 'active' : ''}`}
+            title="Solo Track"
+            onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { solo: !track.solo }); }}
+          >
+            S
+          </button>
+          <button
+            className={`track-ctrl-btn ${track.locked ? 'active' : ''}`}
+            title="Lock Track"
+            onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { locked: !track.locked }); }}
+          >
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
               <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>

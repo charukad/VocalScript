@@ -63,6 +63,12 @@
   border-color: var(--text-secondary);
 }
 
+.btn-secondary.active {
+  background-color: rgba(0, 122, 204, 0.16);
+  border-color: var(--accent-color);
+  color: var(--text-highlight);
+}
+
 .btn-icon {
   background-color: transparent;
   color: var(--text-secondary);
@@ -715,6 +721,12 @@
 .track-ctrl-btn:hover {
   background-color: rgba(255,255,255,0.1);
   color: var(--text-highlight);
+}
+
+.track-ctrl-btn.active {
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+  color: #fff;
 }
 
 .track-content {

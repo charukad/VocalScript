@@ -263,7 +263,7 @@ class FFmpegMediaCompiler(IMediaCompiler):
         # ─── Visual Processing ─────────────────────────────────────────────
         visual_clips = []
         for track in blueprint.tracks:
-            if track.type == "visual":
+            if track.type == "visual" and not blueprint.audio_only:
                 for clip in track.clips:
                     visual_clips.append(clip)
         visual_clips.sort(key=lambda c: c.start_time)

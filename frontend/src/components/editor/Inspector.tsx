@@ -14,7 +14,25 @@ const formatSize = (bytes: number): string => {
 };
 
 export const Inspector = () => {
-  const { clips, tracks, selectedClipId, updateClipTransform, updateClipColor, updateClipAudio, updateClipText, openExportModal, isProcessing, srtDownloadUrl } = useEditorStore();
+  const {
+    clips,
+    tracks,
+    selectedClipId,
+    updateClipTransform,
+    updateClipColor,
+    updateClipAudio,
+    updateClipText,
+    setClipTiming,
+    openExportModal,
+    cancelExport,
+    isProcessing,
+    exportStatus,
+    srtDownloadUrl,
+    vttDownloadUrl,
+    captions,
+    updateCaptionText,
+    createTextClipsFromCaptions
+  } = useEditorStore();
 
   const selectedClip = clips.find(c => c.id === selectedClipId);
   const track = selectedClip ? tracks.find(t => t.id === selectedClip.trackId) : null;
@@ -83,6 +101,30 @@ export const Inspector = () => {
             <div className="inspector-row">
               <span className="inspector-label">Duration</span>
               <span className="inspector-value">{formatDuration(selectedClip.duration)}</span>
+            </div>
+            <div className="inspector-row" style={{ gap: '0.5rem', marginTop: '0.5rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Start Sec</div>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={Number(selectedClip.startTime.toFixed(2))}
+                  onChange={e => setClipTiming(selectedClip.id, Number(e.target.value), selectedClip.duration)}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Duration Sec</div>
+                <input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={Number(selectedClip.duration.toFixed(2))}
+                  onChange={e => setClipTiming(selectedClip.id, selectedClip.startTime, Number(e.target.value))}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
             </div>
             <div className="inspector-row">
               <span className="inspector-label">Size</span>
@@ -411,6 +453,11 @@ export const Inspector = () => {
         {/* Export Section */}
         <div style={{ marginTop: 'auto', paddingTop: '1.5rem' }}>
           <div className="inspector-section-title">Export</div>
+          {exportStatus && (
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', textAlign: 'center' }}>
+              {exportStatus}
+            </div>
+          )}
           {srtDownloadUrl && (
             <a href={srtDownloadUrl} download="subtitles.srt" style={{ textDecoration: 'none' }}>
               <button className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
@@ -423,6 +470,13 @@ export const Inspector = () => {
               </button>
             </a>
           )}
+          {vttDownloadUrl && (
+            <a href={vttDownloadUrl} download="subtitles.vtt" style={{ textDecoration: 'none' }}>
+              <button className="btn-secondary" style={{ width: '100%', marginBottom: '0.5rem' }}>
+                Download VTT
+              </button>
+            </a>
+          )}
           <button
             className="btn-primary"
             style={{ width: '100%', padding: '0.6rem' }}
@@ -431,7 +485,41 @@ export const Inspector = () => {
           >
             {isProcessing ? 'Processing...' : 'Export & Transcribe'}
           </button>
+          {isProcessing && (
+            <button className="btn-secondary" style={{ width: '100%', padding: '0.55rem', marginTop: '0.5rem' }} onClick={cancelExport}>
+              Cancel Export
+            </button>
+          )}
         </div>
+
+        {/* Captions Section */}
+        {captions.length > 0 && (
+          <div className="inspector-section" style={{ marginTop: '1rem' }}>
+            <div className="inspector-section-title">Captions</div>
+            <button
+              className="btn-secondary"
+              style={{ width: '100%', marginBottom: '0.65rem' }}
+              onClick={createTextClipsFromCaptions}
+            >
+              Add Captions to Timeline
+            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+              {captions.map(caption => (
+                <div key={caption.id} style={{ background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.5rem' }}>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.65rem', marginBottom: '0.35rem' }}>
+                    {caption.index}. {formatDuration(caption.start)} - {formatDuration(caption.end)}
+                  </div>
+                  <textarea
+                    value={caption.text}
+                    rows={2}
+                    onChange={e => updateCaptionText(caption.id, e.target.value)}
+                    style={{ width: '100%', resize: 'vertical', background: 'var(--bg-app)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '4px', padding: '0.4rem', fontFamily: 'inherit', fontSize: '0.75rem' }}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

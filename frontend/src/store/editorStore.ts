@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { MediaAsset, TimelineClip, TimelineTrack, MediaType, TextData, ExportSettings } from '../types';
+import type { MediaAsset, TimelineClip, TimelineTrack, MediaType, TextData, ExportSettings, CaptionSegment } from '../types';
 import { getMediaDuration, generateThumbnail, generateWaveform, generateFilmstrip } from '../lib/utils/media';
 import { exportTimeline } from '../lib/api/client';
 
@@ -17,6 +17,100 @@ const DEFAULT_TEXT_DATA: TextData = {
   bgOpacity: 0,
 };
 
+type TimelineSnapshot = {
+  clips: TimelineClip[];
+  tracks: TimelineTrack[];
+};
+
+const HISTORY_LIMIT = 50;
+const SNAP_THRESHOLD = 0.25;
+
+const cloneClips = (clips: TimelineClip[]) => clips.map(clip => ({
+  ...clip,
+  transform: clip.transform ? { ...clip.transform } : undefined,
+  color: clip.color ? { ...clip.color } : undefined,
+  audio: clip.audio ? { ...clip.audio } : undefined,
+  textData: clip.textData ? { ...clip.textData } : undefined,
+}));
+
+const cloneTracks = (tracks: TimelineTrack[]) => tracks.map(track => ({ ...track }));
+
+const makeSnapshot = (state: Pick<EditorState, 'clips' | 'tracks'>): TimelineSnapshot => ({
+  clips: cloneClips(state.clips),
+  tracks: cloneTracks(state.tracks),
+});
+
+const withHistory = (state: EditorState) => ({
+  historyPast: [...state.historyPast.slice(-HISTORY_LIMIT + 1), makeSnapshot(state)],
+  historyFuture: [],
+});
+
+const formatSrtTimestamp = (seconds: number): string => {
+  const safe = Math.max(0, seconds);
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const secs = Math.floor(safe % 60);
+  const millis = Math.floor((safe - Math.floor(safe)) * 1000);
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
+};
+
+const parseSrtTimestamp = (value: string): number => {
+  const match = value.trim().match(/(\d+):(\d+):(\d+)[,.](\d+)/);
+  if (!match) return 0;
+  const [, h, m, s, ms] = match;
+  return Number(h) * 3600 + Number(m) * 60 + Number(s) + Number(ms.padEnd(3, '0').slice(0, 3)) / 1000;
+};
+
+const parseSrt = (srt: string): CaptionSegment[] => {
+  return srt
+    .trim()
+    .split(/\n\s*\n/)
+    .map((block, blockIndex) => {
+      const lines = block.split(/\r?\n/).filter(Boolean);
+      const timeLineIndex = lines.findIndex(line => line.includes('-->'));
+      if (timeLineIndex === -1) return null;
+      const [startRaw, endRaw] = lines[timeLineIndex].split('-->').map(part => part.trim());
+      return {
+        id: `caption-${blockIndex + 1}`,
+        index: blockIndex + 1,
+        start: parseSrtTimestamp(startRaw),
+        end: parseSrtTimestamp(endRaw),
+        text: lines.slice(timeLineIndex + 1).join('\n'),
+      };
+    })
+    .filter((segment): segment is CaptionSegment => Boolean(segment));
+};
+
+const captionsToSrt = (captions: CaptionSegment[]) => captions.map((caption, index) => [
+  String(index + 1),
+  `${formatSrtTimestamp(caption.start)} --> ${formatSrtTimestamp(caption.end)}`,
+  caption.text.trim(),
+  '',
+].join('\n')).join('\n');
+
+const captionsToVtt = (captions: CaptionSegment[]) => `WEBVTT\n\n${captions.map(caption => [
+  `${formatSrtTimestamp(caption.start).replace(',', '.')} --> ${formatSrtTimestamp(caption.end).replace(',', '.')}`,
+  caption.text.trim(),
+  '',
+].join('\n')).join('\n')}`;
+
+const makeTextDownloadUrl = (text: string, type: string) => window.URL.createObjectURL(new Blob([text], { type }));
+
+const isTrackLocked = (tracks: TimelineTrack[], trackId: string) => Boolean(tracks.find(track => track.id === trackId)?.locked);
+
+const snapTime = (state: Pick<EditorState, 'clips' | 'playheadTime' | 'snapEnabled'>, time: number, movingClipId?: string): number => {
+  if (!state.snapEnabled) return Math.max(0, time);
+  const candidates = [0, state.playheadTime];
+  state.clips.forEach(clip => {
+    if (clip.id === movingClipId) return;
+    candidates.push(clip.startTime, clip.startTime + clip.duration);
+  });
+  const nearest = candidates.reduce((best, candidate) => {
+    return Math.abs(candidate - time) < Math.abs(best - time) ? candidate : best;
+  }, time);
+  return Math.max(0, Math.abs(nearest - time) <= SNAP_THRESHOLD ? nearest : time);
+};
+
 type EditorState = {
   // Media Pool
   assets: MediaAsset[];
@@ -26,6 +120,7 @@ type EditorState = {
   // Timeline Tracks
   tracks: TimelineTrack[];
   addTrack: (type: MediaType) => void;
+  updateTrack: (id: string, updates: Partial<Pick<TimelineTrack, 'muted' | 'solo' | 'locked'>>) => void;
 
   // Timeline Clips
   clips: TimelineClip[];
@@ -33,17 +128,24 @@ type EditorState = {
   setSelectedClip: (id: string | null) => void;
   zoom: number;
   setZoom: (zoom: number) => void;
+  snapEnabled: boolean;
+  toggleSnap: () => void;
   addAssetToTimeline: (asset: MediaAsset, trackId?: string, startTimeX?: number) => Promise<void>;
   addTextClip: (trackId: string, startTime: number, duration?: number) => void;
   removeClip: (id: string) => void;
   updateClipStartTime: (id: string, deltaX: number) => void;
   updateClipTrack: (id: string, trackId: string, deltaX: number) => void;
   trimClip: (id: string, newStartTime: number, newDuration: number, newMediaOffset: number) => void;
+  setClipTiming: (id: string, startTime: number, duration: number) => void;
   splitClip: (id: string, splitTime: number) => void;
   updateClipTransform: (id: string, transformData: Partial<TimelineClip['transform']>) => void;
   updateClipColor: (id: string, colorData: Partial<TimelineClip['color']>) => void;
   updateClipAudio: (id: string, audioData: Partial<TimelineClip['audio']>) => void;
   updateClipText: (id: string, textData: Partial<TextData>) => void;
+  undo: () => void;
+  redo: () => void;
+  historyPast: TimelineSnapshot[];
+  historyFuture: TimelineSnapshot[];
 
   // Playback
   isPlaying: boolean;
@@ -61,10 +163,17 @@ type EditorState = {
 
   // Export State
   isProcessing: boolean;
+  exportStatus: string | null;
+  exportAbortController: AbortController | null;
   srtContent: string | null;
   srtDownloadUrl: string | null;
+  vttDownloadUrl: string | null;
+  captions: CaptionSegment[];
   mediaUrl: string | null;
   exportSequence: () => Promise<void>;
+  cancelExport: () => void;
+  updateCaptionText: (id: string, text: string) => void;
+  createTextClipsFromCaptions: () => void;
 };
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -130,8 +239,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   // --- Timeline Tracks ---
   tracks: [
-    { id: 'v1', name: 'V1', type: 'visual', order: 0 },
-    { id: 'a1', name: 'A1', type: 'audio', order: 1 }
+    { id: 'v1', name: 'V1', type: 'visual', order: 0, muted: false, solo: false, locked: false },
+    { id: 'a1', name: 'A1', type: 'audio', order: 1, muted: false, solo: false, locked: false }
   ],
   addTrack: (type: MediaType) => {
     set(state => {
@@ -145,10 +254,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         id: Math.random().toString(36).substring(7),
         name: newName,
         type,
-        order: state.tracks.length
+        order: state.tracks.length,
+        muted: false,
+        solo: false,
+        locked: false
       };
-      return { tracks: [...state.tracks, newTrack] };
+      return { ...withHistory(state), tracks: [...state.tracks, newTrack] };
     });
+  },
+  updateTrack: (id, updates) => {
+    set(state => ({
+      ...withHistory(state),
+      tracks: state.tracks.map(track => track.id === id ? { ...track, ...updates } : track)
+    }));
   },
 
   // --- Timeline Clips ---
@@ -157,6 +275,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setSelectedClip: (id: string | null) => set({ selectedClipId: id }),
   zoom: 20,
   setZoom: (zoom) => set({ zoom }),
+  snapEnabled: true,
+  toggleSnap: () => set(state => ({ snapEnabled: !state.snapEnabled })),
+  historyPast: [],
+  historyFuture: [],
 
   addAssetToTimeline: async (asset: MediaAsset, trackId?: string, startTimeX?: number) => {
     const state = get();
@@ -176,6 +298,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const trackClips = state.clips.filter(c => c.trackId === targetTrackId);
       targetStartTime = trackClips.reduce((max, clip) => Math.max(max, clip.startTime + clip.duration), 0);
     }
+    targetStartTime = snapTime(state, targetStartTime);
 
     const newClip: TimelineClip = {
       id: Math.random().toString(36).substring(7),
@@ -190,7 +313,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       color: { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 },
       audio: { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 }
     };
-    set({ clips: [...state.clips, newClip] });
+    set({ ...withHistory(state), clips: [...state.clips, newClip] });
   },
 
   addTextClip: (trackId: string, startTime: number, duration: number = 5) => {
@@ -209,17 +332,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       audio: { volume: 0, mute: true, fadeIn: 0, fadeOut: 0 },
       textData: { ...DEFAULT_TEXT_DATA }
     };
-    set({ clips: [...state.clips, newClip], selectedClipId: newClip.id });
+    set({ ...withHistory(state), clips: [...state.clips, newClip], selectedClipId: newClip.id });
   },
 
-  removeClip: (id: string) => set(state => ({ clips: state.clips.filter(c => c.id !== id) })),
+  removeClip: (id: string) => set(state => {
+    const clip = state.clips.find(c => c.id === id);
+    if (!clip || isTrackLocked(state.tracks, clip.trackId)) return state;
+    return { ...withHistory(state), clips: state.clips.filter(c => c.id !== id) };
+  }),
 
   updateClipStartTime: (id: string, deltaX: number) => {
     set(state => ({
+      ...withHistory(state),
       clips: state.clips.map(clip => {
         if (clip.id === id) {
+          if (isTrackLocked(state.tracks, clip.trackId)) return clip;
           const timeDelta = deltaX / state.zoom;
-          return { ...clip, startTime: Math.max(0, clip.startTime + timeDelta) };
+          return { ...clip, startTime: snapTime(state, clip.startTime + timeDelta, id) };
         }
         return clip;
       })
@@ -228,10 +357,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   updateClipTrack: (id: string, trackId: string, deltaX: number) => {
     set(state => ({
+      ...withHistory(state),
       clips: state.clips.map(clip => {
         if (clip.id === id) {
+          if (isTrackLocked(state.tracks, clip.trackId) || isTrackLocked(state.tracks, trackId)) return clip;
           const timeDelta = deltaX / state.zoom;
-          return { ...clip, trackId, startTime: Math.max(0, clip.startTime + timeDelta) };
+          return { ...clip, trackId, startTime: snapTime(state, clip.startTime + timeDelta, id) };
         }
         return clip;
       })
@@ -240,13 +371,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   trimClip: (id: string, newStartTime: number, newDuration: number, newMediaOffset: number) => {
     set(state => ({
+      ...withHistory(state),
       clips: state.clips.map(clip => {
         if (clip.id === id) {
+          if (isTrackLocked(state.tracks, clip.trackId)) return clip;
+          const snappedStart = snapTime(state, newStartTime, id);
+          const startDelta = snappedStart - newStartTime;
           return {
             ...clip,
-            startTime: Math.max(0, newStartTime),
-            duration: Math.max(0.1, newDuration),
-            mediaOffset: Math.max(0, newMediaOffset)
+            startTime: snappedStart,
+            duration: Math.max(0.1, newDuration - startDelta),
+            mediaOffset: Math.max(0, newMediaOffset + startDelta)
+          };
+        }
+        return clip;
+      })
+    }));
+  },
+
+  setClipTiming: (id: string, startTime: number, duration: number) => {
+    set(state => ({
+      ...withHistory(state),
+      clips: state.clips.map(clip => {
+        if (clip.id === id) {
+          if (isTrackLocked(state.tracks, clip.trackId)) return clip;
+          return {
+            ...clip,
+            startTime: snapTime(state, startTime, id),
+            duration: Math.max(0.1, duration)
           };
         }
         return clip;
@@ -259,6 +411,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const clipIndex = state.clips.findIndex(c => c.id === id);
       if (clipIndex === -1) return state;
       const clip = state.clips[clipIndex];
+      if (isTrackLocked(state.tracks, clip.trackId)) return state;
       if (splitTime <= clip.startTime || splitTime >= clip.startTime + clip.duration) {
         alert('Playhead must be placed somewhere over the selected clip to split it.');
         return state;
@@ -274,14 +427,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       };
       const newClips = [...state.clips];
       newClips.splice(clipIndex, 1, clip1, clip2);
-      return { clips: newClips };
+      return { ...withHistory(state), clips: newClips };
     });
   },
 
   updateClipTransform: (id: string, transformData: Partial<TimelineClip['transform']>) => {
     set(state => ({
+      ...withHistory(state),
       clips: state.clips.map(clip => {
         if (clip.id === id) {
+          if (isTrackLocked(state.tracks, clip.trackId)) return clip;
           return {
             ...clip,
             transform: { ...(clip.transform || { scale: 100, rotation: 0, flipX: false, flipY: false }), ...transformData }
@@ -294,8 +449,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   updateClipColor: (id: string, colorData: Partial<TimelineClip['color']>) => {
     set(state => ({
+      ...withHistory(state),
       clips: state.clips.map(clip => {
         if (clip.id === id) {
+          if (isTrackLocked(state.tracks, clip.trackId)) return clip;
           return {
             ...clip,
             color: { ...(clip.color || { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 }), ...colorData }
@@ -308,8 +465,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   updateClipAudio: (id: string, audioData: Partial<TimelineClip['audio']>) => {
     set(state => ({
+      ...withHistory(state),
       clips: state.clips.map(clip => {
         if (clip.id === id) {
+          if (isTrackLocked(state.tracks, clip.trackId)) return clip;
           return {
             ...clip,
             audio: { ...(clip.audio || { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 }), ...audioData }
@@ -322,8 +481,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   updateClipText: (id: string, textData: Partial<TextData>) => {
     set(state => ({
+      ...withHistory(state),
       clips: state.clips.map(clip => {
         if (clip.id === id) {
+          if (isTrackLocked(state.tracks, clip.trackId)) return clip;
           return {
             ...clip,
             textData: { ...(clip.textData || DEFAULT_TEXT_DATA), ...textData }
@@ -332,6 +493,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         return clip;
       })
     }));
+  },
+
+  undo: () => {
+    set(state => {
+      const previous = state.historyPast[state.historyPast.length - 1];
+      if (!previous) return state;
+      return {
+        clips: cloneClips(previous.clips),
+        tracks: cloneTracks(previous.tracks),
+        historyPast: state.historyPast.slice(0, -1),
+        historyFuture: [makeSnapshot(state), ...state.historyFuture].slice(0, HISTORY_LIMIT),
+        selectedClipId: previous.clips.some(clip => clip.id === state.selectedClipId) ? state.selectedClipId : null,
+      };
+    });
+  },
+
+  redo: () => {
+    set(state => {
+      const next = state.historyFuture[0];
+      if (!next) return state;
+      return {
+        clips: cloneClips(next.clips),
+        tracks: cloneTracks(next.tracks),
+        historyPast: [...state.historyPast, makeSnapshot(state)].slice(-HISTORY_LIMIT),
+        historyFuture: state.historyFuture.slice(1),
+        selectedClipId: next.clips.some(clip => clip.id === state.selectedClipId) ? state.selectedClipId : null,
+      };
+    });
   },
 
   // --- Playback ---
@@ -343,29 +532,106 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   // --- Export Modal ---
   showExportModal: false,
-  exportSettings: { resolution: '1080p', aspectRatio: '16:9', quality: 'standard' },
+  exportSettings: { resolution: '1080p', aspectRatio: '16:9', quality: 'standard', format: 'video' },
   openExportModal: () => set({ showExportModal: true }),
   closeExportModal: () => set({ showExportModal: false }),
   setExportSettings: (settings) => set(state => ({ exportSettings: { ...state.exportSettings, ...settings } })),
 
   // --- Export ---
   isProcessing: false,
+  exportStatus: null,
+  exportAbortController: null,
   srtContent: null,
   srtDownloadUrl: null,
+  vttDownloadUrl: null,
+  captions: [],
   mediaUrl: null,
   exportSequence: async () => {
-    set({ isProcessing: true, showExportModal: false });
+    const abortController = new AbortController();
+    set({ isProcessing: true, exportStatus: 'Preparing export...', showExportModal: false, exportAbortController: abortController } as Partial<EditorState>);
     try {
       const state = get();
-      const data = await exportTimeline(state.clips, state.tracks, state.exportSettings);
-      const srtBlob = new Blob([data.srtContent], { type: 'text/plain' });
-      const srtUrl = window.URL.createObjectURL(srtBlob);
-      set({ srtContent: data.srtContent, mediaUrl: data.mediaUrl, srtDownloadUrl: srtUrl });
+      set({ exportStatus: 'Rendering media and transcribing audio...' });
+      const data = await exportTimeline(state.clips, state.tracks, state.exportSettings, abortController.signal);
+      const captions = parseSrt(data.srtContent);
+      const srtContent = captions.length > 0 ? captionsToSrt(captions) : data.srtContent;
+      const vttContent = captionsToVtt(captions);
+      const srtUrl = makeTextDownloadUrl(srtContent, 'text/plain');
+      const vttUrl = makeTextDownloadUrl(vttContent, 'text/vtt');
+      set({ captions, srtContent, mediaUrl: data.mediaUrl, srtDownloadUrl: srtUrl, vttDownloadUrl: vttUrl, exportStatus: 'Export complete.' });
     } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'An error occurred during export');
+      if (err.name === 'AbortError') {
+        set({ exportStatus: 'Export canceled.' });
+      } else {
+        console.error(err);
+        alert(err.message || 'An error occurred during export');
+        set({ exportStatus: 'Export failed.' });
+      }
     } finally {
-      set({ isProcessing: false });
+      set({ isProcessing: false, exportAbortController: null } as Partial<EditorState>);
     }
+  },
+  cancelExport: () => {
+    const controller = (get() as EditorState & { exportAbortController?: AbortController | null }).exportAbortController;
+    controller?.abort();
+    set({ isProcessing: false, exportStatus: 'Cancel requested.' });
+  },
+  updateCaptionText: (id: string, text: string) => {
+    set(state => {
+      const captions = state.captions.map(caption => caption.id === id ? { ...caption, text } : caption);
+      const srtContent = captionsToSrt(captions);
+      const vttContent = captionsToVtt(captions);
+      return {
+        captions,
+        srtContent,
+        srtDownloadUrl: makeTextDownloadUrl(srtContent, 'text/plain'),
+        vttDownloadUrl: makeTextDownloadUrl(vttContent, 'text/vtt'),
+      };
+    });
+  },
+  createTextClipsFromCaptions: () => {
+    set(state => {
+      if (state.captions.length === 0) return state;
+      let tracks = state.tracks;
+      let textTrack = tracks.find(track => track.type === 'text');
+      if (!textTrack) {
+        textTrack = {
+          id: Math.random().toString(36).substring(7),
+          name: 'T1',
+          type: 'text',
+          order: tracks.length,
+          muted: false,
+          solo: false,
+          locked: false,
+        };
+        tracks = [...tracks, textTrack];
+      }
+      const captionClips = state.captions.map(caption => {
+        const placeholderFile = new File([], 'caption-overlay.txt', { type: 'text/plain' });
+        return {
+          id: Math.random().toString(36).substring(7),
+          assetId: 'caption-' + Math.random().toString(36).substring(7),
+          trackId: textTrack.id,
+          file: placeholderFile,
+          type: 'text' as const,
+          duration: Math.max(0.1, caption.end - caption.start),
+          startTime: caption.start,
+          mediaOffset: 0,
+          audio: { volume: 0, mute: true, fadeIn: 0, fadeOut: 0 },
+          textData: {
+            ...DEFAULT_TEXT_DATA,
+            content: caption.text,
+            fontSize: 42,
+            bgOpacity: 0.45,
+          }
+        };
+      });
+      return {
+        ...withHistory(state),
+        tracks,
+        clips: [...state.clips, ...captionClips],
+        selectedClipId: captionClips[0]?.id ?? state.selectedClipId,
+      };
+    });
   }
 }));

@@ -15,6 +15,9 @@ export type TimelineTrack = {
   name: string;
   type: MediaType;
   order: number;
+  muted?: boolean;
+  solo?: boolean;
+  locked?: boolean;
 };
 
 export type TextData = {
@@ -66,4 +69,13 @@ export type ExportSettings = {
   resolution: '720p' | '1080p' | '4k';
   aspectRatio: '16:9' | '9:16' | '1:1';
   quality: 'high' | 'standard' | 'compressed';
+  format: 'video' | 'audio';
+};
+
+export type CaptionSegment = {
+  id: string;
+  index: number;
+  start: number;
+  end: number;
+  text: string;
 };

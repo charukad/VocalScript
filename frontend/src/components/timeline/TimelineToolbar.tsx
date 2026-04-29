@@ -1,7 +1,7 @@
 import { useEditorStore } from '../../store/editorStore';
 
 export const TimelineToolbar = () => {
-  const { zoom, setZoom, isPlaying, togglePlayback, playheadTime, selectedClipId, splitClip } = useEditorStore();
+  const { zoom, setZoom, isPlaying, togglePlayback, playheadTime, selectedClipId, splitClip, undo, redo, historyPast, historyFuture, snapEnabled, toggleSnap } = useEditorStore();
 
   const formatTime = (seconds: number): string => {
     const m = Math.floor(seconds / 60);
@@ -30,6 +30,16 @@ export const TimelineToolbar = () => {
           )}
         </button>
         <div className="toolbar-timecode">{formatTime(playheadTime)}</div>
+        <div className="toolbar-divider"></div>
+        <button className="btn-secondary toolbar-btn" onClick={undo} disabled={historyPast.length === 0} title="Undo (Cmd/Ctrl + Z)">
+          Undo
+        </button>
+        <button className="btn-secondary toolbar-btn" onClick={redo} disabled={historyFuture.length === 0} title="Redo (Cmd/Ctrl + Shift + Z)">
+          Redo
+        </button>
+        <button className={`btn-secondary toolbar-btn ${snapEnabled ? 'active' : ''}`} onClick={toggleSnap} title="Toggle Snapping">
+          Snap
+        </button>
         <div className="toolbar-divider"></div>
         <button className="btn-secondary toolbar-btn" onClick={() => useEditorStore.getState().addTrack('visual')}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
