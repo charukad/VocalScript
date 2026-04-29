@@ -1,8 +1,41 @@
-import type { TimelineClip, TimelineTrack, ExportSettings } from '../../types';
+import type {
+  TimelineClip,
+  TimelineTrack,
+  ExportSettings,
+  CaptionSegment,
+  GeneratedMediaType,
+  ProviderName,
+  StoryboardScene,
+  TranscriptSlice,
+} from '../../types';
 
 export type ExportResponse = {
   srtContent: string;
   mediaUrl: string;
+};
+
+export type TranscriptionResponse = {
+  segments: CaptionSegment[];
+  srtContent: string;
+  vttContent: string;
+  language: string;
+  duration: number;
+  sourceName: string;
+};
+
+export type StoryboardResponse = {
+  scenes: StoryboardScene[];
+  provider: ProviderName;
+  usedLlmMode: string;
+  transcript: string;
+  segments: TranscriptSlice[];
+  duration: number;
+};
+
+export type StoryboardGenerationOptions = {
+  provider: ProviderName;
+  preferredVisualType: GeneratedMediaType;
+  style: string;
 };
 
 const formatExportError = (detail: unknown): string => {
@@ -171,4 +204,84 @@ export const exportTimeline = async (
   // Ensure we format the local URL correctly
   data.mediaUrl = 'http://localhost:8000' + data.mediaUrl;
   return data;
+};
+
+export const transcribeMedia = async (
+  file: File,
+  signal?: AbortSignal
+): Promise<TranscriptionResponse> => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch('http://localhost:8000/api/transcribe', {
+    method: 'POST',
+    body: formData,
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    const detail = typeof errorData.detail === 'string' ? errorData.detail : 'Transcription failed';
+    throw new Error(detail);
+  }
+
+  return response.json();
+};
+
+const formatApiError = (detail: unknown, fallback: string): string => {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail)) return detail.map(item => item?.msg ?? String(item)).join(', ');
+  return fallback;
+};
+
+export const createStoryboardFromTranscript = async (
+  transcript: string,
+  segments: TranscriptSlice[],
+  options: StoryboardGenerationOptions,
+  signal?: AbortSignal
+): Promise<StoryboardResponse> => {
+  const response = await fetch('http://localhost:8000/api/generation/storyboard/from-transcript', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      transcript,
+      segments,
+      preferredVisualType: options.preferredVisualType,
+      style: options.style,
+      provider: options.provider,
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Storyboard generation failed'));
+  }
+
+  return response.json();
+};
+
+export const createStoryboardFromAudio = async (
+  file: File,
+  options: StoryboardGenerationOptions,
+  signal?: AbortSignal
+): Promise<StoryboardResponse> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('preferredVisualType', options.preferredVisualType);
+  formData.append('style', options.style);
+  formData.append('provider', options.provider);
+
+  const response = await fetch('http://localhost:8000/api/generation/storyboard/from-audio', {
+    method: 'POST',
+    body: formData,
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Storyboard generation failed'));
+  }
+
+  return response.json();
 };

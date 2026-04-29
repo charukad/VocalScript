@@ -1,7 +1,18 @@
 import { create } from 'zustand';
-import type { MediaAsset, TimelineClip, TimelineTrack, MediaType, TextData, ExportSettings, CaptionSegment, KeyframeProperty } from '../types';
+import type {
+  MediaAsset,
+  TimelineClip,
+  TimelineTrack,
+  MediaType,
+  TextData,
+  ExportSettings,
+  CaptionSegment,
+  KeyframeProperty,
+  StoryboardScene,
+  StoryboardSettings,
+} from '../types';
 import { getMediaDuration, generateThumbnail, generateWaveform, generateFilmstrip } from '../lib/utils/media';
-import { exportTimeline } from '../lib/api/client';
+import { createStoryboardFromAudio, createStoryboardFromTranscript, exportTimeline, transcribeMedia } from '../lib/api/client';
 import { clampKeyframeTime, getClipPropertyValue, getKeyframedValue } from '../lib/utils/keyframes';
 
 const DEFAULT_TEXT_DATA: TextData = {
@@ -16,6 +27,19 @@ const DEFAULT_TEXT_DATA: TextData = {
   y: 85,
   bgColor: '#000000',
   bgOpacity: 0,
+};
+
+const DEFAULT_STORYBOARD_SETTINGS: StoryboardSettings = {
+  sourceMediaId: null,
+  provider: 'meta',
+  visualType: 'image',
+  style: 'cinematic realistic',
+};
+
+type StoryboardSource = {
+  id: string;
+  file: File;
+  name: string;
 };
 
 type TimelineSnapshot = {
@@ -100,6 +124,14 @@ const makeTextDownloadUrl = (text: string, type: string) => window.URL.createObj
 
 const isTrackLocked = (tracks: TimelineTrack[], trackId: string) => Boolean(tracks.find(track => track.id === trackId)?.locked);
 
+const hasPlayableAudioSource = (clip: TimelineClip): boolean => {
+  if (clip.type === 'audio') return true;
+  if (clip.type !== 'visual') return false;
+  const fileType = clip.file.type.toLowerCase();
+  const fileName = clip.file.name.toLowerCase();
+  return !(fileType.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|bmp|svg)$/i.test(fileName));
+};
+
 const snapTime = (state: Pick<EditorState, 'clips' | 'playheadTime' | 'snapEnabled'>, time: number, movingClipId?: string): number => {
   if (!state.snapEnabled) return Math.max(0, time);
   const candidates = [0, state.playheadTime];
@@ -113,7 +145,7 @@ const snapTime = (state: Pick<EditorState, 'clips' | 'playheadTime' | 'snapEnabl
   return Math.max(0, Math.abs(nearest - time) <= SNAP_THRESHOLD ? nearest : time);
 };
 
-type EditorState = {
+export type EditorState = {
   // Media Pool
   assets: MediaAsset[];
   addAssets: (files: File[]) => Promise<void>;
@@ -176,9 +208,85 @@ type EditorState = {
   captions: CaptionSegment[];
   mediaUrl: string | null;
   exportSequence: () => Promise<void>;
+  transcribeSelectedMedia: () => Promise<void>;
   cancelExport: () => void;
   updateCaptionText: (id: string, text: string) => void;
   createTextClipsFromCaptions: () => void;
+
+  // Auto Video Storyboard
+  storyboardSettings: StoryboardSettings;
+  storyboardScenes: StoryboardScene[];
+  isGeneratingStoryboard: boolean;
+  storyboardStatus: string | null;
+  setStoryboardSettings: (settings: Partial<StoryboardSettings>) => void;
+  generateStoryboard: () => Promise<void>;
+  updateStoryboardScene: (id: string, updates: Partial<StoryboardScene>) => void;
+  addStoryboardScene: () => void;
+  duplicateStoryboardScene: (id: string) => void;
+  deleteStoryboardScene: (id: string) => void;
+  approveStoryboard: () => void;
+};
+
+const getTranscriptSourceClip = (state: Pick<EditorState, 'clips' | 'selectedClipId'>): TimelineClip | null => {
+  const selectedClip = state.clips.find(clip => clip.id === state.selectedClipId);
+  if (selectedClip && hasPlayableAudioSource(selectedClip)) return selectedClip;
+  return state.clips.find(hasPlayableAudioSource) ?? null;
+};
+
+const hasPlayableAssetSource = (asset: MediaAsset): boolean => asset.mediaKind === 'audio' || asset.mediaKind === 'video';
+
+export const getStoryboardSources = (state: Pick<EditorState, 'assets' | 'clips'>): StoryboardSource[] => {
+  const clipSources = state.clips
+    .filter(hasPlayableAudioSource)
+    .map(clip => ({
+      id: `clip:${clip.id}`,
+      file: clip.file,
+      name: `Timeline: ${clip.file.name}`,
+    }));
+  const clipAssetIds = new Set(state.clips.map(clip => clip.assetId));
+  const assetSources = state.assets
+    .filter(asset => hasPlayableAssetSource(asset) && !clipAssetIds.has(asset.id))
+    .map(asset => ({
+      id: `asset:${asset.id}`,
+      file: asset.file,
+      name: `Media Pool: ${asset.file.name}`,
+    }));
+  return [...clipSources, ...assetSources];
+};
+
+const getConfiguredStoryboardSource = (
+  state: Pick<EditorState, 'assets' | 'clips' | 'selectedClipId' | 'storyboardSettings'>
+): StoryboardSource | null => {
+  const sources = getStoryboardSources(state);
+  const configuredSource = state.storyboardSettings.sourceMediaId
+    ? sources.find(source => source.id === state.storyboardSettings.sourceMediaId)
+    : null;
+  if (configuredSource) return configuredSource;
+
+  const selectedClip = getTranscriptSourceClip(state);
+  if (selectedClip) {
+    return {
+      id: `clip:${selectedClip.id}`,
+      file: selectedClip.file,
+      name: `Timeline: ${selectedClip.file.name}`,
+    };
+  }
+
+  return sources[0] ?? null;
+};
+
+const normalizeStoryboardScenes = (scenes: StoryboardScene[], fallback: StoryboardSettings): StoryboardScene[] => {
+  return scenes.map((scene, index) => ({
+    ...scene,
+    id: scene.id || `scene-${index + 1}`,
+    start: Number(scene.start.toFixed(3)),
+    end: Number(Math.max(scene.start + 0.1, scene.end).toFixed(3)),
+    visualType: scene.visualType || fallback.visualType,
+    negativePrompt: scene.negativePrompt || 'low quality, blurry, distorted, watermark, readable text',
+    style: scene.style || fallback.style,
+    camera: scene.camera || (scene.visualType === 'video' ? 'slow cinematic push-in' : 'static'),
+    status: scene.status || 'draft',
+  }));
 };
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -633,6 +741,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   vttDownloadUrl: null,
   captions: [],
   mediaUrl: null,
+  storyboardSettings: DEFAULT_STORYBOARD_SETTINGS,
+  storyboardScenes: [],
+  isGeneratingStoryboard: false,
+  storyboardStatus: null,
   exportSequence: async () => {
     const abortController = new AbortController();
     set({ isProcessing: true, exportStatus: 'Preparing export...', showExportModal: false, exportAbortController: abortController } as Partial<EditorState>);
@@ -653,6 +765,50 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         console.error(err);
         alert(err.message || 'An error occurred during export');
         set({ exportStatus: 'Export failed.' });
+      }
+    } finally {
+      set({ isProcessing: false, exportAbortController: null } as Partial<EditorState>);
+    }
+  },
+  transcribeSelectedMedia: async () => {
+    const state = get();
+    const sourceClip = getTranscriptSourceClip(state);
+    if (!sourceClip) {
+      alert('Add or select an audio/video clip to generate a transcript.');
+      return;
+    }
+
+    const abortController = new AbortController();
+    set({
+      isProcessing: true,
+      exportStatus: `Transcribing ${sourceClip.file.name}...`,
+      exportAbortController: abortController,
+      mediaUrl: null,
+    } as Partial<EditorState>);
+
+    try {
+      const data = await transcribeMedia(sourceClip.file, abortController.signal);
+      const captions = data.segments.map((segment, index) => ({
+        ...segment,
+        id: segment.id || `caption-${index + 1}`,
+        index: index + 1,
+      }));
+      const srtContent = captions.length > 0 ? captionsToSrt(captions) : data.srtContent;
+      const vttContent = captions.length > 0 ? captionsToVtt(captions) : data.vttContent;
+      set({
+        captions,
+        srtContent,
+        srtDownloadUrl: makeTextDownloadUrl(srtContent, 'text/plain'),
+        vttDownloadUrl: makeTextDownloadUrl(vttContent, 'text/vtt'),
+        exportStatus: captions.length > 0 ? 'Transcript ready.' : 'No speech found in this media.',
+      });
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        set({ exportStatus: 'Transcript canceled.' });
+      } else {
+        console.error(err);
+        alert(err.message || 'An error occurred during transcription');
+        set({ exportStatus: 'Transcript failed.' });
       }
     } finally {
       set({ isProcessing: false, exportAbortController: null } as Partial<EditorState>);
@@ -721,5 +877,138 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         selectedClipId: captionClips[0]?.id ?? state.selectedClipId,
       };
     });
+  },
+
+  setStoryboardSettings: (settings) => {
+    set(state => ({
+      storyboardSettings: { ...state.storyboardSettings, ...settings },
+    }));
+  },
+  generateStoryboard: async () => {
+    const state = get();
+    const settings = state.storyboardSettings;
+    const source = getConfiguredStoryboardSource(state);
+    const timedSegments = state.captions
+      .filter(caption => caption.text.trim())
+      .map(caption => ({
+        start: caption.start,
+        end: caption.end,
+        text: caption.text.trim(),
+      }));
+    const transcript = timedSegments.map(segment => segment.text).join(' ').trim();
+
+    if (!transcript && !source) {
+      alert('Generate a transcript or select an audio/video clip first.');
+      return;
+    }
+
+    set({
+      isGeneratingStoryboard: true,
+      storyboardStatus: transcript ? 'Generating storyboard from captions...' : `Transcribing and planning ${source?.file.name}...`,
+    } as Partial<EditorState>);
+
+    try {
+      const response = transcript
+        ? await createStoryboardFromTranscript(
+            transcript,
+            timedSegments,
+            {
+              provider: settings.provider,
+              preferredVisualType: settings.visualType,
+              style: settings.style,
+            }
+          )
+        : await createStoryboardFromAudio(
+            source!.file,
+            {
+              provider: settings.provider,
+              preferredVisualType: settings.visualType,
+              style: settings.style,
+            }
+          );
+
+      const scenes = normalizeStoryboardScenes(response.scenes, settings);
+      set({
+        storyboardScenes: scenes,
+        storyboardSettings: {
+          ...settings,
+          sourceMediaId: source?.id ?? settings.sourceMediaId,
+        },
+        storyboardStatus: `Storyboard ready: ${scenes.length} scenes (${response.usedLlmMode}).`,
+      });
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Storyboard generation failed');
+      set({ storyboardStatus: 'Storyboard generation failed.' });
+    } finally {
+      set({ isGeneratingStoryboard: false } as Partial<EditorState>);
+    }
+  },
+  updateStoryboardScene: (id, updates) => {
+    set(state => ({
+      storyboardScenes: state.storyboardScenes.map(scene => {
+        if (scene.id !== id) return scene;
+        const next = { ...scene, ...updates };
+        if (updates.start !== undefined || updates.end !== undefined) {
+          next.start = Math.max(0, Number(next.start) || 0);
+          next.end = Math.max(next.start + 0.1, Number(next.end) || next.start + 0.1);
+        }
+        return next;
+      }),
+      storyboardStatus: 'Storyboard edited.',
+    }));
+  },
+  addStoryboardScene: () => {
+    set(state => {
+      const previous = state.storyboardScenes[state.storyboardScenes.length - 1];
+      const start = previous ? previous.end : 0;
+      const duration = previous ? Math.max(0.1, previous.end - previous.start) : 5;
+      const newScene: StoryboardScene = {
+        id: `scene-${Math.random().toString(36).substring(7)}`,
+        start: Number(start.toFixed(3)),
+        end: Number((start + duration).toFixed(3)),
+        transcript: '',
+        visualType: state.storyboardSettings.visualType,
+        prompt: `${state.storyboardSettings.style}, clear visual scene for this part of the narration.`,
+        negativePrompt: 'low quality, blurry, distorted, watermark, readable text',
+        style: state.storyboardSettings.style,
+        camera: state.storyboardSettings.visualType === 'video' ? 'slow cinematic push-in' : 'static',
+        status: 'draft',
+      };
+      return {
+        storyboardScenes: [...state.storyboardScenes, newScene],
+        storyboardStatus: 'Scene added.',
+      };
+    });
+  },
+  duplicateStoryboardScene: (id) => {
+    set(state => {
+      const sceneIndex = state.storyboardScenes.findIndex(scene => scene.id === id);
+      if (sceneIndex === -1) return state;
+      const scene = state.storyboardScenes[sceneIndex];
+      const duration = Math.max(0.1, scene.end - scene.start);
+      const duplicate: StoryboardScene = {
+        ...scene,
+        id: `scene-${Math.random().toString(36).substring(7)}`,
+        start: Number(scene.end.toFixed(3)),
+        end: Number((scene.end + duration).toFixed(3)),
+        status: 'draft',
+      };
+      const storyboardScenes = [...state.storyboardScenes];
+      storyboardScenes.splice(sceneIndex + 1, 0, duplicate);
+      return { storyboardScenes, storyboardStatus: 'Scene duplicated.' };
+    });
+  },
+  deleteStoryboardScene: (id) => {
+    set(state => ({
+      storyboardScenes: state.storyboardScenes.filter(scene => scene.id !== id),
+      storyboardStatus: 'Scene deleted.',
+    }));
+  },
+  approveStoryboard: () => {
+    set(state => ({
+      storyboardScenes: state.storyboardScenes.map(scene => ({ ...scene, status: 'approved' })),
+      storyboardStatus: 'Storyboard approved. Ready for generation queue.',
+    }));
   }
 }));

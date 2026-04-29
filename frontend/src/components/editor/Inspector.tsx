@@ -1,5 +1,6 @@
 import { useEditorStore } from '../../store/editorStore';
 import type { KeyframeProperty } from '../../types';
+import { AutoGeneratePanel } from './AutoGeneratePanel';
 
 type KeyframeMeta = {
   label: string;
@@ -48,6 +49,7 @@ export const Inspector = () => {
     captions,
     updateCaptionText,
     createTextClipsFromCaptions,
+    transcribeSelectedMedia,
     playheadTime,
     addKeyframe,
     updateKeyframe,
@@ -60,6 +62,13 @@ export const Inspector = () => {
     ? Math.max(0, Math.min(selectedClip.duration, playheadTime - selectedClip.startTime))
     : 0;
   const hasPlayableAudio = Boolean(selectedClip && (selectedClip.type === 'audio' || (selectedClip.type === 'visual' && !selectedClip.file.type.startsWith('image'))));
+  const hasTranscriptSource = clips.some(clip => {
+    if (clip.type === 'audio') return true;
+    if (clip.type !== 'visual') return false;
+    const fileType = clip.file.type.toLowerCase();
+    const fileName = clip.file.name.toLowerCase();
+    return !(fileType.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|bmp|svg)$/i.test(fileName));
+  });
   const keyframeProperties: KeyframeProperty[] = selectedClip
     ? [
         ...(selectedClip.type === 'visual' ? (['scale', 'rotation'] as KeyframeProperty[]) : []),
@@ -109,6 +118,8 @@ export const Inspector = () => {
             </div>
           </>
         )}
+
+        <AutoGeneratePanel />
 
         {/* Clip Properties */}
         {selectedClip && (
@@ -567,14 +578,23 @@ export const Inspector = () => {
           </div>
         )}
 
-        {/* Export Section */}
+        {/* Transcript and Export Section */}
         <div style={{ marginTop: 'auto', paddingTop: '1.5rem' }}>
-          <div className="inspector-section-title">Export</div>
+          <div className="inspector-section-title">Transcript</div>
           {exportStatus && (
             <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', textAlign: 'center' }}>
               {exportStatus}
             </div>
           )}
+          <button
+            className="btn-secondary"
+            style={{ width: '100%', padding: '0.55rem', marginBottom: '0.5rem' }}
+            onClick={transcribeSelectedMedia}
+            disabled={isProcessing || !hasTranscriptSource}
+            title={hasTranscriptSource ? 'Generate transcript from selected or first audio/video clip' : 'Add an audio or video clip first'}
+          >
+            {isProcessing ? 'Processing...' : 'Generate Transcript'}
+          </button>
           {srtDownloadUrl && (
             <a href={srtDownloadUrl} download="subtitles.srt" style={{ textDecoration: 'none' }}>
               <button className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
@@ -594,6 +614,7 @@ export const Inspector = () => {
               </button>
             </a>
           )}
+          <div className="inspector-section-title" style={{ marginTop: '0.9rem' }}>Export</div>
           <button
             className="btn-primary"
             style={{ width: '100%', padding: '0.6rem' }}
@@ -604,7 +625,7 @@ export const Inspector = () => {
           </button>
           {isProcessing && (
             <button className="btn-secondary" style={{ width: '100%', padding: '0.55rem', marginTop: '0.5rem' }} onClick={cancelExport}>
-              Cancel Export
+              Cancel
             </button>
           )}
         </div>

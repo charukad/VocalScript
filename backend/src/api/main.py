@@ -4,13 +4,16 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import logging
+import os
+import shutil
+import tempfile
 from pydantic import ValidationError
 
 from backend.src.domain.models.blueprint import TimelineBlueprint
 from backend.src.infrastructure.ffmpeg_compiler import FFmpegMediaCompiler
 from backend.src.infrastructure.faster_whisper_service import FasterWhisperService
 from backend.src.infrastructure.local_llm_service import LocalLLMService
-from backend.src.domain.services.export_orchestrator import ExportOrchestrator
+from backend.src.domain.services.export_orchestrator import ExportOrchestrator, generate_srt
 from backend.src.domain.services.storyboard_service import StoryboardService
 from backend.src.api.generation import build_generation_router
 from backend.src.config import settings
@@ -34,6 +37,68 @@ orchestrator = ExportOrchestrator(compiler, whisper_engine)
 local_llm_service = LocalLLMService(settings.llm)
 storyboard_service = StoryboardService(local_llm_service)
 app.include_router(build_generation_router(storyboard_service, whisper_engine))
+
+def _format_vtt_timestamp(seconds: float) -> str:
+    safe = max(0.0, seconds)
+    hours = int(safe // 3600)
+    minutes = int((safe % 3600) // 60)
+    secs = int(safe % 60)
+    millis = int((safe - int(safe)) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+def generate_vtt(segments) -> str:
+    lines = ["WEBVTT", ""]
+    for segment in segments:
+        start_time = _format_vtt_timestamp(segment.start)
+        end_time = _format_vtt_timestamp(segment.end)
+        lines.append(f"{start_time} --> {end_time}")
+        lines.append(segment.text.strip())
+        lines.append("")
+    return "\n".join(lines)
+
+@app.post("/api/transcribe")
+async def transcribe_media(file: UploadFile = File(...)):
+    """
+    Generate transcript/captions from one uploaded audio or video file without exporting media.
+    """
+    original_name = file.filename or "media"
+    suffix = os.path.splitext(original_name)[1] or ".media"
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix="neuralscribe_transcribe_")
+    temp_path = temp_file.name
+    temp_file.close()
+
+    try:
+        with open(temp_path, "wb") as output:
+            shutil.copyfileobj(file.file, output)
+
+        transcription_result = whisper_engine.transcribe(temp_path)
+        segments = [
+            {
+                "id": f"caption-{index}",
+                "index": index,
+                "start": segment.start,
+                "end": segment.end,
+                "text": segment.text.strip(),
+            }
+            for index, segment in enumerate(transcription_result.segments, 1)
+        ]
+
+        return JSONResponse(content={
+            "segments": segments,
+            "srtContent": generate_srt(transcription_result.segments),
+            "vttContent": generate_vtt(transcription_result.segments),
+            "language": transcription_result.language,
+            "duration": transcription_result.duration,
+            "sourceName": original_name,
+        })
+    except Exception as e:
+        logger.exception("Transcription failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
 
 @app.post("/api/export")
 async def export_sequence(

@@ -160,9 +160,42 @@ The storyboard engine should support three levels:
 
 1. Local LLM mode with Ollama.
 2. Local LLM mode with LM Studio or another OpenAI-compatible local server.
-3. Rule-based fallback when no local LLM is available.
+3. Optional OpenRouter mode using free models when the user provides their own API key.
+4. Optional Google Gemini mode when the user provides their own Gemini API key.
+5. Rule-based fallback when no LLM is available.
 
-Rule-based fallback is important. It lets the feature work even on machines that cannot run a good local model.
+Rule-based fallback is important. It lets the feature work even on machines that cannot run a good local model and when no API key is configured.
+
+### Optional OpenRouter Setup
+
+OpenRouter support must use environment variables. Do not hardcode API keys in source files.
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env`:
+
+```text
+NEURALSCRIBE_LLM_MODE=openrouter
+NEURALSCRIBE_OPENROUTER_API_KEY=your-rotated-openrouter-key
+NEURALSCRIBE_OPENROUTER_MODEL=google/gemma-4-31b-it:free
+NEURALSCRIBE_OPENROUTER_REASONING=true
+```
+
+If no OpenRouter key is configured, the app falls back to rule-based storyboarding.
+
+### Optional Gemini Setup
+
+Gemini support must use environment variables. Do not hardcode API keys in source files.
+
+```text
+NEURALSCRIBE_LLM_MODE=gemini
+GEMINI_API_KEY=your-gemini-key
+NEURALSCRIBE_GEMINI_MODEL=gemini-3-flash-preview
+```
+
+If no Gemini key is configured, the app falls back to rule-based storyboarding.
 
 ### Suggested Local LLM Prompt Contract
 

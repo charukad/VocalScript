@@ -535,6 +535,131 @@
   font-size: 0.78rem;
 }
 
+.auto-generate-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.auto-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.auto-row-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.auto-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.auto-field span,
+.auto-status,
+.storyboard-count {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+}
+
+.auto-field input,
+.auto-field select,
+.auto-field textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 0.35rem 0.4rem;
+  background: var(--surface-3);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.72rem;
+}
+
+.auto-field textarea {
+  resize: vertical;
+  line-height: 1.35;
+}
+
+.auto-status {
+  text-align: center;
+  line-height: 1.35;
+}
+
+.storyboard-toolbar,
+.storyboard-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.storyboard-toolbar .btn-secondary,
+.storyboard-actions .btn-secondary {
+  padding: 0.35rem 0.45rem;
+  font-size: 0.68rem;
+}
+
+.storyboard-actions .danger {
+  color: var(--error-color);
+}
+
+.storyboard-count {
+  text-align: center;
+}
+
+.storyboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-height: 470px;
+  overflow-y: auto;
+  padding-right: 0.1rem;
+}
+
+.storyboard-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: var(--surface-3);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.55rem;
+}
+
+.storyboard-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-highlight);
+}
+
+.storyboard-status {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.12rem 0.35rem;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.storyboard-status.status-approved {
+  color: var(--success-color);
+  border-color: rgba(137, 209, 133, 0.45);
+}
+
 /* ==========================================
    TIMELINE
    ========================================== */

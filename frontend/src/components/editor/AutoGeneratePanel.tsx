@@ -1,0 +1,213 @@
+import { getStoryboardSources, useEditorStore } from '../../store/editorStore';
+import type { GeneratedMediaType, ProviderName, StoryboardScene } from '../../types';
+
+const STYLE_OPTIONS = [
+  'cinematic realistic',
+  'documentary natural',
+  'animated explainer',
+  'vertical social video',
+  'product commercial',
+  'moody sci-fi',
+];
+
+const formatSeconds = (seconds: number): string => `${Number(seconds.toFixed(2))}s`;
+
+const providerOptions: { value: ProviderName; label: string }[] = [
+  { value: 'meta', label: 'Meta' },
+  { value: 'grok', label: 'Grok' },
+];
+
+const mediaTypeOptions: { value: GeneratedMediaType; label: string }[] = [
+  { value: 'image', label: 'Image' },
+  { value: 'video', label: 'Video' },
+];
+
+type SceneField = keyof Pick<StoryboardScene, 'start' | 'end' | 'transcript' | 'prompt' | 'visualType' | 'camera'>;
+
+export const AutoGeneratePanel = () => {
+  const state = useEditorStore();
+  const {
+    captions,
+    storyboardSettings,
+    setStoryboardSettings,
+    storyboardScenes,
+    isGeneratingStoryboard,
+    storyboardStatus,
+    generateStoryboard,
+    updateStoryboardScene,
+    addStoryboardScene,
+    duplicateStoryboardScene,
+    deleteStoryboardScene,
+    approveStoryboard,
+  } = state;
+
+  const sources = getStoryboardSources(state);
+  const configuredSourceExists = sources.some(source => source.id === storyboardSettings.sourceMediaId);
+  const selectedSourceId = configuredSourceExists ? storyboardSettings.sourceMediaId ?? '' : sources[0]?.id ?? '';
+  const hasTranscript = captions.some(caption => caption.text.trim());
+  const canGenerate = hasTranscript || sources.length > 0;
+  const approvedCount = storyboardScenes.filter(scene => scene.status === 'approved').length;
+
+  const updateScene = (id: string, field: SceneField, value: string) => {
+    if (field === 'start' || field === 'end') {
+      updateStoryboardScene(id, { [field]: Number(value) || 0 });
+      return;
+    }
+    updateStoryboardScene(id, { [field]: value } as Partial<StoryboardScene>);
+  };
+
+  return (
+    <div className="inspector-section auto-generate-panel">
+      <div className="inspector-section-title">Auto Generate Video</div>
+
+      <div className="auto-grid">
+        <label className="auto-field">
+          <span>Source</span>
+          <select
+            value={selectedSourceId}
+            onChange={event => setStoryboardSettings({ sourceMediaId: event.target.value || null })}
+            disabled={sources.length === 0}
+          >
+            {sources.length === 0 ? (
+              <option value="">No audio/video source</option>
+            ) : sources.map(source => (
+              <option key={source.id} value={source.id}>{source.name}</option>
+            ))}
+          </select>
+        </label>
+
+        <div className="auto-row-2">
+          <label className="auto-field">
+            <span>Provider</span>
+            <select
+              value={storyboardSettings.provider}
+              onChange={event => setStoryboardSettings({ provider: event.target.value as ProviderName })}
+            >
+              {providerOptions.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="auto-field">
+            <span>Type</span>
+            <select
+              value={storyboardSettings.visualType}
+              onChange={event => setStoryboardSettings({ visualType: event.target.value as GeneratedMediaType })}
+            >
+              {mediaTypeOptions.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <label className="auto-field">
+          <span>Style</span>
+          <select
+            value={storyboardSettings.style}
+            onChange={event => setStoryboardSettings({ style: event.target.value })}
+          >
+            {STYLE_OPTIONS.map(style => (
+              <option key={style} value={style}>{style}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <button
+        className="btn-primary"
+        style={{ width: '100%', padding: '0.55rem', marginTop: '0.65rem' }}
+        onClick={generateStoryboard}
+        disabled={isGeneratingStoryboard || !canGenerate}
+      >
+        {isGeneratingStoryboard ? 'Generating...' : 'Generate Storyboard'}
+      </button>
+
+      {storyboardStatus && (
+        <div className="auto-status">{storyboardStatus}</div>
+      )}
+
+      {storyboardScenes.length > 0 && (
+        <>
+          <div className="storyboard-toolbar">
+            <button className="btn-secondary" onClick={addStoryboardScene}>Add Scene</button>
+            <button className="btn-secondary" onClick={approveStoryboard}>Approve</button>
+          </div>
+          <div className="storyboard-count">
+            {storyboardScenes.length} scenes - {approvedCount} approved
+          </div>
+
+          <div className="storyboard-list">
+            {storyboardScenes.map((scene, index) => (
+              <div key={scene.id} className="storyboard-card">
+                <div className="storyboard-card-header">
+                  <span>Scene {index + 1}</span>
+                  <span className={`storyboard-status status-${scene.status}`}>{scene.status}</span>
+                </div>
+
+                <div className="auto-row-2">
+                  <label className="auto-field">
+                    <span>Start</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={Number(scene.start.toFixed(2))}
+                      onChange={event => updateScene(scene.id, 'start', event.target.value)}
+                    />
+                  </label>
+                  <label className="auto-field">
+                    <span>End</span>
+                    <input
+                      type="number"
+                      min={0.1}
+                      step={0.1}
+                      value={Number(scene.end.toFixed(2))}
+                      onChange={event => updateScene(scene.id, 'end', event.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <label className="auto-field">
+                  <span>Media</span>
+                  <select
+                    value={scene.visualType}
+                    onChange={event => updateScene(scene.id, 'visualType', event.target.value)}
+                  >
+                    {mediaTypeOptions.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="auto-field">
+                  <span>Prompt</span>
+                  <textarea
+                    rows={3}
+                    value={scene.prompt}
+                    onChange={event => updateScene(scene.id, 'prompt', event.target.value)}
+                  />
+                </label>
+
+                <label className="auto-field">
+                  <span>Transcript - {formatSeconds(scene.start)} - {formatSeconds(scene.end)}</span>
+                  <textarea
+                    rows={2}
+                    value={scene.transcript}
+                    onChange={event => updateScene(scene.id, 'transcript', event.target.value)}
+                  />
+                </label>
+
+                <div className="storyboard-actions">
+                  <button className="btn-secondary" onClick={() => duplicateStoryboardScene(scene.id)}>Duplicate</button>
+                  <button className="btn-secondary danger" onClick={() => deleteStoryboardScene(scene.id)}>Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};

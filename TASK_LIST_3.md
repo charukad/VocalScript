@@ -22,35 +22,48 @@ Manual tests after Phase 1:
 - [x] Add transcript-to-scenes rule-based storyboard service.
 - [x] Add optional Ollama local LLM service.
 - [x] Add optional LM Studio/OpenAI-compatible local server support.
+- [x] Add optional OpenRouter free-model support through environment variables.
+- [x] Add optional Gemini support through environment variables.
 - [x] Add JSON validation and timing repair for LLM output.
 - [x] Add endpoint to create storyboard from existing transcript.
 - [x] Add endpoint to create storyboard from audio/transcription result.
+- [x] Add transcript-only endpoint that does not export media.
 
 Manual tests after Phase 2:
 
 - [ ] Import audio.
 - [ ] Generate or reuse transcript.
+- [ ] Generate transcript without exporting audio or video.
 - [ ] Create storyboard scenes.
 - [ ] Confirm scene start/end times are valid.
 - [ ] Confirm prompts are readable and match the transcript.
 - [ ] Test fallback mode with no local LLM running.
+- [ ] Test OpenRouter mode with a rotated key stored in `.env`.
+- [ ] Test Gemini mode with `GEMINI_API_KEY` stored in `.env`.
 
 ## Phase 3: Storyboard Frontend UI
 
-- [ ] Add Auto Generate Video panel.
-- [ ] Add source audio selector.
-- [ ] Add provider selector.
-- [ ] Add media type selector.
-- [ ] Add visual style selector.
-- [ ] Add storyboard generation button.
-- [ ] Add editable scene list.
-- [ ] Add add/delete/duplicate scene actions.
-- [ ] Add approve storyboard action.
+- [x] Add Auto Generate Video panel.
+- [x] Add source audio selector.
+- [x] Add provider selector.
+- [x] Add media type selector.
+- [x] Add visual style selector.
+- [x] Add storyboard generation button.
+- [x] Add editable scene list.
+- [x] Add add/delete/duplicate scene actions.
+- [x] Add approve storyboard action.
+- [x] Add transcript-only action in the inspector.
+- [x] Reuse transcript results for SRT/VTT downloads and editable captions.
+- [x] Allow transcript captions to become timeline text clips.
 
 Manual tests after Phase 3:
 
 - [ ] Open Auto Generate Video panel.
 - [ ] Select an audio clip.
+- [ ] Click Generate Transcript without opening export.
+- [ ] Download SRT and VTT from the transcript result.
+- [ ] Edit one caption and confirm downloads update.
+- [ ] Add transcript captions to the timeline.
 - [ ] Generate storyboard.
 - [ ] Edit a scene prompt.
 - [ ] Add a scene.
@@ -200,7 +213,7 @@ Manual tests after Phase 10:
 
 - [x] Phase 1: Contracts And Architecture
 - [x] Phase 2: Storyboard Backend MVP
-- [ ] Phase 3: Storyboard Frontend UI
+- [x] Phase 3: Storyboard Frontend UI
 - [ ] Phase 4: Generation Queue Backend
 - [ ] Phase 5: Chrome Extension Bridge MVP
 - [ ] Phase 6: Provider Adapter MVP

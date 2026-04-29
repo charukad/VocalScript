@@ -12,7 +12,7 @@ const formatTimecode = (seconds: number): string => {
 };
 
 export const PreviewWindow = () => {
-  const { clips, tracks, playheadTime, setPlayheadTime, isPlaying, isProcessing, srtContent, mediaUrl, togglePlayback, setIsPlaying } = useEditorStore();
+  const { clips, tracks, playheadTime, setPlayheadTime, isPlaying, isProcessing, exportStatus, srtContent, mediaUrl, togglePlayback, setIsPlaying } = useEditorStore();
   
   const animationRef = useRef<number | null>(null);
   const lastUpdateRef = useRef<number>(0);
@@ -189,7 +189,7 @@ export const PreviewWindow = () => {
         {isProcessing ? (
           <div className="status-indicator">
             <div className="spinner"></div>
-            <div style={{ color: 'var(--text-secondary)' }}>Processing media & generating subtitles...</div>
+            <div style={{ color: 'var(--text-secondary)' }}>{exportStatus || 'Processing...'}</div>
           </div>
         ) : (
           <>

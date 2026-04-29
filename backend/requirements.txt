@@ -5,3 +5,4 @@ python-multipart
 pydantic
 pydub
 Pillow
+google-genai

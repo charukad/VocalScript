@@ -91,3 +91,42 @@ export type CaptionSegment = {
   end: number;
   text: string;
 };
+
+export type ProviderName = 'meta' | 'grok';
+
+export type GeneratedMediaType = 'image' | 'video';
+
+export type StoryboardSceneStatus =
+  | 'draft'
+  | 'approved'
+  | 'queued'
+  | 'generating'
+  | 'completed'
+  | 'failed'
+  | 'placeholder';
+
+export type TranscriptSlice = {
+  start: number;
+  end: number;
+  text: string;
+};
+
+export type StoryboardScene = {
+  id: string;
+  start: number;
+  end: number;
+  transcript: string;
+  visualType: GeneratedMediaType;
+  prompt: string;
+  negativePrompt: string;
+  style: string;
+  camera: string;
+  status: StoryboardSceneStatus;
+};
+
+export type StoryboardSettings = {
+  sourceMediaId: string | null;
+  provider: ProviderName;
+  visualType: GeneratedMediaType;
+  style: string;
+};
