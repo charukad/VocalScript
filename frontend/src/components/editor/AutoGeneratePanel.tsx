@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { getStoryboardSources, useEditorStore } from '../../store/editorStore';
-import type { GeneratedMediaType, GenerationJobStatus, ProviderName, StoryboardScene } from '../../types';
+import { resolveBackendMediaUrl } from '../../lib/api/client';
+import type { GeneratedMediaType, GenerationAspectRatio, GenerationJobStatus, ProviderName, StoryboardScene } from '../../types';
 
 const STYLE_OPTIONS = [
   'cinematic realistic',
@@ -21,6 +22,13 @@ const providerOptions: { value: ProviderName; label: string }[] = [
 const mediaTypeOptions: { value: GeneratedMediaType; label: string }[] = [
   { value: 'image', label: 'Image' },
   { value: 'video', label: 'Video' },
+];
+
+const aspectRatioOptions: { value: GenerationAspectRatio; label: string }[] = [
+  { value: '16:9', label: '16:9' },
+  { value: '9:16', label: '9:16' },
+  { value: '1:1', label: '1:1' },
+  { value: '4:5', label: '4:5' },
 ];
 
 const terminalJobStatuses: GenerationJobStatus[] = ['completed', 'failed', 'canceled', 'manual_action_required'];
@@ -46,8 +54,10 @@ export const AutoGeneratePanel = () => {
     refreshGenerationJobs,
     syncGenerationBatch,
     importCompletedGenerationMedia,
+    importGenerationVariant,
     currentGenerationBatchId,
     generationJobs,
+    generatedMediaAssets,
     isSyncingGeneration,
     clips,
   } = state;
@@ -68,13 +78,16 @@ export const AutoGeneratePanel = () => {
       .map(clip => clip.generation!.sceneId)
   );
   const jobBySceneId = new Map(generationJobs.map(job => [job.sceneId, job]));
+  const assetBySceneId = new Map(generatedMediaAssets.map(asset => [asset.sceneId, asset]));
   const sceneJobRows = storyboardScenes.map((scene, index) => {
     const job = jobBySceneId.get(scene.id);
+    const asset = assetBySceneId.get(scene.id);
     const imported = generatedClipSceneIds.has(scene.id);
     return {
       scene,
       index,
       job,
+      asset,
       imported,
       status: imported ? 'imported' : job?.status ?? scene.status,
     };
@@ -155,6 +168,18 @@ export const AutoGeneratePanel = () => {
         </div>
 
         <label className="auto-field">
+          <span>Aspect</span>
+          <select
+            value={storyboardSettings.aspectRatio}
+            onChange={event => setStoryboardSettings({ aspectRatio: event.target.value as GenerationAspectRatio })}
+          >
+            {aspectRatioOptions.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="auto-field">
           <span>Style</span>
           <select
             value={storyboardSettings.style}
@@ -219,12 +244,41 @@ export const AutoGeneratePanel = () => {
                 <div className="generation-batch">Batch {currentGenerationBatchId.replace(/^batch-/, '')}</div>
               )}
               <div className="generation-status-list">
-                {sceneJobRows.map(row => (
-                  <div key={row.scene.id} className="generation-scene-row">
-                    <span>Scene {row.index + 1}</span>
-                    <span className={`generation-scene-status status-${row.status}`}>{row.status}</span>
+                {sceneJobRows.map(row => {
+                  const variants = row.asset?.resultVariants?.length
+                    ? row.asset.resultVariants
+                    : row.asset?.resultUrl
+                      ? [{ id: 'result-1', url: row.asset.resultUrl, mediaType: row.asset.mediaType, localPath: row.asset.localPath, width: null, height: null, source: 'provider' }]
+                      : [];
+                  return (
+                  <div key={row.scene.id} className="generation-scene-block">
+                    <div className="generation-scene-row">
+                      <span>Scene {row.index + 1}</span>
+                      <span className={`generation-scene-status status-${row.status}`}>{row.status}</span>
+                    </div>
+                    {variants.length > 0 && !row.imported && (
+                      <div className="generation-variants">
+                        {variants.map((variant, variantIndex) => (
+                          <button
+                            key={`${row.scene.id}-${variant.url}`}
+                            className="generation-variant"
+                            onClick={() => importGenerationVariant(row.asset!.jobId, variant.url)}
+                            disabled={isSyncingGeneration}
+                            title={`Use result ${variantIndex + 1}`}
+                          >
+                            {variant.mediaType === 'image' ? (
+                              <img src={resolveBackendMediaUrl(variant.url)} alt={`Scene ${row.index + 1} result ${variantIndex + 1}`} />
+                            ) : (
+                              <span>Video {variantIndex + 1}</span>
+                            )}
+                            <span>Use {variantIndex + 1}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

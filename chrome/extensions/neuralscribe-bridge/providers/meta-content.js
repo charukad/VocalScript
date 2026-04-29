@@ -54,7 +54,7 @@ async function runMetaJob(job, options) {
     throw new Error("Could not find Meta prompt input.");
   }
 
-  fillPrompt(promptBox, job.prompt);
+  fillPrompt(promptBox, buildPrompt(job));
 
   const generateButton = await waitForGenerateButton(20000);
   if (!generateButton) {
@@ -64,11 +64,11 @@ async function runMetaJob(job, options) {
     throw new Error("Could not find enabled Meta generate button.");
   }
 
-  const mediaBefore = new Set(findMediaUrls());
+  const mediaBefore = new Set(findMediaCandidates().map((candidate) => candidate.url));
   clickElement(generateButton);
 
-  const mediaUrl = await waitForGeneratedMedia(timeoutMs, mediaBefore);
-  if (!mediaUrl) {
+  const result = await waitForGeneratedMedia(timeoutMs, mediaBefore, job.mediaType || "image");
+  if (!result) {
     if (hasManualActionElement()) {
       return manualActionResult(job, "Meta needs manual action before media is available.");
     }
@@ -77,11 +77,13 @@ async function runMetaJob(job, options) {
 
   return {
     status: "completed",
-    mediaUrl,
-    mediaType: job.mediaType || "image",
+    mediaUrl: result.mediaUrl,
+    mediaType: result.mediaType,
+    mediaVariants: result.variants,
     metadata: {
       provider: "meta",
       providerPageUrl: location.href,
+      variantCount: String(result.variants.length),
     },
   };
 }
@@ -96,6 +98,19 @@ function manualActionResult(job, message) {
       providerPageUrl: location.href,
     },
   };
+}
+
+function buildPrompt(job) {
+  const prompt = String(job.prompt || "").trim();
+  const aspectRatio = job.metadata?.aspectRatio;
+  if (!aspectRatio) return prompt;
+  const labels = {
+    "16:9": "wide landscape 16:9",
+    "9:16": "vertical portrait 9:16",
+    "1:1": "square 1:1",
+    "4:5": "portrait 4:5",
+  };
+  return `${prompt}\n\nCreate this in ${labels[aspectRatio] || `${aspectRatio} aspect ratio`}.`;
 }
 
 function fillPrompt(element, prompt) {
@@ -130,12 +145,43 @@ async function waitForGenerateButton(timeoutMs) {
   return null;
 }
 
-async function waitForGeneratedMedia(timeoutMs, seenBefore) {
+async function waitForGeneratedMedia(timeoutMs, seenBefore, requestedMediaType) {
   const deadline = Date.now() + timeoutMs;
+  const found = new Map();
+  let firstFoundAt = 0;
+  let lastFoundAt = 0;
 
   while (Date.now() < deadline) {
-    const urls = findMediaUrls().filter((url) => !seenBefore.has(url));
-    if (urls.length > 0) return urls[urls.length - 1];
+    const candidates = findMediaCandidates()
+      .filter((candidate) => !seenBefore.has(candidate.url))
+      .filter((candidate) => requestedMediaType !== "video" || candidate.mediaType === "video");
+
+    for (const candidate of candidates) {
+      if (!found.has(candidate.url)) {
+        found.set(candidate.url, candidate);
+        firstFoundAt = firstFoundAt || Date.now();
+        lastFoundAt = Date.now();
+      }
+    }
+
+    if (found.size > 0 && (Date.now() - lastFoundAt > 5000 || found.size >= 4 || Date.now() - firstFoundAt > 12000)) {
+      const variants = selectVariantGroup([...found.values()], requestedMediaType);
+      if (variants.length > 0) {
+        return {
+          mediaUrl: variants[0].url,
+          mediaType: variants[0].mediaType,
+          variants: variants.map((variant, index) => ({
+            id: `variant-${index + 1}`,
+            url: variant.url,
+            mediaType: variant.mediaType,
+            width: variant.width || null,
+            height: variant.height || null,
+            source: "meta",
+          })),
+        };
+      }
+    }
+
     await sleep(1500);
   }
 
@@ -143,14 +189,75 @@ async function waitForGeneratedMedia(timeoutMs, seenBefore) {
 }
 
 function findMediaUrls() {
-  const urls = [];
+  return findMediaCandidates().map((candidate) => candidate.url);
+}
+
+function findMediaCandidates() {
+  const candidates = [];
+  let index = 0;
   for (const selector of META_SELECTORS.media) {
     document.querySelectorAll(selector).forEach((element) => {
       const url = extractUrl(element);
-      if (url && !urls.includes(url)) urls.push(url);
+      if (!isUsableMediaUrl(url) || candidates.some((candidate) => candidate.url === url)) return;
+      const rect = element.getBoundingClientRect();
+      const groupElement = findMediaGroup(element);
+      candidates.push({
+        url,
+        mediaType: inferMediaType(element, url),
+        width: element.naturalWidth || element.videoWidth || rect.width || null,
+        height: element.naturalHeight || element.videoHeight || rect.height || null,
+        top: rect.top + window.scrollY,
+        left: rect.left + window.scrollX,
+        index: index++,
+        groupKey: getElementPath(groupElement),
+      });
     });
   }
-  return urls.filter(isUsableMediaUrl);
+  return candidates;
+}
+
+function selectVariantGroup(candidates, requestedMediaType) {
+  const matching = candidates.filter((candidate) => requestedMediaType !== "video" || candidate.mediaType === "video");
+  const usable = matching.length > 0 ? matching : candidates;
+  const groups = new Map();
+  for (const candidate of usable) {
+    const group = groups.get(candidate.groupKey) || [];
+    group.push(candidate);
+    groups.set(candidate.groupKey, group);
+  }
+  const ranked = [...groups.values()].sort((a, b) => {
+    const aScore = a.length * 100000 + Math.max(...a.map((item) => item.top)) * 10 + Math.max(...a.map((item) => item.index));
+    const bScore = b.length * 100000 + Math.max(...b.map((item) => item.top)) * 10 + Math.max(...b.map((item) => item.index));
+    return bScore - aScore;
+  });
+  return (ranked[0] || usable)
+    .sort((a, b) => a.top - b.top || a.left - b.left || a.index - b.index)
+    .slice(0, 4);
+}
+
+function findMediaGroup(element) {
+  let current = element.parentElement;
+  let fallback = current || element;
+  for (let depth = 0; current && depth < 8; depth++) {
+    const mediaCount = current.querySelectorAll(META_SELECTORS.media.join(",")).length;
+    if (mediaCount >= 2 && mediaCount <= 6) return current;
+    fallback = current;
+    current = current.parentElement;
+  }
+  return fallback;
+}
+
+function getElementPath(element) {
+  if (!element || !element.parentElement) return "document";
+  const parts = [];
+  let current = element;
+  while (current && current !== document.body && parts.length < 5) {
+    const parent = current.parentElement;
+    const index = parent ? Array.prototype.indexOf.call(parent.children, current) : 0;
+    parts.unshift(`${current.tagName}:${index}`);
+    current = parent;
+  }
+  return parts.join("/");
 }
 
 function extractUrl(element) {
@@ -159,6 +266,12 @@ function extractUrl(element) {
   if (element.src) return element.src;
   if (element.href) return element.href;
   return element.getAttribute("src") || element.getAttribute("href") || "";
+}
+
+function inferMediaType(element, url) {
+  if (element instanceof HTMLVideoElement || element.tagName === "SOURCE") return "video";
+  if (/\.(mp4|webm|mov)(\?|$)/i.test(url)) return "video";
+  return "image";
 }
 
 function isUsableMediaUrl(url) {

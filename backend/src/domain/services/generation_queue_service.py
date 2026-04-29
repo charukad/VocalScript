@@ -10,8 +10,10 @@ from urllib.parse import urlparse
 from typing import BinaryIO, Dict, List, Optional
 
 from backend.src.domain.models.generation import (
+    GenerationAspectRatio,
     GeneratedMediaType,
     GeneratedMediaAsset,
+    GenerationMediaVariant,
     GenerationJob,
     GenerationJobStatus,
     ProviderName,
@@ -30,6 +32,7 @@ class GenerationQueueService:
         self,
         scenes: List[StoryboardScene],
         provider: ProviderName,
+        aspect_ratio: GenerationAspectRatio = "16:9",
         batch_id: Optional[str] = None,
     ) -> List[GenerationJob]:
         resolved_batch_id = batch_id or f"batch-{uuid.uuid4().hex[:12]}"
@@ -47,6 +50,7 @@ class GenerationQueueService:
                 status="queued",
                 metadata={
                     "batchId": resolved_batch_id,
+                    "aspectRatio": aspect_ratio,
                     "sceneStart": str(scene.start),
                     "sceneEnd": str(scene.end),
                     "sceneStyle": scene.style,
@@ -102,6 +106,7 @@ class GenerationQueueService:
                     mediaType=job.media_type,
                     status=job.status,
                     resultUrl=job.result_url,
+                    resultVariants=job.result_variants,
                     localPath=job.local_path,
                     prompt=job.prompt,
                     negativePrompt=job.negative_prompt,
@@ -171,12 +176,17 @@ class GenerationQueueService:
     def complete_job_with_url(
         self,
         job_id: str,
-        media_url: str,
+        media_url: Optional[str],
         media_type: Optional[GeneratedMediaType] = None,
+        media_variants: Optional[List[GenerationMediaVariant]] = None,
         metadata: Optional[Dict[str, str]] = None,
     ) -> Optional[GenerationJob]:
         job = self._jobs.get(job_id)
         if not job:
+            return None
+        variants = self._normalize_variants(media_url, media_type or job.media_type, media_variants)
+        resolved_media_url = media_url or (variants[0].url if variants else None)
+        if not resolved_media_url:
             return None
         merged_metadata = dict(job.metadata)
         if metadata:
@@ -185,7 +195,8 @@ class GenerationQueueService:
             job_id,
             status="completed",
             media_type=media_type or job.media_type,
-            result_url=media_url,
+            result_url=resolved_media_url,
+            result_variants=variants,
             error=None,
             metadata=merged_metadata,
         )
@@ -217,6 +228,15 @@ class GenerationQueueService:
             status="completed",
             media_type=media_type or job.media_type,
             result_url=f"/api/generation/media/{output_name}",
+            result_variants=[
+                GenerationMediaVariant(
+                    id="stored-1",
+                    url=f"/api/generation/media/{output_name}",
+                    mediaType=media_type or job.media_type,
+                    localPath=str(output_path),
+                    source="backend",
+                )
+            ],
             local_path=str(output_path),
             error=None,
             metadata=merged_metadata,
@@ -282,6 +302,39 @@ class GenerationQueueService:
 
     def _default_extension(self, media_type: GeneratedMediaType) -> str:
         return "mp4" if media_type == "video" else "png"
+
+    def _normalize_variants(
+        self,
+        media_url: Optional[str],
+        media_type: GeneratedMediaType,
+        media_variants: Optional[List[GenerationMediaVariant]],
+    ) -> List[GenerationMediaVariant]:
+        variants = list(media_variants or [])
+        if media_url and not any(variant.url == media_url for variant in variants):
+            variants.insert(
+                0,
+                GenerationMediaVariant(
+                    id="variant-1",
+                    url=media_url,
+                    mediaType=media_type,
+                    source="provider",
+                ),
+            )
+        normalized: List[GenerationMediaVariant] = []
+        seen_urls: set[str] = set()
+        for index, variant in enumerate(variants, 1):
+            if not variant.url or variant.url in seen_urls:
+                continue
+            seen_urls.add(variant.url)
+            normalized.append(
+                variant.model_copy(
+                    update={
+                        "id": variant.id or f"variant-{index}",
+                        "media_type": variant.media_type or media_type,
+                    }
+                )
+            )
+        return normalized
 
     def _metadata_float(self, value: Optional[str], fallback: float) -> float:
         if value is None:

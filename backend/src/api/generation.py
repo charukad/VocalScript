@@ -81,7 +81,12 @@ def build_generation_router(
     async def create_generation_jobs(request: GenerationJobCreateRequest):
         if not request.scenes:
             raise HTTPException(status_code=400, detail="At least one storyboard scene is required")
-        jobs = queue_service.create_jobs(request.scenes, request.provider, batch_id=request.batch_id)
+        jobs = queue_service.create_jobs(
+            request.scenes,
+            request.provider,
+            aspect_ratio=request.aspect_ratio,
+            batch_id=request.batch_id,
+        )
         return GenerationJobListResponse(jobs=jobs, batchId=jobs[0].batch_id if jobs else request.batch_id)
 
     @router.get("/jobs", response_model=GenerationJobListResponse)
@@ -154,6 +159,7 @@ def build_generation_router(
             job_id,
             media_url=request.media_url,
             media_type=request.media_type,
+            media_variants=request.media_variants,
             metadata=request.metadata,
         )
         if not job:

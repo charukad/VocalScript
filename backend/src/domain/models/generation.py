@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 ProviderName = Literal["meta", "grok"]
 GeneratedMediaType = Literal["image", "video"]
+GenerationAspectRatio = Literal["16:9", "9:16", "1:1", "4:5"]
 StoryboardSceneStatus = Literal[
     "draft",
     "approved",
@@ -62,6 +63,16 @@ class StoryboardScene(ApiModel):
     status: StoryboardSceneStatus = "draft"
 
 
+class GenerationMediaVariant(ApiModel):
+    id: str
+    url: str
+    media_type: GeneratedMediaType = Field(default="image", alias="mediaType")
+    local_path: Optional[str] = Field(default=None, alias="localPath")
+    width: Optional[float] = None
+    height: Optional[float] = None
+    source: str = "provider"
+
+
 class StoryboardRequest(ApiModel):
     transcript: str
     segments: List[TranscriptSlice] = Field(default_factory=list)
@@ -89,6 +100,7 @@ class GenerationJob(ApiModel):
     negative_prompt: str = Field(default="", alias="negativePrompt")
     status: GenerationJobStatus = "queued"
     result_url: Optional[str] = Field(default=None, alias="resultUrl")
+    result_variants: List[GenerationMediaVariant] = Field(default_factory=list, alias="resultVariants")
     local_path: Optional[str] = Field(default=None, alias="localPath")
     error: Optional[str] = None
     metadata: Dict[str, str] = Field(default_factory=dict)
@@ -97,6 +109,7 @@ class GenerationJob(ApiModel):
 class GenerationJobCreateRequest(ApiModel):
     scenes: List[StoryboardScene]
     provider: ProviderName = "meta"
+    aspect_ratio: GenerationAspectRatio = Field(default="16:9", alias="aspectRatio")
     batch_id: Optional[str] = Field(default=None, alias="batchId")
 
 
@@ -113,6 +126,7 @@ class GeneratedMediaAsset(ApiModel):
     media_type: GeneratedMediaType = Field(alias="mediaType")
     status: GenerationJobStatus
     result_url: Optional[str] = Field(default=None, alias="resultUrl")
+    result_variants: List[GenerationMediaVariant] = Field(default_factory=list, alias="resultVariants")
     local_path: Optional[str] = Field(default=None, alias="localPath")
     prompt: str
     negative_prompt: str = Field(default="", alias="negativePrompt")
@@ -141,8 +155,9 @@ class GenerationJobClaimRequest(ApiModel):
 
 
 class GenerationJobResultRequest(ApiModel):
-    media_url: str = Field(alias="mediaUrl")
+    media_url: Optional[str] = Field(default=None, alias="mediaUrl")
     media_type: Optional[GeneratedMediaType] = Field(default=None, alias="mediaType")
+    media_variants: List[GenerationMediaVariant] = Field(default_factory=list, alias="mediaVariants")
     metadata: Dict[str, str] = Field(default_factory=dict)
 
 

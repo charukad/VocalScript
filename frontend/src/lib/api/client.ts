@@ -3,6 +3,7 @@ import type {
   TimelineTrack,
   ExportSettings,
   CaptionSegment,
+  GenerationAspectRatio,
   GeneratedMediaType,
   GeneratedMediaAsset,
   ProviderName,
@@ -313,12 +314,13 @@ export const createStoryboardFromAudio = async (
 export const createGenerationJobs = async (
   scenes: StoryboardScene[],
   provider: ProviderName,
+  aspectRatio: GenerationAspectRatio,
   signal?: AbortSignal
 ): Promise<GenerationJobListResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/generation/jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenes, provider }),
+    body: JSON.stringify({ scenes, provider, aspectRatio }),
     signal,
   });
 

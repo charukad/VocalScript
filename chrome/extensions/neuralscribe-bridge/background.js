@@ -322,7 +322,7 @@ async function claimAndRunNextJob() {
       return;
     }
 
-    await completeJob(settings, job.id, result.mediaUrl, result.mediaType, result.metadata);
+    await completeJob(settings, job.id, result.mediaUrl, result.mediaType, result.metadata, result.mediaVariants);
     updateStatus({ jobMessage: `Completed ${job.id}` });
   } catch (error) {
     await updateJobStatus(settings, job.id, "failed", error.message, { provider: "meta" });
@@ -354,11 +354,11 @@ async function updateJobStatus(settings, jobId, status, error, metadata = {}) {
   return response.json();
 }
 
-async function completeJob(settings, jobId, mediaUrl, mediaType, metadata = {}) {
+async function completeJob(settings, jobId, mediaUrl, mediaType, metadata = {}, mediaVariants = []) {
   const response = await fetch(`${settings.httpBaseUrl}/api/generation/jobs/${jobId}/result`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mediaUrl, mediaType, metadata }),
+    body: JSON.stringify({ mediaUrl, mediaType, mediaVariants, metadata }),
   });
   if (!response.ok) throw new Error(await responseText(response));
   return response.json();

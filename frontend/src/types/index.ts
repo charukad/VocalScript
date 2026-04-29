@@ -104,6 +104,7 @@ export type CaptionSegment = {
 export type ProviderName = 'meta' | 'grok';
 
 export type GeneratedMediaType = 'image' | 'video';
+export type GenerationAspectRatio = '16:9' | '9:16' | '1:1' | '4:5';
 
 export type StoryboardSceneStatus =
   | 'draft'
@@ -137,7 +138,18 @@ export type StoryboardSettings = {
   sourceMediaId: string | null;
   provider: ProviderName;
   visualType: GeneratedMediaType;
+  aspectRatio: GenerationAspectRatio;
   style: string;
+};
+
+export type GenerationMediaVariant = {
+  id: string;
+  url: string;
+  mediaType: GeneratedMediaType;
+  localPath: string | null;
+  width: number | null;
+  height: number | null;
+  source: string;
 };
 
 export type GenerationJobStatus =
@@ -158,6 +170,7 @@ export type GenerationJob = {
   negativePrompt: string;
   status: GenerationJobStatus;
   resultUrl: string | null;
+  resultVariants: GenerationMediaVariant[];
   localPath: string | null;
   error: string | null;
   metadata: Record<string, string>;
@@ -171,6 +184,7 @@ export type GeneratedMediaAsset = {
   mediaType: GeneratedMediaType;
   status: GenerationJobStatus;
   resultUrl: string | null;
+  resultVariants: GenerationMediaVariant[];
   localPath: string | null;
   prompt: string;
   negativePrompt: string;
