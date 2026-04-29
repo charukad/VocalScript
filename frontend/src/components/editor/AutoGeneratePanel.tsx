@@ -1,5 +1,6 @@
+import { useEffect } from 'react';
 import { getStoryboardSources, useEditorStore } from '../../store/editorStore';
-import type { GeneratedMediaType, ProviderName, StoryboardScene } from '../../types';
+import type { GeneratedMediaType, GenerationJobStatus, ProviderName, StoryboardScene } from '../../types';
 
 const STYLE_OPTIONS = [
   'cinematic realistic',
@@ -22,6 +23,8 @@ const mediaTypeOptions: { value: GeneratedMediaType; label: string }[] = [
   { value: 'video', label: 'Video' },
 ];
 
+const terminalJobStatuses: GenerationJobStatus[] = ['completed', 'failed', 'canceled', 'manual_action_required'];
+
 type SceneField = keyof Pick<StoryboardScene, 'start' | 'end' | 'transcript' | 'prompt' | 'visualType' | 'camera'>;
 
 export const AutoGeneratePanel = () => {
@@ -41,8 +44,12 @@ export const AutoGeneratePanel = () => {
     approveStoryboard,
     createJobsFromApprovedScenes,
     refreshGenerationJobs,
+    syncGenerationBatch,
     importCompletedGenerationMedia,
+    currentGenerationBatchId,
     generationJobs,
+    isSyncingGeneration,
+    clips,
   } = state;
 
   const sources = getStoryboardSources(state);
@@ -55,7 +62,43 @@ export const AutoGeneratePanel = () => {
     counts[job.status] = (counts[job.status] ?? 0) + 1;
     return counts;
   }, {});
-  const importReadyCount = (jobCounts.completed ?? 0) + (jobCounts.failed ?? 0) + (jobCounts.manual_action_required ?? 0);
+  const generatedClipSceneIds = new Set(
+    clips
+      .filter(clip => clip.generation?.batchId === currentGenerationBatchId)
+      .map(clip => clip.generation!.sceneId)
+  );
+  const jobBySceneId = new Map(generationJobs.map(job => [job.sceneId, job]));
+  const sceneJobRows = storyboardScenes.map((scene, index) => {
+    const job = jobBySceneId.get(scene.id);
+    const imported = generatedClipSceneIds.has(scene.id);
+    return {
+      scene,
+      index,
+      job,
+      imported,
+      status: imported ? 'imported' : job?.status ?? scene.status,
+    };
+  });
+  const importReadyCount = sceneJobRows.filter(row =>
+    row.job && terminalJobStatuses.includes(row.job.status) && !row.imported
+  ).length;
+  const shouldAutoSync = Boolean(
+    currentGenerationBatchId &&
+    generationJobs.length > 0 &&
+    (
+      generationJobs.some(job => job.status === 'queued' || job.status === 'running') ||
+      importReadyCount > 0
+    )
+  );
+
+  useEffect(() => {
+    if (!shouldAutoSync || isSyncingGeneration) return;
+    void syncGenerationBatch(true);
+    const interval = window.setInterval(() => {
+      void syncGenerationBatch(true);
+    }, 3500);
+    return () => window.clearInterval(interval);
+  }, [shouldAutoSync, isSyncingGeneration, syncGenerationBatch]);
 
   const updateScene = (id: string, field: SceneField, value: string) => {
     if (field === 'start' || field === 'end') {
@@ -158,17 +201,30 @@ export const AutoGeneratePanel = () => {
           {generationJobs.length > 0 && (
             <div className="generation-controls">
               <div className="generation-toolbar">
-                <button className="btn-secondary" onClick={refreshGenerationJobs}>Refresh Jobs</button>
+                <button className="btn-secondary" onClick={refreshGenerationJobs} disabled={isSyncingGeneration}>
+                  Refresh Jobs
+                </button>
                 <button
                   className="btn-secondary"
                   onClick={importCompletedGenerationMedia}
-                  disabled={importReadyCount === 0}
+                  disabled={isSyncingGeneration || importReadyCount === 0}
                 >
-                  Import Results
+                  {isSyncingGeneration ? 'Syncing...' : 'Import Ready'}
                 </button>
               </div>
               <div className="generation-summary">
                 queued {jobCounts.queued ?? 0} - running {jobCounts.running ?? 0} - completed {jobCounts.completed ?? 0} - needs action {jobCounts.manual_action_required ?? 0} - failed {jobCounts.failed ?? 0}
+              </div>
+              {currentGenerationBatchId && (
+                <div className="generation-batch">Batch {currentGenerationBatchId.replace(/^batch-/, '')}</div>
+              )}
+              <div className="generation-status-list">
+                {sceneJobRows.map(row => (
+                  <div key={row.scene.id} className="generation-scene-row">
+                    <span>Scene {row.index + 1}</span>
+                    <span className={`generation-scene-status status-${row.status}`}>{row.status}</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}

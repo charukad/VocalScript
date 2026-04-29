@@ -81,6 +81,7 @@ class StoryboardResponse(ApiModel):
 
 class GenerationJob(ApiModel):
     id: str
+    batch_id: str = Field(alias="batchId")
     scene_id: str = Field(alias="sceneId")
     provider: ProviderName = "meta"
     media_type: GeneratedMediaType = Field(default="image", alias="mediaType")
@@ -96,14 +97,17 @@ class GenerationJob(ApiModel):
 class GenerationJobCreateRequest(ApiModel):
     scenes: List[StoryboardScene]
     provider: ProviderName = "meta"
+    batch_id: Optional[str] = Field(default=None, alias="batchId")
 
 
 class GenerationJobListResponse(ApiModel):
     jobs: List[GenerationJob]
+    batch_id: Optional[str] = Field(default=None, alias="batchId")
 
 
 class GeneratedMediaAsset(ApiModel):
     job_id: str = Field(alias="jobId")
+    batch_id: str = Field(alias="batchId")
     scene_id: str = Field(alias="sceneId")
     provider: ProviderName = "meta"
     media_type: GeneratedMediaType = Field(alias="mediaType")
@@ -122,6 +126,7 @@ class GeneratedMediaAsset(ApiModel):
 
 class GeneratedMediaListResponse(ApiModel):
     assets: List[GeneratedMediaAsset]
+    batch_id: Optional[str] = Field(default=None, alias="batchId")
 
 
 class GenerationJobStatusUpdate(ApiModel):

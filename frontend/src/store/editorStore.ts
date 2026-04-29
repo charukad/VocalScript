@@ -229,8 +229,10 @@ export type EditorState = {
   // Auto Video Storyboard
   storyboardSettings: StoryboardSettings;
   storyboardScenes: StoryboardScene[];
+  currentGenerationBatchId: string | null;
   generationJobs: GenerationJob[];
   isGeneratingStoryboard: boolean;
+  isSyncingGeneration: boolean;
   storyboardStatus: string | null;
   setStoryboardSettings: (settings: Partial<StoryboardSettings>) => void;
   generateStoryboard: () => Promise<void>;
@@ -241,6 +243,7 @@ export type EditorState = {
   approveStoryboard: () => void;
   createJobsFromApprovedScenes: () => Promise<void>;
   refreshGenerationJobs: () => Promise<void>;
+  syncGenerationBatch: (silent?: boolean) => Promise<void>;
   importCompletedGenerationMedia: () => Promise<void>;
 };
 
@@ -356,6 +359,7 @@ const fetchGeneratedMediaFile = async (asset: GeneratedMediaAsset): Promise<File
 
 const generatedMetadata = (asset: GeneratedMediaAsset): NonNullable<TimelineClip['generation']> => ({
   jobId: asset.jobId,
+  batchId: asset.batchId,
   sceneId: asset.sceneId,
   provider: asset.provider,
   status: asset.status,
@@ -411,13 +415,14 @@ const selectGeneratedAssetsForImport = (
   );
   const importedSceneIds = new Set(
     existingClips
-      .map(clip => clip.generation?.sceneId)
-      .filter((sceneId): sceneId is string => Boolean(sceneId))
+      .map(clip => clip.generation ? `${clip.generation.batchId}:${clip.generation.sceneId}` : null)
+      .filter((sceneKey): sceneKey is string => Boolean(sceneKey))
   );
   const bestByScene = new Map<string, GeneratedMediaAsset>();
 
   for (const asset of assets) {
-    if (importedJobIds.has(asset.jobId) || importedSceneIds.has(asset.sceneId)) continue;
+    const sceneKey = `${asset.batchId}:${asset.sceneId}`;
+    if (importedJobIds.has(asset.jobId) || importedSceneIds.has(sceneKey)) continue;
     const existing = bestByScene.get(asset.sceneId);
     if (!existing || getGeneratedAssetRank(asset) >= getGeneratedAssetRank(existing)) {
       bestByScene.set(asset.sceneId, asset);
@@ -425,6 +430,42 @@ const selectGeneratedAssetsForImport = (
   }
 
   return [...bestByScene.values()].sort((a, b) => a.start - b.start || a.sceneId.localeCompare(b.sceneId));
+};
+
+const getCurrentGenerationBatchId = (
+  state: Pick<EditorState, 'currentGenerationBatchId' | 'generationJobs'>
+): string | null => state.currentGenerationBatchId ?? state.generationJobs[0]?.batchId ?? null;
+
+const getSceneStatusFromJob = (job: GenerationJob): StoryboardScene['status'] => {
+  if (job.status === 'completed') return 'completed';
+  if (job.status === 'running') return 'generating';
+  if (job.status === 'queued') return 'queued';
+  if (job.status === 'failed' || job.status === 'manual_action_required') return 'failed';
+  return 'placeholder';
+};
+
+const mergeSceneStatuses = (
+  scenes: StoryboardScene[],
+  jobs: GenerationJob[],
+  clips: TimelineClip[],
+  batchId: string | null,
+): StoryboardScene[] => {
+  if (!batchId) return scenes;
+  const jobsByScene = new Map(jobs.map(job => [job.sceneId, job]));
+  const importedScenes = new Set(
+    clips
+      .filter(clip => clip.generation?.batchId === batchId)
+      .map(clip => clip.generation!.sceneId)
+  );
+
+  return scenes.map(scene => {
+    const job = jobsByScene.get(scene.id);
+    if (!job) return scene;
+    return {
+      ...scene,
+      status: importedScenes.has(scene.id) ? 'completed' : getSceneStatusFromJob(job),
+    };
+  });
 };
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -881,8 +922,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   mediaUrl: null,
   storyboardSettings: DEFAULT_STORYBOARD_SETTINGS,
   storyboardScenes: [],
+  currentGenerationBatchId: null,
   generationJobs: [],
   isGeneratingStoryboard: false,
+  isSyncingGeneration: false,
   storyboardStatus: null,
   exportSequence: async () => {
     const abortController = new AbortController();
@@ -1161,10 +1204,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ storyboardStatus: 'Creating generation jobs...' });
     try {
       const response = await createGenerationJobs(approvedScenes, state.storyboardSettings.provider);
+      const batchId = response.batchId ?? response.jobs[0]?.batchId ?? null;
       set({
+        currentGenerationBatchId: batchId,
         generationJobs: response.jobs,
+        storyboardScenes: mergeSceneStatuses(state.storyboardScenes, response.jobs, state.clips, batchId),
         storyboardStatus: `Created ${response.jobs.length} generation jobs.`,
       });
+      void get().syncGenerationBatch(true);
     } catch (err: any) {
       console.error(err);
       alert(err.message || 'Generation job creation failed');
@@ -1172,30 +1219,52 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
   refreshGenerationJobs: async () => {
+    const batchId = getCurrentGenerationBatchId(get());
+    if (!batchId) {
+      set({ storyboardStatus: 'Create generation jobs before refreshing.' });
+      return;
+    }
+
     set({ storyboardStatus: 'Refreshing generation jobs...' });
     try {
-      const response = await listGenerationJobs();
-      set({
+      const response = await listGenerationJobs({ batchId });
+      set(state => ({
+        currentGenerationBatchId: batchId,
         generationJobs: response.jobs,
+        storyboardScenes: mergeSceneStatuses(state.storyboardScenes, response.jobs, state.clips, batchId),
         storyboardStatus: `Generation jobs refreshed: ${response.jobs.length} total.`,
-      });
+      }));
     } catch (err: any) {
       console.error(err);
       alert(err.message || 'Could not refresh generation jobs');
       set({ storyboardStatus: 'Generation job refresh failed.' });
     }
   },
-  importCompletedGenerationMedia: async () => {
-    set({ storyboardStatus: 'Importing generated media...' });
-    try {
-      const jobsResponse = await listGenerationJobs();
-      set({ generationJobs: jobsResponse.jobs });
+  syncGenerationBatch: async (silent = false) => {
+    const batchId = getCurrentGenerationBatchId(get());
+    if (!batchId) {
+      if (!silent) set({ storyboardStatus: 'Create generation jobs before importing results.' });
+      return;
+    }
+    if (get().isSyncingGeneration) return;
 
-      const mediaResponse = await listGeneratedMediaAssets(true);
+    set({
+      isSyncingGeneration: true,
+      ...(silent ? {} : { storyboardStatus: 'Checking generated scenes...' }),
+    } as Partial<EditorState>);
+    try {
+      const jobsResponse = await listGenerationJobs({ batchId });
+      set(state => ({
+        currentGenerationBatchId: batchId,
+        generationJobs: jobsResponse.jobs,
+        storyboardScenes: mergeSceneStatuses(state.storyboardScenes, jobsResponse.jobs, state.clips, batchId),
+      }));
+
+      const mediaResponse = await listGeneratedMediaAssets(true, { batchId });
       const generatedAssets = selectGeneratedAssetsForImport(mediaResponse.assets, get().clips);
 
       if (generatedAssets.length === 0) {
-        set({ storyboardStatus: 'No new generated media to import.' });
+        if (!silent) set({ storyboardStatus: 'No new generated media to import.' });
         return;
       }
 
@@ -1290,11 +1359,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
 
       if (newClips.length === 0) {
-        set({ storyboardStatus: 'No new generated media to import.' });
+        if (!silent) set({ storyboardStatus: 'No new generated media to import.' });
         return;
       }
 
-      const refreshedJobs = await listGenerationJobs().catch(() => null);
+      const refreshedJobs = await listGenerationJobs({ batchId }).catch(() => null);
       set(state => {
         const importedJobIds = new Set(
           state.clips
@@ -1303,12 +1372,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         );
         const importedSceneIds = new Set(
           state.clips
-            .map(clip => clip.generation?.sceneId)
-            .filter((sceneId): sceneId is string => Boolean(sceneId))
+            .map(clip => clip.generation ? `${clip.generation.batchId}:${clip.generation.sceneId}` : null)
+            .filter((sceneKey): sceneKey is string => Boolean(sceneKey))
         );
         const clipsToAdd = newClips.filter(clip =>
           !clip.generation ||
-          (!importedJobIds.has(clip.generation.jobId) && !importedSceneIds.has(clip.generation.sceneId))
+          (!importedJobIds.has(clip.generation.jobId) && !importedSceneIds.has(`${clip.generation.batchId}:${clip.generation.sceneId}`))
         );
         const assetIdsToAdd = new Set(clipsToAdd.map(clip => clip.assetId));
         const assetsToAdd = newAssets.filter(asset => assetIdsToAdd.has(asset.id));
@@ -1316,7 +1385,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         if (clipsToAdd.length === 0) {
           return {
             generationJobs: refreshedJobs?.jobs ?? state.generationJobs,
-            storyboardStatus: 'Generated media is already on the timeline.',
+            storyboardScenes: mergeSceneStatuses(state.storyboardScenes, refreshedJobs?.jobs ?? state.generationJobs, state.clips, batchId),
+            ...(silent ? {} : { storyboardStatus: 'Generated media is already on the timeline.' }),
           };
         }
 
@@ -1332,20 +1402,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           placeholderCount > 0 ? `${placeholderCount} placeholder${placeholderCount === 1 ? '' : 's'}` : null,
         ].filter(Boolean);
 
+        const nextClips = [...state.clips, ...clipsToAdd];
+        const nextJobs = refreshedJobs?.jobs ?? state.generationJobs;
         return {
           ...withHistory(state),
           assets: [...state.assets, ...assetsToAdd],
           tracks,
-          clips: [...state.clips, ...clipsToAdd],
+          clips: nextClips,
           selectedClipId: clipsToAdd[0]?.id ?? state.selectedClipId,
-          generationJobs: refreshedJobs?.jobs ?? state.generationJobs,
+          generationJobs: nextJobs,
+          storyboardScenes: mergeSceneStatuses(state.storyboardScenes, nextJobs, nextClips, batchId),
           storyboardStatus: `Imported ${statusParts.join(' and ')} to the timeline.`,
         };
       });
     } catch (err: any) {
       console.error(err);
-      alert(err.message || 'Generated media import failed');
-      set({ storyboardStatus: 'Generated media import failed.' });
+      if (!silent) alert(err.message || 'Generated media import failed');
+      set({ storyboardStatus: silent ? 'Auto import paused after an error.' : 'Generated media import failed.' });
+    } finally {
+      set({ isSyncingGeneration: false });
     }
+  },
+  importCompletedGenerationMedia: async () => {
+    await get().syncGenerationBatch(false);
   }
 }));

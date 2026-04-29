@@ -26,12 +26,19 @@ class GenerationQueueService:
         self._jobs: Dict[str, GenerationJob] = {}
         self._job_order: List[str] = []
 
-    def create_jobs(self, scenes: List[StoryboardScene], provider: ProviderName) -> List[GenerationJob]:
+    def create_jobs(
+        self,
+        scenes: List[StoryboardScene],
+        provider: ProviderName,
+        batch_id: Optional[str] = None,
+    ) -> List[GenerationJob]:
+        resolved_batch_id = batch_id or f"batch-{uuid.uuid4().hex[:12]}"
         jobs: List[GenerationJob] = []
         for scene in scenes:
             job_id = f"job-{uuid.uuid4().hex[:12]}"
             job = GenerationJob(
                 id=job_id,
+                batchId=resolved_batch_id,
                 sceneId=scene.id,
                 provider=provider,
                 mediaType=scene.visual_type,
@@ -39,6 +46,7 @@ class GenerationQueueService:
                 negativePrompt=scene.negative_prompt,
                 status="queued",
                 metadata={
+                    "batchId": resolved_batch_id,
                     "sceneStart": str(scene.start),
                     "sceneEnd": str(scene.end),
                     "sceneStyle": scene.style,
@@ -55,17 +63,24 @@ class GenerationQueueService:
         self,
         status: Optional[GenerationJobStatus] = None,
         provider: Optional[ProviderName] = None,
+        batch_id: Optional[str] = None,
     ) -> List[GenerationJob]:
         jobs = [self._jobs[job_id] for job_id in self._job_order if job_id in self._jobs]
         if status:
             jobs = [job for job in jobs if job.status == status]
         if provider:
             jobs = [job for job in jobs if job.provider == provider]
+        if batch_id:
+            jobs = [job for job in jobs if job.batch_id == batch_id]
         return jobs
 
-    def list_generated_media_assets(self, include_placeholders: bool = True) -> List[GeneratedMediaAsset]:
+    def list_generated_media_assets(
+        self,
+        include_placeholders: bool = True,
+        batch_id: Optional[str] = None,
+    ) -> List[GeneratedMediaAsset]:
         assets: List[GeneratedMediaAsset] = []
-        for job in self.list_jobs():
+        for job in self.list_jobs(batch_id=batch_id):
             if job.status == "completed" and not job.result_url:
                 continue
             if job.status != "completed" and not (
@@ -81,6 +96,7 @@ class GenerationQueueService:
             assets.append(
                 GeneratedMediaAsset(
                     jobId=job.id,
+                    batchId=job.batch_id,
                     sceneId=job.scene_id,
                     provider=job.provider,
                     mediaType=job.media_type,

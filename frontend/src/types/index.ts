@@ -77,6 +77,7 @@ export type TimelineClip = {
   keyframes?: Keyframe[];
   generation?: {
     jobId: string;
+    batchId: string;
     sceneId: string;
     provider: ProviderName;
     status: GenerationJobStatus;
@@ -149,6 +150,7 @@ export type GenerationJobStatus =
 
 export type GenerationJob = {
   id: string;
+  batchId: string;
   sceneId: string;
   provider: ProviderName;
   mediaType: GeneratedMediaType;
@@ -163,6 +165,7 @@ export type GenerationJob = {
 
 export type GeneratedMediaAsset = {
   jobId: string;
+  batchId: string;
   sceneId: string;
   provider: ProviderName;
   mediaType: GeneratedMediaType;

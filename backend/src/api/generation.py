@@ -4,7 +4,7 @@ import shutil
 import tempfile
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from backend.src.domain.interfaces.transcriber import ITranscriber
@@ -81,20 +81,31 @@ def build_generation_router(
     async def create_generation_jobs(request: GenerationJobCreateRequest):
         if not request.scenes:
             raise HTTPException(status_code=400, detail="At least one storyboard scene is required")
-        jobs = queue_service.create_jobs(request.scenes, request.provider)
-        return GenerationJobListResponse(jobs=jobs)
+        jobs = queue_service.create_jobs(request.scenes, request.provider, batch_id=request.batch_id)
+        return GenerationJobListResponse(jobs=jobs, batchId=jobs[0].batch_id if jobs else request.batch_id)
 
     @router.get("/jobs", response_model=GenerationJobListResponse)
     async def list_generation_jobs(
         status: Optional[GenerationJobStatus] = None,
         provider: Optional[ProviderName] = None,
+        batch_id: Optional[str] = Query(None, alias="batchId"),
     ):
-        return GenerationJobListResponse(jobs=queue_service.list_jobs(status=status, provider=provider))
+        return GenerationJobListResponse(
+            jobs=queue_service.list_jobs(status=status, provider=provider, batch_id=batch_id),
+            batchId=batch_id,
+        )
 
     @router.get("/media-assets", response_model=GeneratedMediaListResponse)
-    async def list_generated_media_assets(include_placeholders: bool = True):
+    async def list_generated_media_assets(
+        include_placeholders: bool = True,
+        batch_id: Optional[str] = Query(None, alias="batchId"),
+    ):
         return GeneratedMediaListResponse(
-            assets=queue_service.list_generated_media_assets(include_placeholders=include_placeholders)
+            assets=queue_service.list_generated_media_assets(
+                include_placeholders=include_placeholders,
+                batch_id=batch_id,
+            ),
+            batchId=batch_id,
         )
 
     @router.get("/jobs/{job_id}", response_model=GenerationJob)

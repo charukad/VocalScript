@@ -44,10 +44,17 @@ export type StoryboardGenerationOptions = {
 
 export type GenerationJobListResponse = {
   jobs: GenerationJob[];
+  batchId?: string | null;
 };
 
 export type GeneratedMediaListResponse = {
   assets: GeneratedMediaAsset[];
+  batchId?: string | null;
+};
+
+type GenerationListOptions = {
+  batchId?: string | null;
+  signal?: AbortSignal;
 };
 
 export const resolveBackendMediaUrl = (url: string): string => {
@@ -324,9 +331,12 @@ export const createGenerationJobs = async (
 };
 
 export const listGenerationJobs = async (
-  signal?: AbortSignal
+  options: GenerationListOptions = {}
 ): Promise<GenerationJobListResponse> => {
-  const response = await fetch(`${API_BASE_URL}/api/generation/jobs`, { signal });
+  const params = new URLSearchParams();
+  if (options.batchId) params.set('batchId', options.batchId);
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs${suffix}`, { signal: options.signal });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
@@ -338,10 +348,11 @@ export const listGenerationJobs = async (
 
 export const listGeneratedMediaAssets = async (
   includePlaceholders = true,
-  signal?: AbortSignal
+  options: GenerationListOptions = {}
 ): Promise<GeneratedMediaListResponse> => {
   const params = new URLSearchParams({ include_placeholders: String(includePlaceholders) });
-  const response = await fetch(`${API_BASE_URL}/api/generation/media-assets?${params.toString()}`, { signal });
+  if (options.batchId) params.set('batchId', options.batchId);
+  const response = await fetch(`${API_BASE_URL}/api/generation/media-assets?${params.toString()}`, { signal: options.signal });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));

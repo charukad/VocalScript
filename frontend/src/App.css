@@ -627,6 +627,63 @@
   text-align: center;
 }
 
+.generation-batch {
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+  text-align: center;
+}
+
+.generation-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.45rem;
+  background: var(--surface-3);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.generation-scene-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.generation-scene-status {
+  max-width: 104px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.1rem 0.32rem;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+}
+
+.generation-scene-status.status-imported,
+.generation-scene-status.status-completed {
+  color: var(--success-color);
+  border-color: rgba(137, 209, 133, 0.45);
+}
+
+.generation-scene-status.status-running,
+.generation-scene-status.status-generating {
+  color: var(--accent-color);
+  border-color: rgba(91, 141, 239, 0.5);
+}
+
+.generation-scene-status.status-failed,
+.generation-scene-status.status-manual_action_required {
+  color: var(--error-color);
+  border-color: rgba(255, 107, 107, 0.5);
+}
+
 .storyboard-list {
   display: flex;
   flex-direction: column;
