@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeuralScribe Bridge</title>
+    <link rel="stylesheet" href="sidepanel.css">
+  </head>
+  <body>
+    <main class="panel">
+      <header class="header">
+        <div>
+          <h1>NeuralScribe Bridge</h1>
+          <p id="workerId">Worker pending</p>
+        </div>
+        <span id="statusDot" class="status-dot"></span>
+      </header>
+
+      <section class="status-card">
+        <div class="status-line">
+          <span>Status</span>
+          <strong id="statusText">Disconnected</strong>
+        </div>
+        <div class="status-line">
+          <span>Last update</span>
+          <strong id="updatedAt">-</strong>
+        </div>
+      </section>
+
+      <section class="settings">
+        <label>
+          Backend WebSocket
+          <input id="wsUrl" type="text" spellcheck="false">
+        </label>
+        <label>
+          Backend HTTP
+          <input id="httpBaseUrl" type="text" spellcheck="false">
+        </label>
+        <label>
+          Session Token
+          <input id="sessionToken" type="password" spellcheck="false">
+        </label>
+        <fieldset>
+          <legend>Providers</legend>
+          <label class="check-row">
+            <input id="providerMeta" type="checkbox" value="meta">
+            Meta
+          </label>
+          <label class="check-row">
+            <input id="providerGrok" type="checkbox" value="grok">
+            Grok
+          </label>
+        </fieldset>
+      </section>
+
+      <section class="actions">
+        <button id="saveBtn" class="secondary">Save</button>
+        <button id="connectBtn" class="primary">Connect</button>
+        <button id="disconnectBtn" class="secondary">Disconnect</button>
+      </section>
+
+      <section class="log">
+        <div class="log-title">Bridge Log</div>
+        <div id="logEntries" class="log-entries"></div>
+      </section>
+    </main>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>

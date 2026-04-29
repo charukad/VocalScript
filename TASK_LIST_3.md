@@ -95,14 +95,14 @@ Manual tests after Phase 4:
 
 ## Phase 5: Chrome Extension Bridge MVP
 
-- [ ] Create our own Manifest V3 extension.
-- [ ] Add side panel/status page.
-- [ ] Add background service worker.
-- [ ] Add backend WebSocket connection.
-- [ ] Add extension registration message.
-- [ ] Add connected/disconnected UI state.
-- [ ] Add heartbeat/reconnect behavior.
-- [ ] Add local session token or pairing code.
+- [x] Create our own Manifest V3 extension.
+- [x] Add side panel/status page.
+- [x] Add background service worker.
+- [x] Add backend WebSocket connection.
+- [x] Add extension registration message.
+- [x] Add connected/disconnected UI state.
+- [x] Add heartbeat/reconnect behavior.
+- [x] Add local session token or pairing code.
 
 Manual tests after Phase 5:
 
@@ -217,7 +217,7 @@ Manual tests after Phase 10:
 - [x] Phase 2: Storyboard Backend MVP
 - [x] Phase 3: Storyboard Frontend UI
 - [x] Phase 4: Generation Queue Backend
-- [ ] Phase 5: Chrome Extension Bridge MVP
+- [x] Phase 5: Chrome Extension Bridge MVP
 - [ ] Phase 6: Provider Adapter MVP
 - [ ] Phase 7: Timeline Import
 - [ ] Phase 8: Reliability And Batch Controls

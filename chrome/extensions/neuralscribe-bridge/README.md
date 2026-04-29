@@ -1,8 +1,8 @@
 # NeuralScribe Chrome Bridge
 
-This folder is reserved for NeuralScribe's own Chrome extension.
+This is NeuralScribe's own Chrome extension.
 
-The extension will connect the local app to the user's existing Chrome browser. It will not modify or depend on the third-party extensions stored under `chrome/extentions`.
+The extension connects the local app to the user's existing Chrome browser. It does not modify or depend on the third-party extensions stored under `chrome/extentions`.
 
 Phase 1 decisions:
 
@@ -12,3 +12,26 @@ Phase 1 decisions:
 - Start with Meta as the first provider adapter.
 - Add Grok after the bridge and Meta adapter are stable.
 - Use local/free generation flow: local transcription, local/rule-based storyboarding, browser-based provider generation.
+
+Phase 5 MVP:
+
+- Manifest V3 extension with a background service worker.
+- Side panel with connection status, backend URL, session token, and provider toggles.
+- WebSocket connection to `ws://127.0.0.1:8000/api/browser-bridge/ws`.
+- `worker.ready` registration and `worker.heartbeat` messages.
+- Reconnect when the backend drops.
+
+Useful ideas from the existing extension folders:
+
+- Keep browser UI in a side panel.
+- Keep durable connection/control work in the background worker.
+- Keep provider-specific DOM selectors isolated from bridge plumbing.
+- Send clear status updates to the UI while automation runs.
+
+Manual load:
+
+1. Open Chrome extensions: `chrome://extensions`.
+2. Enable Developer mode.
+3. Click Load unpacked.
+4. Select `chrome/extensions/neuralscribe-bridge`.
+5. Click the NeuralScribe Bridge toolbar icon.
