@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Auto Meta Launcher</title>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Nunito', sans-serif;
+            background-color: #1a202c;
+            color: #fff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .top-bar {
+            padding: 12px 12px 5px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .lang-switch {
+            display: flex;
+            align-items: center;
+            background: rgba(138, 180, 248, 0.15);
+            padding: 5px 10px;
+            border-radius: 20px;
+            gap: 6px;
+            border: 1px solid #8ab4f8;
+            box-shadow: 0 0 10px rgba(138, 180, 248, 0.4);
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .lang-switch:hover {
+            background: rgba(138, 180, 248, 0.25);
+            box-shadow: 0 0 15px rgba(138, 180, 248, 0.7);
+            transform: translateY(-1px);
+        }
+
+        .lang-switch span {
+            font-size: 20px;
+            color: #8ab4f8;
+        }
+
+        .lang-switch select {
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+            outline: none;
+            font-weight: 700;
+        }
+
+        .lang-switch select option {
+            background: #1a202c;
+            color: #fff;
+        }
+
+        .container {
+            padding: 0 20px 20px 20px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            box-sizing: border-box;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            text-align: left;
+            margin-top: 10px;
+        }
+
+        .header-text {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header img.logo {
+            width: 56px;
+            height: 56px;
+            filter: drop-shadow(0 0 10px rgba(138, 180, 248, 0.3));
+            flex-shrink: 0;
+        }
+
+        .header h1 {
+            margin: 0;
+            color: #8ab4f8;
+            font-size: 1.5rem;
+            line-height: 1.2;
+        }
+
+        .header p {
+            color: #9aa0a6;
+            margin: 2px 0 0 0;
+            font-size: 0.8rem;
+            line-height: 1.3;
+        }
+
+        .versions {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-top: 25px;
+        }
+
+        .version-card {
+            background: #2d3748;
+            border: 1px solid #4a5568;
+            border-radius: 12px;
+            padding: 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+            text-align: left;
+        }
+
+        .version-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .version-card:active {
+            transform: translateY(0);
+        }
+
+        .icon-area {
+            width: 48px;
+            height: 48px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .icon-area span {
+            font-size: 28px;
+        }
+
+        .info {
+            flex: 1;
+        }
+
+        .info h3 {
+            margin: 0 0 4px 0;
+            font-size: 1.05rem;
+            color: #e8eaed;
+        }
+
+        .info p {
+            margin: 0;
+            font-size: 0.8rem;
+            color: #bdc1c6;
+            line-height: 1.3;
+        }
+
+        .info p b {
+            color: #fff;
+        }
+
+        .arrow {
+            color: #5f6368;
+            font-size: 20px;
+        }
+
+        /* --- Auto Meta: Primary Card --- */
+        .version-card.primary {
+            border-color: rgba(138, 180, 248, 0.5);
+            background: linear-gradient(145deg, rgba(45, 55, 72, 1) 0%, rgba(26, 32, 44, 1) 100%);
+        }
+
+        .version-card.primary:hover {
+            border-color: #8ab4f8;
+        }
+
+        .version-card.primary .icon-area span {
+            color: #8ab4f8;
+        }
+
+        .badge {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background: #27ae60;
+            color: white;
+            font-size: 0.6rem;
+            font-weight: bold;
+            padding: 3px 10px;
+            border-bottom-left-radius: 8px;
+        }
+
+        /* --- G-Labs Automation: Premium Card --- */
+        .version-card.local {
+            border: 1px solid transparent;
+            background:
+                linear-gradient(145deg, rgba(55, 48, 74, 1) 0%, rgba(30, 24, 50, 1) 50%, rgba(45, 30, 60, 1) 100%) padding-box,
+                linear-gradient(135deg, #a78bfa, #f472b6, #fbbf24, #a78bfa) border-box;
+            background-size: 100% 100%, 300% 300%;
+            animation: borderShift 4s ease infinite;
+            box-shadow: 0 0 15px rgba(167, 139, 250, 0.25), 0 0 30px rgba(167, 139, 250, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .version-card.local::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, 0.06) 45%, rgba(255, 255, 255, 0.12) 50%, rgba(255, 255, 255, 0.06) 55%, transparent 60%);
+            background-size: 200% 100%;
+            animation: shimmer 3s ease-in-out infinite;
+            pointer-events: none;
+            border-radius: 12px;
+        }
+
+        .version-card.local:hover {
+            box-shadow: 0 0 20px rgba(167, 139, 250, 0.45), 0 0 40px rgba(244, 114, 182, 0.2);
+            transform: translateY(-4px);
+        }
+
+        .version-card.local .icon-area {
+            background: linear-gradient(135deg, rgba(167, 139, 250, 0.2), rgba(244, 114, 182, 0.15));
+            border: 1px solid rgba(167, 139, 250, 0.3);
+        }
+
+        .version-card.local .icon-area span {
+            color: #c4b5fd;
+            font-size: 30px;
+        }
+
+        .version-card.local .info h3 {
+            color: #e9d5ff;
+        }
+
+        .version-card.local .info p b {
+            color: #fbbf24;
+        }
+
+        .version-card.local .arrow {
+            color: #c4b5fd;
+        }
+
+        .badge-local {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background: linear-gradient(135deg, #8b5cf6, #ec4899);
+            color: white;
+            font-size: 0.55rem;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            padding: 4px 12px;
+            border-bottom-left-radius: 10px;
+            box-shadow: 0 2px 8px rgba(139, 92, 246, 0.4);
+            text-transform: uppercase;
+        }
+
+        @keyframes borderShift {
+
+            0%,
+            100% {
+                background-position: 0 0, 0% 50%;
+            }
+
+            50% {
+                background-position: 0 0, 100% 50%;
+            }
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: 200% 0;
+            }
+
+            100% {
+                background-position: -200% 0;
+            }
+        }
+
+        .quick-links {
+            margin-top: auto;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            padding-top: 20px;
+        }
+
+        .link-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            color: #9aa0a6;
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: color 0.2s;
+        }
+
+        .link-item:hover {
+            color: #fff;
+        }
+
+        .link-item span.material-symbols-outlined {
+            font-size: 18px;
+        }
+
+        .social-links {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 18px;
+        }
+
+        .social-link {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #e8eaed;
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 700;
+            padding: 10px 16px;
+            border-radius: 10px;
+            border: 1px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+        .social-link:hover {
+            color: #fff;
+            transform: translateY(-2px);
+        }
+
+        .social-link svg {
+            flex-shrink: 0;
+        }
+
+        .social-link.youtube {
+            background: rgba(255, 0, 0, 0.12);
+            border-color: rgba(255, 0, 0, 0.35);
+            box-shadow: 0 0 8px rgba(255, 0, 0, 0.08);
+        }
+
+        .social-link.youtube:hover {
+            background: rgba(255, 0, 0, 0.2);
+            border-color: rgba(255, 0, 0, 0.6);
+            box-shadow: 0 4px 16px rgba(255, 0, 0, 0.25);
+        }
+
+        .social-link.discord {
+            background: rgba(88, 101, 242, 0.12);
+            border-color: rgba(88, 101, 242, 0.35);
+            box-shadow: 0 0 8px rgba(88, 101, 242, 0.08);
+        }
+
+        .social-link.discord:hover {
+            background: rgba(88, 101, 242, 0.2);
+            border-color: rgba(88, 101, 242, 0.6);
+            box-shadow: 0 4px 16px rgba(88, 101, 242, 0.25);
+        }
+
+        .footer {
+            margin-top: 15px;
+            font-size: 0.8rem;
+            color: #718096;
+            font-weight: 600;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="top-bar">
+        <div class="lang-switch">
+            <span class="material-symbols-outlined">language</span>
+            <select id="languageSelector">
+                <option value="vi">Tiếng Việt</option>
+                <option value="en">English</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <img src="images/logo.png" alt="Logo" class="logo">
+            <div class="header-text">
+                <h1>Auto Meta</h1>
+                <p data-lang-key="subtitle">Trình quản lý tự động cho <a href='https://www.meta.ai/create'
+                        target='_blank' style='color: inherit; text-decoration: underline;'>Meta AI</a></p>
+            </div>
+        </div>
+
+        <div class="versions">
+            <div class="version-card primary" id="btn-autometa">
+                <div class="badge" data-lang-key="badge_recommended">KHUYÊN DÙNG</div>
+                <div class="icon-area">
+                    <span class="material-symbols-outlined">smart_toy</span>
+                </div>
+                <div class="info">
+                    <h3 data-lang-key="autometa_title">Auto Meta</h3>
+                    <p data-lang-key="autometa_desc">
+                        Tự động tạo video & ảnh trên Meta AI. <b>Hỗ trợ hàng loạt prompt, ảnh tham chiếu & tải media tự
+                            động.</b>
+                    </p>
+                </div>
+                <span class="material-symbols-outlined arrow">chevron_right</span>
+            </div>
+
+            <div class="version-card local" id="btn-local">
+                <div class="badge-local" data-lang-key="badge_local">⭐ ĐẶC BIỆT</div>
+                <div class="icon-area">
+                    <span class="material-symbols-outlined">desktop_windows</span>
+                </div>
+                <div class="info">
+                    <h3 data-lang-key="local_title">G-Labs Automation</h3>
+                    <p data-lang-key="local_desc">
+                        Phiên bản desktop mạnh mẽ nhất — <b>không giới hạn tài khoản & luồng tạo ảnh/video</b>. Biến
+                        hàng ngàn ý tưởng thành hình ảnh chỉ trong vài phút!
+                    </p>
+                </div>
+                <span class="material-symbols-outlined arrow">open_in_new</span>
+            </div>
+
+            <div class="version-card local" id="btn-voice">
+                <div class="badge-local" data-lang-key="badge_voice">🎙️ MỚI</div>
+                <div class="icon-area">
+                    <span class="material-symbols-outlined">record_voice_over</span>
+                </div>
+                <div class="info">
+                    <h3 data-lang-key="voice_title">G-Labs Voice Studio</h3>
+                    <p data-lang-key="voice_desc">
+                        Studio giọng nói AI dành cho người sáng tạo — <b>Nhân bản giọng nói / Văn bản thành giọng nói /
+                            Giọng nói thành văn bản</b> / Hỗ trợ hơn 600 ngôn ngữ.
+                    </p>
+                </div>
+                <span class="material-symbols-outlined arrow">open_in_new</span>
+            </div>
+        </div>
+
+        <div class="social-links">
+            <a href="https://www.youtube.com/@duckmartians" target="_blank" rel="noopener noreferrer"
+                class="social-link youtube">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="#FF0000">
+                    <path
+                        d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                </svg>
+                <span>duckmartians</span>
+            </a>
+            <a href="https://www.youtube.com/@duckproductionhub" target="_blank" rel="noopener noreferrer"
+                class="social-link youtube">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="#FF0000">
+                    <path
+                        d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                </svg>
+                <span>duckproductionhub</span>
+            </a>
+            <a href="https://discord.gg/munMZEBMw5" target="_blank" rel="noopener noreferrer"
+                class="social-link discord">
+                <svg width="22" height="22" viewBox="0 0 71 55" fill="#5865F2">
+                    <path
+                        d="M60.1 4.9A58.5 58.5 0 0045.4.2a.2.2 0 00-.2.1 40.8 40.8 0 00-1.8 3.7 54 54 0 00-16.2 0A37.5 37.5 0 0025.4.3a.2.2 0 00-.2-.1A58.4 58.4 0 0010.5 4.9a.2.2 0 00-.1.1A59.8 59.8 0 00.6 45.4a.2.2 0 00.1.2A58.8 58.8 0 0018.3 54a.2.2 0 00.3-.1 42 42 0 003.6-5.9.2.2 0 00-.1-.3 38.8 38.8 0 01-5.5-2.6.2.2 0 01 0-.4l1.1-.9a.2.2 0 01.2 0 42 42 0 0035.6 0 .2.2 0 01.2 0l1.1.9a.2.2 0 010 .3 36.4 36.4 0 01-5.5 2.7.2.2 0 00-.1.3 47.2 47.2 0 003.6 5.9.2.2 0 00.3.1A58.6 58.6 0 0070 45.6a.2.2 0 00.1-.2A59.5 59.5 0 0060.2 5a.2.2 0 00-.1-.1zM23.7 37.3c-3.5 0-6.4-3.2-6.4-7.1s2.8-7.1 6.4-7.1 6.5 3.2 6.4 7.1c0 3.9-2.8 7.1-6.4 7.1zm23.6 0c-3.5 0-6.4-3.2-6.4-7.1s2.8-7.1 6.4-7.1 6.5 3.2 6.4 7.1c0 3.9-2.8 7.1-6.4 7.1z" />
+                </svg>
+                <span>Discord Community</span>
+            </a>
+        </div>
+
+        <div class="quick-links">
+            <a href="https://github.com/duckmartians/Auto-MetaAI" target="_blank" class="link-item">
+                <span class="material-symbols-outlined">menu_book</span> <span data-lang-key="link_guide">Hướng
+                    dẫn</span>
+            </a>
+            <a href="#" class="link-item" style="color: #fdd663;">
+                <span class="material-symbols-outlined">coffee</span> <span data-lang-key="link_donate">Mời tôi ly cà
+                    phê</span>
+            </a>
+        </div>
+
+        <div class="footer">
+            Designed by duckmartians
+        </div>
+    </div>
+    <script src="gateway.js"></script>
+</body>
+
+</html>
