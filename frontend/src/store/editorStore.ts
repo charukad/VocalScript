@@ -7,12 +7,24 @@ import type {
   TextData,
   ExportSettings,
   CaptionSegment,
+  GeneratedMediaAsset,
+  GenerationJob,
   KeyframeProperty,
   StoryboardScene,
   StoryboardSettings,
 } from '../types';
 import { getMediaDuration, generateThumbnail, generateWaveform, generateFilmstrip } from '../lib/utils/media';
-import { createStoryboardFromAudio, createStoryboardFromTranscript, exportTimeline, transcribeMedia } from '../lib/api/client';
+import {
+  createGenerationJobs,
+  createStoryboardFromAudio,
+  createStoryboardFromTranscript,
+  exportTimeline,
+  listGeneratedMediaAssets,
+  listGenerationJobs,
+  resolveBackendMediaUrl,
+  storeRemoteGenerationJob,
+  transcribeMedia,
+} from '../lib/api/client';
 import { clampKeyframeTime, getClipPropertyValue, getKeyframedValue } from '../lib/utils/keyframes';
 
 const DEFAULT_TEXT_DATA: TextData = {
@@ -57,6 +69,7 @@ const cloneClips = (clips: TimelineClip[]) => clips.map(clip => ({
   audio: clip.audio ? { ...clip.audio } : undefined,
   textData: clip.textData ? { ...clip.textData } : undefined,
   keyframes: clip.keyframes ? clip.keyframes.map(keyframe => ({ ...keyframe })) : undefined,
+  generation: clip.generation ? { ...clip.generation } : undefined,
 }));
 
 const cloneTracks = (tracks: TimelineTrack[]) => tracks.map(track => ({ ...track }));
@@ -216,6 +229,7 @@ export type EditorState = {
   // Auto Video Storyboard
   storyboardSettings: StoryboardSettings;
   storyboardScenes: StoryboardScene[];
+  generationJobs: GenerationJob[];
   isGeneratingStoryboard: boolean;
   storyboardStatus: string | null;
   setStoryboardSettings: (settings: Partial<StoryboardSettings>) => void;
@@ -225,6 +239,9 @@ export type EditorState = {
   duplicateStoryboardScene: (id: string) => void;
   deleteStoryboardScene: (id: string) => void;
   approveStoryboard: () => void;
+  createJobsFromApprovedScenes: () => Promise<void>;
+  refreshGenerationJobs: () => Promise<void>;
+  importCompletedGenerationMedia: () => Promise<void>;
 };
 
 const getTranscriptSourceClip = (state: Pick<EditorState, 'clips' | 'selectedClipId'>): TimelineClip | null => {
@@ -287,6 +304,127 @@ const normalizeStoryboardScenes = (scenes: StoryboardScene[], fallback: Storyboa
     camera: scene.camera || (scene.visualType === 'video' ? 'slow cinematic push-in' : 'static'),
     status: scene.status || 'draft',
   }));
+};
+
+const makeId = () => Math.random().toString(36).substring(7);
+
+const makeTrack = (tracks: TimelineTrack[], type: MediaType): TimelineTrack => {
+  const typeTracks = tracks.filter(track => track.type === type);
+  const prefix = type === 'visual' ? 'V' : type === 'audio' ? 'A' : 'T';
+  return {
+    id: makeId(),
+    name: `${prefix}${typeTracks.length + 1}`,
+    type,
+    order: tracks.length,
+    muted: false,
+    solo: false,
+    locked: false,
+  };
+};
+
+const getGeneratedFileName = (asset: GeneratedMediaAsset, resultUrl: string): string => {
+  const fallbackExtension = asset.mediaType === 'video' ? 'mp4' : 'png';
+  try {
+    const parsed = new URL(resultUrl, window.location.href);
+    const name = parsed.pathname.split('/').filter(Boolean).pop();
+    if (name) return name;
+  } catch {
+    const name = resultUrl.split('?')[0].split('/').filter(Boolean).pop();
+    if (name) return name;
+  }
+  return `${asset.jobId}.${fallbackExtension}`;
+};
+
+const getGeneratedFallbackMime = (asset: GeneratedMediaAsset): string => {
+  return asset.mediaType === 'video' ? 'video/mp4' : 'image/png';
+};
+
+const isRemoteMediaUrl = (resultUrl: string): boolean => /^https?:\/\//i.test(resultUrl);
+
+const fetchGeneratedMediaFile = async (asset: GeneratedMediaAsset): Promise<File> => {
+  if (!asset.resultUrl) {
+    throw new Error('Generated media has no result URL.');
+  }
+  const response = await fetch(resolveBackendMediaUrl(asset.resultUrl));
+  if (!response.ok) {
+    throw new Error(`Generated media download failed (${response.status}).`);
+  }
+  const blob = await response.blob();
+  const fileType = blob.type || getGeneratedFallbackMime(asset);
+  return new File([blob], getGeneratedFileName(asset, asset.resultUrl), { type: fileType });
+};
+
+const generatedMetadata = (asset: GeneratedMediaAsset): NonNullable<TimelineClip['generation']> => ({
+  jobId: asset.jobId,
+  sceneId: asset.sceneId,
+  provider: asset.provider,
+  status: asset.status,
+  prompt: asset.prompt,
+  transcript: asset.transcript,
+});
+
+const makeGeneratedPlaceholderClip = (asset: GeneratedMediaAsset, trackId: string): TimelineClip => {
+  const label = asset.status === 'failed' ? 'Generation failed' : 'Manual action needed';
+  const detail = asset.error || asset.prompt || asset.transcript || asset.sceneId;
+  const placeholderFile = new File([], `${asset.jobId}-placeholder.txt`, { type: 'text/plain' });
+  return {
+    id: makeId(),
+    assetId: `generated-placeholder-${asset.jobId}`,
+    trackId,
+    file: placeholderFile,
+    type: 'text',
+    duration: Math.max(0.1, asset.duration),
+    startTime: Math.max(0, asset.start),
+    mediaOffset: 0,
+    audio: { volume: 0, mute: true, fadeIn: 0, fadeOut: 0 },
+    transform: { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false },
+    textData: {
+      ...DEFAULT_TEXT_DATA,
+      content: `${label}\n${detail}`.slice(0, 180),
+      fontSize: 34,
+      y: 50,
+      bgOpacity: 0.55,
+    },
+    generation: generatedMetadata(asset),
+  };
+};
+
+const getGeneratedAssetRank = (asset: GeneratedMediaAsset): number => {
+  const statusScore = asset.status === 'completed'
+    ? 3
+    : asset.status === 'manual_action_required'
+      ? 2
+      : asset.status === 'failed'
+        ? 1
+        : 0;
+  return statusScore * 10 + (asset.localPath ? 1 : 0);
+};
+
+const selectGeneratedAssetsForImport = (
+  assets: GeneratedMediaAsset[],
+  existingClips: TimelineClip[],
+): GeneratedMediaAsset[] => {
+  const importedJobIds = new Set(
+    existingClips
+      .map(clip => clip.generation?.jobId)
+      .filter((jobId): jobId is string => Boolean(jobId))
+  );
+  const importedSceneIds = new Set(
+    existingClips
+      .map(clip => clip.generation?.sceneId)
+      .filter((sceneId): sceneId is string => Boolean(sceneId))
+  );
+  const bestByScene = new Map<string, GeneratedMediaAsset>();
+
+  for (const asset of assets) {
+    if (importedJobIds.has(asset.jobId) || importedSceneIds.has(asset.sceneId)) continue;
+    const existing = bestByScene.get(asset.sceneId);
+    if (!existing || getGeneratedAssetRank(asset) >= getGeneratedAssetRank(existing)) {
+      bestByScene.set(asset.sceneId, asset);
+    }
+  }
+
+  return [...bestByScene.values()].sort((a, b) => a.start - b.start || a.sceneId.localeCompare(b.sceneId));
 };
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -743,6 +881,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   mediaUrl: null,
   storyboardSettings: DEFAULT_STORYBOARD_SETTINGS,
   storyboardScenes: [],
+  generationJobs: [],
   isGeneratingStoryboard: false,
   storyboardStatus: null,
   exportSequence: async () => {
@@ -1010,5 +1149,203 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       storyboardScenes: state.storyboardScenes.map(scene => ({ ...scene, status: 'approved' })),
       storyboardStatus: 'Storyboard approved. Ready for generation queue.',
     }));
+  },
+  createJobsFromApprovedScenes: async () => {
+    const state = get();
+    const approvedScenes = state.storyboardScenes.filter(scene => scene.status === 'approved');
+    if (approvedScenes.length === 0) {
+      alert('Approve storyboard scenes before creating generation jobs.');
+      return;
+    }
+
+    set({ storyboardStatus: 'Creating generation jobs...' });
+    try {
+      const response = await createGenerationJobs(approvedScenes, state.storyboardSettings.provider);
+      set({
+        generationJobs: response.jobs,
+        storyboardStatus: `Created ${response.jobs.length} generation jobs.`,
+      });
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Generation job creation failed');
+      set({ storyboardStatus: 'Generation job creation failed.' });
+    }
+  },
+  refreshGenerationJobs: async () => {
+    set({ storyboardStatus: 'Refreshing generation jobs...' });
+    try {
+      const response = await listGenerationJobs();
+      set({
+        generationJobs: response.jobs,
+        storyboardStatus: `Generation jobs refreshed: ${response.jobs.length} total.`,
+      });
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Could not refresh generation jobs');
+      set({ storyboardStatus: 'Generation job refresh failed.' });
+    }
+  },
+  importCompletedGenerationMedia: async () => {
+    set({ storyboardStatus: 'Importing generated media...' });
+    try {
+      const jobsResponse = await listGenerationJobs();
+      set({ generationJobs: jobsResponse.jobs });
+
+      const mediaResponse = await listGeneratedMediaAssets(true);
+      const generatedAssets = selectGeneratedAssetsForImport(mediaResponse.assets, get().clips);
+
+      if (generatedAssets.length === 0) {
+        set({ storyboardStatus: 'No new generated media to import.' });
+        return;
+      }
+
+      let preparedTracks = [...get().tracks];
+      let visualTrack = preparedTracks.find(track => track.type === 'visual');
+      if (!visualTrack) {
+        visualTrack = makeTrack(preparedTracks, 'visual');
+        preparedTracks = [...preparedTracks, visualTrack];
+      }
+
+      let textTrack = preparedTracks.find(track => track.type === 'text');
+      const ensureTextTrack = (): TimelineTrack => {
+        if (!textTrack) {
+          textTrack = makeTrack(preparedTracks, 'text');
+          preparedTracks = [...preparedTracks, textTrack];
+        }
+        return textTrack;
+      };
+
+      const newAssets: MediaAsset[] = [];
+      const newClips: TimelineClip[] = [];
+      let importedCount = 0;
+      let placeholderCount = 0;
+
+      for (const generated of generatedAssets) {
+        if (generated.status === 'completed' && generated.resultUrl) {
+          let assetForImport = generated;
+          if (isRemoteMediaUrl(generated.resultUrl) && !generated.localPath) {
+            try {
+              const storedJob = await storeRemoteGenerationJob(generated.jobId);
+              assetForImport = {
+                ...generated,
+                status: storedJob.status,
+                mediaType: storedJob.mediaType,
+                resultUrl: storedJob.resultUrl,
+                localPath: storedJob.localPath,
+                error: storedJob.error,
+                metadata: storedJob.metadata,
+              };
+            } catch (error) {
+              console.warn('Backend could not store remote generated media, trying browser fetch.', error);
+            }
+          }
+
+          try {
+            const file = await fetchGeneratedMediaFile(assetForImport);
+            const mediaKind = assetForImport.mediaType === 'video' ? 'video' : 'image';
+            const thumbnailUrl = await generateThumbnail(file, mediaKind);
+            const assetId = `generated-${assetForImport.jobId}`;
+            const newAsset: MediaAsset = {
+              id: assetId,
+              file,
+              type: 'visual',
+              mediaKind,
+              thumbnailUrl,
+            };
+
+            if (mediaKind === 'video') {
+              const sourceDuration = await getMediaDuration(file, 'visual');
+              const framesCount = Math.min(50, Math.max(5, Math.ceil(sourceDuration / 2)));
+              newAsset.filmstrip = await generateFilmstrip(file, sourceDuration, framesCount);
+            }
+
+            newAssets.push(newAsset);
+            newClips.push({
+              id: makeId(),
+              assetId,
+              trackId: visualTrack.id,
+              file,
+              type: 'visual',
+              duration: Math.max(0.1, assetForImport.duration),
+              startTime: Math.max(0, assetForImport.start),
+              mediaOffset: 0,
+              transform: { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false },
+              color: { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 },
+              audio: { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 },
+              generation: generatedMetadata(assetForImport),
+            });
+            importedCount += 1;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Generated media could not be imported.';
+            newClips.push(makeGeneratedPlaceholderClip(
+              { ...generated, status: 'manual_action_required', error: message },
+              ensureTextTrack().id
+            ));
+            placeholderCount += 1;
+          }
+        } else {
+          newClips.push(makeGeneratedPlaceholderClip(generated, ensureTextTrack().id));
+          placeholderCount += 1;
+        }
+      }
+
+      if (newClips.length === 0) {
+        set({ storyboardStatus: 'No new generated media to import.' });
+        return;
+      }
+
+      const refreshedJobs = await listGenerationJobs().catch(() => null);
+      set(state => {
+        const importedJobIds = new Set(
+          state.clips
+            .map(clip => clip.generation?.jobId)
+            .filter((jobId): jobId is string => Boolean(jobId))
+        );
+        const importedSceneIds = new Set(
+          state.clips
+            .map(clip => clip.generation?.sceneId)
+            .filter((sceneId): sceneId is string => Boolean(sceneId))
+        );
+        const clipsToAdd = newClips.filter(clip =>
+          !clip.generation ||
+          (!importedJobIds.has(clip.generation.jobId) && !importedSceneIds.has(clip.generation.sceneId))
+        );
+        const assetIdsToAdd = new Set(clipsToAdd.map(clip => clip.assetId));
+        const assetsToAdd = newAssets.filter(asset => assetIdsToAdd.has(asset.id));
+
+        if (clipsToAdd.length === 0) {
+          return {
+            generationJobs: refreshedJobs?.jobs ?? state.generationJobs,
+            storyboardStatus: 'Generated media is already on the timeline.',
+          };
+        }
+
+        let tracks = state.tracks;
+        for (const track of preparedTracks) {
+          if (!tracks.some(existing => existing.id === track.id)) {
+            tracks = [...tracks, { ...track, order: tracks.length }];
+          }
+        }
+
+        const statusParts = [
+          importedCount > 0 ? `${importedCount} media clip${importedCount === 1 ? '' : 's'}` : null,
+          placeholderCount > 0 ? `${placeholderCount} placeholder${placeholderCount === 1 ? '' : 's'}` : null,
+        ].filter(Boolean);
+
+        return {
+          ...withHistory(state),
+          assets: [...state.assets, ...assetsToAdd],
+          tracks,
+          clips: [...state.clips, ...clipsToAdd],
+          selectedClipId: clipsToAdd[0]?.id ?? state.selectedClipId,
+          generationJobs: refreshedJobs?.jobs ?? state.generationJobs,
+          storyboardStatus: `Imported ${statusParts.join(' and ')} to the timeline.`,
+        };
+      });
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Generated media import failed');
+      set({ storyboardStatus: 'Generated media import failed.' });
+    }
   }
 }));

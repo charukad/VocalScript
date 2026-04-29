@@ -6,17 +6,27 @@ const elements = {
   wsUrl: document.getElementById("wsUrl"),
   httpBaseUrl: document.getElementById("httpBaseUrl"),
   sessionToken: document.getElementById("sessionToken"),
+  metaUrl: document.getElementById("metaUrl"),
+  jobTimeoutSeconds: document.getElementById("jobTimeoutSeconds"),
   providerMeta: document.getElementById("providerMeta"),
   providerGrok: document.getElementById("providerGrok"),
   saveBtn: document.getElementById("saveBtn"),
   connectBtn: document.getElementById("connectBtn"),
   disconnectBtn: document.getElementById("disconnectBtn"),
+  jobRunnerText: document.getElementById("jobRunnerText"),
+  currentJobText: document.getElementById("currentJobText"),
+  startJobsBtn: document.getElementById("startJobsBtn"),
+  claimOnceBtn: document.getElementById("claimOnceBtn"),
+  stopJobsBtn: document.getElementById("stopJobsBtn"),
   logEntries: document.getElementById("logEntries"),
 };
 
 elements.saveBtn.addEventListener("click", saveSettings);
 elements.connectBtn.addEventListener("click", connectBridge);
 elements.disconnectBtn.addEventListener("click", disconnectBridge);
+elements.startJobsBtn.addEventListener("click", startJobs);
+elements.claimOnceBtn.addEventListener("click", claimOnce);
+elements.stopJobsBtn.addEventListener("click", stopJobs);
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "bridge.statusChanged") {
@@ -80,6 +90,8 @@ function readSettings() {
     wsUrl: elements.wsUrl.value,
     httpBaseUrl: elements.httpBaseUrl.value,
     sessionToken: elements.sessionToken.value,
+    metaUrl: elements.metaUrl.value,
+    jobTimeoutMs: Math.max(30, Number(elements.jobTimeoutSeconds.value) || 180) * 1000,
     providers,
   };
 }
@@ -88,6 +100,8 @@ function renderSettings(settings) {
   elements.wsUrl.value = settings.wsUrl || "";
   elements.httpBaseUrl.value = settings.httpBaseUrl || "";
   elements.sessionToken.value = settings.sessionToken || "";
+  elements.metaUrl.value = settings.metaUrl || "";
+  elements.jobTimeoutSeconds.value = Math.round((settings.jobTimeoutMs || 180000) / 1000);
   elements.providerMeta.checked = (settings.providers || []).includes("meta");
   elements.providerGrok.checked = (settings.providers || []).includes("grok");
 }
@@ -99,6 +113,40 @@ function renderStatus(status) {
   elements.statusText.textContent = status.message || status.status || "Disconnected";
   elements.workerId.textContent = status.workerId || "Worker pending";
   elements.updatedAt.textContent = status.updatedAt ? new Date(status.updatedAt).toLocaleTimeString() : "-";
+  elements.jobRunnerText.textContent = status.jobMessage || (status.jobRunning ? "Running" : "Stopped");
+  elements.currentJobText.textContent = status.currentJob?.id || "-";
+}
+
+async function startJobs() {
+  await saveSettings();
+  const response = await send({ type: "jobs.start" });
+  if (response.ok) {
+    renderStatus(response.status);
+    addLog("Job runner started");
+  } else {
+    addLog(response.error || "Job runner start failed");
+  }
+}
+
+async function claimOnce() {
+  await saveSettings();
+  const response = await send({ type: "jobs.claimOnce" });
+  if (response.ok) {
+    renderStatus(response.status);
+    addLog(response.status.jobMessage || "Run once complete");
+  } else {
+    addLog(response.error || "Run once failed");
+  }
+}
+
+async function stopJobs() {
+  const response = await send({ type: "jobs.stop" });
+  if (response.ok) {
+    renderStatus(response.status);
+    addLog("Job runner stopped");
+  } else {
+    addLog(response.error || "Job runner stop failed");
+  }
 }
 
 function addLog(message) {

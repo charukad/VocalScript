@@ -40,6 +40,14 @@
           Session Token
           <input id="sessionToken" type="password" spellcheck="false">
         </label>
+        <label>
+          Meta URL
+          <input id="metaUrl" type="text" spellcheck="false">
+        </label>
+        <label>
+          Job Timeout Seconds
+          <input id="jobTimeoutSeconds" type="number" min="30" step="10">
+        </label>
         <fieldset>
           <legend>Providers</legend>
           <label class="check-row">
@@ -57,6 +65,23 @@
         <button id="saveBtn" class="secondary">Save</button>
         <button id="connectBtn" class="primary">Connect</button>
         <button id="disconnectBtn" class="secondary">Disconnect</button>
+      </section>
+
+      <section class="status-card">
+        <div class="status-line">
+          <span>Job Runner</span>
+          <strong id="jobRunnerText">Stopped</strong>
+        </div>
+        <div class="status-line">
+          <span>Current Job</span>
+          <strong id="currentJobText">-</strong>
+        </div>
+      </section>
+
+      <section class="actions">
+        <button id="startJobsBtn" class="primary">Start Jobs</button>
+        <button id="claimOnceBtn" class="secondary">Run Once</button>
+        <button id="stopJobsBtn" class="secondary">Stop Jobs</button>
       </section>
 
       <section class="log">

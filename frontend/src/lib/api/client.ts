@@ -4,10 +4,14 @@ import type {
   ExportSettings,
   CaptionSegment,
   GeneratedMediaType,
+  GeneratedMediaAsset,
   ProviderName,
+  GenerationJob,
   StoryboardScene,
   TranscriptSlice,
 } from '../../types';
+
+const API_BASE_URL = 'http://localhost:8000';
 
 export type ExportResponse = {
   srtContent: string;
@@ -36,6 +40,19 @@ export type StoryboardGenerationOptions = {
   provider: ProviderName;
   preferredVisualType: GeneratedMediaType;
   style: string;
+};
+
+export type GenerationJobListResponse = {
+  jobs: GenerationJob[];
+};
+
+export type GeneratedMediaListResponse = {
+  assets: GeneratedMediaAsset[];
+};
+
+export const resolveBackendMediaUrl = (url: string): string => {
+  if (url.startsWith('/')) return `${API_BASE_URL}${url}`;
+  return url;
 };
 
 const formatExportError = (detail: unknown): string => {
@@ -189,7 +206,7 @@ export const exportTimeline = async (
     formData.append('files', newFile);
   });
 
-  const response = await fetch('http://localhost:8000/api/export', {
+  const response = await fetch(`${API_BASE_URL}/api/export`, {
     method: 'POST',
     body: formData,
     signal,
@@ -202,7 +219,7 @@ export const exportTimeline = async (
 
   const data = await response.json();
   // Ensure we format the local URL correctly
-  data.mediaUrl = 'http://localhost:8000' + data.mediaUrl;
+  data.mediaUrl = API_BASE_URL + data.mediaUrl;
   return data;
 };
 
@@ -213,7 +230,7 @@ export const transcribeMedia = async (
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch('http://localhost:8000/api/transcribe', {
+  const response = await fetch(`${API_BASE_URL}/api/transcribe`, {
     method: 'POST',
     body: formData,
     signal,
@@ -240,7 +257,7 @@ export const createStoryboardFromTranscript = async (
   options: StoryboardGenerationOptions,
   signal?: AbortSignal
 ): Promise<StoryboardResponse> => {
-  const response = await fetch('http://localhost:8000/api/generation/storyboard/from-transcript', {
+  const response = await fetch(`${API_BASE_URL}/api/generation/storyboard/from-transcript`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -272,7 +289,7 @@ export const createStoryboardFromAudio = async (
   formData.append('style', options.style);
   formData.append('provider', options.provider);
 
-  const response = await fetch('http://localhost:8000/api/generation/storyboard/from-audio', {
+  const response = await fetch(`${API_BASE_URL}/api/generation/storyboard/from-audio`, {
     method: 'POST',
     body: formData,
     signal,
@@ -281,6 +298,74 @@ export const createStoryboardFromAudio = async (
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(formatApiError(errorData.detail, 'Storyboard generation failed'));
+  }
+
+  return response.json();
+};
+
+export const createGenerationJobs = async (
+  scenes: StoryboardScene[],
+  provider: ProviderName,
+  signal?: AbortSignal
+): Promise<GenerationJobListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scenes, provider }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Generation job creation failed'));
+  }
+
+  return response.json();
+};
+
+export const listGenerationJobs = async (
+  signal?: AbortSignal
+): Promise<GenerationJobListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs`, { signal });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not refresh generation jobs'));
+  }
+
+  return response.json();
+};
+
+export const listGeneratedMediaAssets = async (
+  includePlaceholders = true,
+  signal?: AbortSignal
+): Promise<GeneratedMediaListResponse> => {
+  const params = new URLSearchParams({ include_placeholders: String(includePlaceholders) });
+  const response = await fetch(`${API_BASE_URL}/api/generation/media-assets?${params.toString()}`, { signal });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not load generated media'));
+  }
+
+  return response.json();
+};
+
+export const storeRemoteGenerationJob = async (
+  jobId: string,
+  mediaUrl?: string,
+  signal?: AbortSignal
+): Promise<GenerationJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs/${jobId}/store-remote`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(mediaUrl ? { mediaUrl } : {}),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not store remote generated media'));
   }
 
   return response.json();

@@ -75,6 +75,14 @@ export type TimelineClip = {
   };
   textData?: TextData;
   keyframes?: Keyframe[];
+  generation?: {
+    jobId: string;
+    sceneId: string;
+    provider: ProviderName;
+    status: GenerationJobStatus;
+    prompt: string;
+    transcript: string;
+  };
 };
 
 export type ExportSettings = {
@@ -129,4 +137,44 @@ export type StoryboardSettings = {
   provider: ProviderName;
   visualType: GeneratedMediaType;
   style: string;
+};
+
+export type GenerationJobStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'canceled'
+  | 'manual_action_required';
+
+export type GenerationJob = {
+  id: string;
+  sceneId: string;
+  provider: ProviderName;
+  mediaType: GeneratedMediaType;
+  prompt: string;
+  negativePrompt: string;
+  status: GenerationJobStatus;
+  resultUrl: string | null;
+  localPath: string | null;
+  error: string | null;
+  metadata: Record<string, string>;
+};
+
+export type GeneratedMediaAsset = {
+  jobId: string;
+  sceneId: string;
+  provider: ProviderName;
+  mediaType: GeneratedMediaType;
+  status: GenerationJobStatus;
+  resultUrl: string | null;
+  localPath: string | null;
+  prompt: string;
+  negativePrompt: string;
+  start: number;
+  end: number;
+  duration: number;
+  transcript: string;
+  error: string | null;
+  metadata: Record<string, string>;
 };

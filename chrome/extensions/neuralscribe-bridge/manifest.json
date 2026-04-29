@@ -13,7 +13,19 @@
   "permissions": [
     "sidePanel",
     "storage",
-    "tabs"
+    "tabs",
+    "scripting"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.meta.ai/*"
+      ],
+      "js": [
+        "providers/meta-content.js"
+      ],
+      "run_at": "document_idle"
+    }
   ],
   "host_permissions": [
     "http://127.0.0.1/*",

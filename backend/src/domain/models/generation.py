@@ -102,6 +102,28 @@ class GenerationJobListResponse(ApiModel):
     jobs: List[GenerationJob]
 
 
+class GeneratedMediaAsset(ApiModel):
+    job_id: str = Field(alias="jobId")
+    scene_id: str = Field(alias="sceneId")
+    provider: ProviderName = "meta"
+    media_type: GeneratedMediaType = Field(alias="mediaType")
+    status: GenerationJobStatus
+    result_url: Optional[str] = Field(default=None, alias="resultUrl")
+    local_path: Optional[str] = Field(default=None, alias="localPath")
+    prompt: str
+    negative_prompt: str = Field(default="", alias="negativePrompt")
+    start: float = 0.0
+    end: float = 5.0
+    duration: float = 5.0
+    transcript: str = ""
+    error: Optional[str] = None
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
+class GeneratedMediaListResponse(ApiModel):
+    assets: List[GeneratedMediaAsset]
+
+
 class GenerationJobStatusUpdate(ApiModel):
     status: GenerationJobStatus
     error: Optional[str] = None
@@ -115,6 +137,12 @@ class GenerationJobClaimRequest(ApiModel):
 
 class GenerationJobResultRequest(ApiModel):
     media_url: str = Field(alias="mediaUrl")
+    media_type: Optional[GeneratedMediaType] = Field(default=None, alias="mediaType")
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
+class GenerationJobRemoteStoreRequest(ApiModel):
+    media_url: Optional[str] = Field(default=None, alias="mediaUrl")
     media_type: Optional[GeneratedMediaType] = Field(default=None, alias="mediaType")
     metadata: Dict[str, str] = Field(default_factory=dict)
 

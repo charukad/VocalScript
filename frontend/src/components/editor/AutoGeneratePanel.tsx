@@ -39,6 +39,10 @@ export const AutoGeneratePanel = () => {
     duplicateStoryboardScene,
     deleteStoryboardScene,
     approveStoryboard,
+    createJobsFromApprovedScenes,
+    refreshGenerationJobs,
+    importCompletedGenerationMedia,
+    generationJobs,
   } = state;
 
   const sources = getStoryboardSources(state);
@@ -47,6 +51,11 @@ export const AutoGeneratePanel = () => {
   const hasTranscript = captions.some(caption => caption.text.trim());
   const canGenerate = hasTranscript || sources.length > 0;
   const approvedCount = storyboardScenes.filter(scene => scene.status === 'approved').length;
+  const jobCounts = generationJobs.reduce<Record<string, number>>((counts, job) => {
+    counts[job.status] = (counts[job.status] ?? 0) + 1;
+    return counts;
+  }, {});
+  const importReadyCount = (jobCounts.completed ?? 0) + (jobCounts.failed ?? 0) + (jobCounts.manual_action_required ?? 0);
 
   const updateScene = (id: string, field: SceneField, value: string) => {
     if (field === 'start' || field === 'end') {
@@ -134,9 +143,35 @@ export const AutoGeneratePanel = () => {
             <button className="btn-secondary" onClick={addStoryboardScene}>Add Scene</button>
             <button className="btn-secondary" onClick={approveStoryboard}>Approve</button>
           </div>
+          <button
+            className="btn-primary"
+            style={{ width: '100%', padding: '0.55rem' }}
+            onClick={createJobsFromApprovedScenes}
+            disabled={approvedCount === 0}
+          >
+            Create Generation Jobs
+          </button>
           <div className="storyboard-count">
-            {storyboardScenes.length} scenes - {approvedCount} approved
+            {storyboardScenes.length} scenes - {approvedCount} approved - {generationJobs.length} jobs
           </div>
+
+          {generationJobs.length > 0 && (
+            <div className="generation-controls">
+              <div className="generation-toolbar">
+                <button className="btn-secondary" onClick={refreshGenerationJobs}>Refresh Jobs</button>
+                <button
+                  className="btn-secondary"
+                  onClick={importCompletedGenerationMedia}
+                  disabled={importReadyCount === 0}
+                >
+                  Import Results
+                </button>
+              </div>
+              <div className="generation-summary">
+                queued {jobCounts.queued ?? 0} - running {jobCounts.running ?? 0} - completed {jobCounts.completed ?? 0} - needs action {jobCounts.manual_action_required ?? 0} - failed {jobCounts.failed ?? 0}
+              </div>
+            </div>
+          )}
 
           <div className="storyboard-list">
             {storyboardScenes.map((scene, index) => (

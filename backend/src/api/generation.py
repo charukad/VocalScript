@@ -10,10 +10,12 @@ from fastapi.responses import FileResponse
 from backend.src.domain.interfaces.transcriber import ITranscriber
 from backend.src.domain.models.generation import (
     GeneratedMediaType,
+    GeneratedMediaListResponse,
     GenerationJob,
     GenerationJobClaimRequest,
     GenerationJobCreateRequest,
     GenerationJobListResponse,
+    GenerationJobRemoteStoreRequest,
     GenerationJobResultRequest,
     GenerationJobStatus,
     GenerationJobStatusUpdate,
@@ -89,6 +91,12 @@ def build_generation_router(
     ):
         return GenerationJobListResponse(jobs=queue_service.list_jobs(status=status, provider=provider))
 
+    @router.get("/media-assets", response_model=GeneratedMediaListResponse)
+    async def list_generated_media_assets(include_placeholders: bool = True):
+        return GeneratedMediaListResponse(
+            assets=queue_service.list_generated_media_assets(include_placeholders=include_placeholders)
+        )
+
     @router.get("/jobs/{job_id}", response_model=GenerationJob)
     async def get_generation_job(job_id: str):
         job = queue_service.get_job(job_id)
@@ -155,6 +163,35 @@ def build_generation_router(
             media_type=media_type,
             metadata=_parse_metadata_form(metadata),
         )
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
+
+    @router.post("/jobs/{job_id}/store-remote", response_model=GenerationJob)
+    async def store_remote_generation_job_result(
+        job_id: str,
+        request: Optional[GenerationJobRemoteStoreRequest] = None,
+    ):
+        existing_job = queue_service.get_job(job_id)
+        if not existing_job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        media_url = request.media_url if request and request.media_url else existing_job.result_url
+        if not media_url:
+            raise HTTPException(status_code=400, detail="Job has no media URL to store")
+
+        try:
+            job = queue_service.store_remote_result(
+                job_id,
+                media_url=media_url,
+                media_type=request.media_type if request else None,
+                metadata=request.metadata if request else None,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
         return job

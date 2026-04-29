@@ -116,16 +116,16 @@ Manual tests after Phase 5:
 
 ## Phase 6: Provider Adapter MVP
 
-- [ ] Add provider adapter interface.
-- [ ] Add Meta provider content script.
-- [ ] Add provider tab open/reuse logic.
-- [ ] Add prompt input detection.
-- [ ] Add prompt fill action.
-- [ ] Add generate button click action.
-- [ ] Add result DOM observer.
-- [ ] Add media URL extraction.
-- [ ] Add manual-action-needed status for login/captcha.
-- [ ] Add result reporting back to backend.
+- [x] Add provider adapter interface.
+- [x] Add Meta provider content script.
+- [x] Add provider tab open/reuse logic.
+- [x] Add prompt input detection.
+- [x] Add prompt fill action.
+- [x] Add generate button click action.
+- [x] Add result DOM observer.
+- [x] Add media URL extraction.
+- [x] Add manual-action-needed status for login/captcha.
+- [x] Add result reporting back to backend.
 
 Manual tests after Phase 6:
 
@@ -140,13 +140,13 @@ Manual tests after Phase 6:
 
 ## Phase 7: Timeline Import
 
-- [ ] Download or store generated media in backend.
-- [ ] Add generated media asset response format.
-- [ ] Add frontend action to import generated media.
-- [ ] Place generated media clips on a visual track.
-- [ ] Match clip timing to storyboard scenes.
-- [ ] Keep failed scenes as placeholders.
-- [ ] Store scene prompt metadata on generated clips.
+- [x] Download or store generated media in backend.
+- [x] Add generated media asset response format.
+- [x] Add frontend action to import generated media.
+- [x] Place generated media clips on a visual track.
+- [x] Match clip timing to storyboard scenes.
+- [x] Keep failed scenes as placeholders.
+- [x] Store scene prompt metadata on generated clips.
 
 Manual tests after Phase 7:
 
@@ -218,8 +218,8 @@ Manual tests after Phase 10:
 - [x] Phase 3: Storyboard Frontend UI
 - [x] Phase 4: Generation Queue Backend
 - [x] Phase 5: Chrome Extension Bridge MVP
-- [ ] Phase 6: Provider Adapter MVP
-- [ ] Phase 7: Timeline Import
+- [x] Phase 6: Provider Adapter MVP
+- [x] Phase 7: Timeline Import
 - [ ] Phase 8: Reliability And Batch Controls
 - [ ] Phase 9: Grok Provider
 - [ ] Phase 10: Video Generation And Polish

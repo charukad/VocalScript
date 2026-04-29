@@ -10,19 +10,35 @@ const DEFAULT_SETTINGS = {
   httpBaseUrl: DEFAULT_BRIDGE.HTTP_BASE_URL,
   sessionToken: DEFAULT_BRIDGE.SESSION_TOKEN,
   providers: [PROVIDERS.META],
+  metaUrl: "https://www.meta.ai/create",
+  claimIntervalMs: 5000,
+  jobTimeoutMs: 180000,
 };
 
 let socket = null;
 let reconnectTimer = null;
 let heartbeatTimer = null;
+let jobLoopTimer = null;
+let jobLoopActive = false;
+let currentJob = null;
 let manualDisconnect = false;
 let currentStatus = {
   connected: false,
   status: "disconnected",
   message: "Disconnected",
   workerId: "",
+  jobRunning: false,
+  currentJob: null,
+  jobMessage: "Job runner stopped",
   lastMessage: null,
   updatedAt: new Date().toISOString(),
+};
+
+const PROVIDER_ADAPTERS = {
+  [PROVIDERS.META]: {
+    claimProvider: PROVIDERS.META,
+    run: runMetaJob,
+  },
 };
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -58,6 +74,15 @@ async function handleRuntimeMessage(message) {
       manualDisconnect = true;
       disconnect("Disconnected by user");
       return { ok: true, status: currentStatus };
+    case "jobs.start":
+      await startJobLoop();
+      return { ok: true, status: currentStatus };
+    case "jobs.stop":
+      stopJobLoop("Job runner stopped");
+      return { ok: true, status: currentStatus };
+    case "jobs.claimOnce":
+      await claimAndRunNextJob();
+      return { ok: true, status: currentStatus };
     default:
       return { ok: false, error: "Unknown message type" };
   }
@@ -76,6 +101,9 @@ function sanitizeSettings(settings) {
     providers: Array.isArray(settings.providers) && settings.providers.length > 0
       ? settings.providers.filter((provider) => Object.values(PROVIDERS).includes(provider))
       : DEFAULT_SETTINGS.providers,
+    metaUrl: String(settings.metaUrl || DEFAULT_SETTINGS.metaUrl).trim(),
+    claimIntervalMs: Number(settings.claimIntervalMs || DEFAULT_SETTINGS.claimIntervalMs),
+    jobTimeoutMs: Number(settings.jobTimeoutMs || DEFAULT_SETTINGS.jobTimeoutMs),
   };
 }
 
@@ -178,6 +206,7 @@ function clearReconnect() {
 function disconnect(message) {
   clearReconnect();
   cleanupSocket();
+  stopJobLoop("Job runner stopped");
   updateStatus({
     connected: false,
     status: "disconnected",
@@ -216,4 +245,207 @@ function messageLabel(payload) {
   if (payload.type === "bridge.hello") return "Backend greeted bridge";
   if (payload.type === "bridge.error") return payload.error || "Bridge error";
   return `Received ${payload.type || "message"}`;
+}
+
+async function startJobLoop() {
+  jobLoopActive = true;
+  updateStatus({
+    jobRunning: true,
+    jobMessage: "Job runner started",
+  });
+  await claimAndRunNextJob();
+  scheduleJobLoop();
+}
+
+function stopJobLoop(message) {
+  jobLoopActive = false;
+  if (jobLoopTimer) {
+    clearTimeout(jobLoopTimer);
+    jobLoopTimer = null;
+  }
+  updateStatus({
+    jobRunning: false,
+    jobMessage: message,
+  });
+}
+
+function scheduleJobLoop() {
+  if (!jobLoopActive) return;
+  if (jobLoopTimer) clearTimeout(jobLoopTimer);
+  getSettings().then((settings) => {
+    jobLoopTimer = setTimeout(async () => {
+      await claimAndRunNextJob();
+      scheduleJobLoop();
+    }, Math.max(1000, settings.claimIntervalMs));
+  });
+}
+
+async function claimAndRunNextJob() {
+  if (currentJob) {
+    updateStatus({ jobMessage: `Already running ${currentJob.id}` });
+    return;
+  }
+
+  const settings = await getSettings();
+  const provider = settings.providers.find((name) => PROVIDER_ADAPTERS[name]);
+  if (!provider) {
+    updateStatus({ jobMessage: "No supported provider is enabled" });
+    return;
+  }
+  const adapter = PROVIDER_ADAPTERS[provider];
+
+  const workerId = await getWorkerId();
+  let job = null;
+  try {
+    job = await claimQueuedJob(settings, adapter.claimProvider, workerId);
+  } catch (error) {
+    updateStatus({ jobMessage: `Queue claim failed: ${error.message}` });
+    return;
+  }
+
+  if (!job) {
+    updateStatus({ jobMessage: "No queued Meta jobs" });
+    return;
+  }
+
+  currentJob = job;
+  updateStatus({
+    currentJob: job,
+    jobMessage: `Running ${job.id}`,
+  });
+
+  try {
+    const result = await adapter.run(job, settings);
+    if (result.status === "manual_action_required") {
+      await updateJobStatus(settings, job.id, "manual_action_required", result.message, result.metadata);
+      updateStatus({ jobMessage: `Manual action needed for ${job.id}` });
+      return;
+    }
+
+    await completeJob(settings, job.id, result.mediaUrl, result.mediaType, result.metadata);
+    updateStatus({ jobMessage: `Completed ${job.id}` });
+  } catch (error) {
+    await updateJobStatus(settings, job.id, "failed", error.message, { provider: "meta" });
+    updateStatus({ jobMessage: `Failed ${job.id}: ${error.message}` });
+  } finally {
+    currentJob = null;
+    updateStatus({ currentJob: null });
+  }
+}
+
+async function claimQueuedJob(settings, provider, workerId) {
+  const response = await fetch(`${settings.httpBaseUrl}/api/generation/jobs/claim`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider, workerId }),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(await responseText(response));
+  return response.json();
+}
+
+async function updateJobStatus(settings, jobId, status, error, metadata = {}) {
+  const response = await fetch(`${settings.httpBaseUrl}/api/generation/jobs/${jobId}/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status, error, metadata }),
+  });
+  if (!response.ok) throw new Error(await responseText(response));
+  return response.json();
+}
+
+async function completeJob(settings, jobId, mediaUrl, mediaType, metadata = {}) {
+  const response = await fetch(`${settings.httpBaseUrl}/api/generation/jobs/${jobId}/result`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mediaUrl, mediaType, metadata }),
+  });
+  if (!response.ok) throw new Error(await responseText(response));
+  return response.json();
+}
+
+async function responseText(response) {
+  const text = await response.text();
+  try {
+    const parsed = JSON.parse(text);
+    return parsed.detail || text;
+  } catch {
+    return text || response.statusText;
+  }
+}
+
+async function runMetaJob(job, settings) {
+  const tab = await findOrOpenProviderTab(settings.metaUrl, "*://*.meta.ai/*");
+  await waitForTabReady(tab.id);
+  await ensureMetaContentScript(tab.id);
+  const response = await sendTabMessage(tab.id, {
+    type: "provider.meta.runJob",
+    job,
+    options: {
+      timeoutMs: settings.jobTimeoutMs,
+    },
+  });
+  if (!response?.ok) {
+    throw new Error(response?.error || "Meta provider adapter failed");
+  }
+  return response.result;
+}
+
+async function findOrOpenProviderTab(targetUrl, queryUrl) {
+  const tabs = await chrome.tabs.query({ url: queryUrl });
+  const existing = tabs.find((tab) => tab.url?.startsWith(targetUrl)) || tabs[0];
+  if (existing?.id) {
+    await chrome.tabs.update(existing.id, { active: true, url: existing.url || targetUrl });
+    return existing;
+  }
+  return chrome.tabs.create({ url: targetUrl, active: true });
+}
+
+function waitForTabReady(tabId) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      reject(new Error("Timed out waiting for provider tab"));
+    }, 60000);
+
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.get(tabId).then((tab) => {
+      if (tab.status === "complete") {
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }).catch(reject);
+  });
+}
+
+async function ensureMetaContentScript(tabId) {
+  try {
+    await sendTabMessage(tabId, { type: "provider.meta.ping" });
+  } catch {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["providers/meta-content.js"],
+    });
+  }
+}
+
+function sendTabMessage(tabId, message) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(response);
+    });
+  });
 }
