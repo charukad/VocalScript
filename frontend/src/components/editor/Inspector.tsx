@@ -14,7 +14,7 @@ const formatSize = (bytes: number): string => {
 };
 
 export const Inspector = () => {
-  const { clips, tracks, selectedClipId, updateClipTransform, updateClipColor, updateClipAudio, exportSequence, isProcessing, srtDownloadUrl } = useEditorStore();
+  const { clips, tracks, selectedClipId, updateClipTransform, updateClipColor, updateClipAudio, updateClipText, openExportModal, isProcessing, srtDownloadUrl } = useEditorStore();
 
   const selectedClip = clips.find(c => c.id === selectedClipId);
   const track = selectedClip ? tracks.find(t => t.id === selectedClip.trackId) : null;
@@ -287,12 +287,133 @@ export const Inspector = () => {
           </div>
         )}
 
-        {/* Export Section (Always pinned to bottom) */}
+        {/* Text Clip Controls */}
+        {selectedClip?.type === 'text' && selectedClip.textData && (
+          <div className="inspector-section">
+            <div className="inspector-section-title">Text</div>
+
+            {/* Content */}
+            <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+              <div className="inspector-label" style={{ marginBottom: '0.3rem' }}>Content</div>
+              <textarea
+                value={selectedClip.textData.content}
+                onChange={e => updateClipText(selectedClip.id, { content: e.target.value })}
+                rows={3}
+                style={{
+                  width: '100%', resize: 'vertical', padding: '0.4rem 0.5rem',
+                  background: 'var(--surface-3)', border: '1px solid var(--border-color)',
+                  borderRadius: '6px', color: 'var(--text-primary)', fontSize: '0.8rem',
+                  fontFamily: 'inherit', boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
+            {/* Font & Size */}
+            <div className="inspector-row" style={{ marginBottom: '0.9rem', gap: '0.5rem' }}>
+              <div style={{ flex: 2 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.3rem' }}>Font</div>
+                <select
+                  value={selectedClip.textData.fontFamily}
+                  onChange={e => updateClipText(selectedClip.id, { fontFamily: e.target.value })}
+                  style={{
+                    width: '100%', padding: '0.35rem', background: 'var(--surface-3)',
+                    border: '1px solid var(--border-color)', borderRadius: '6px',
+                    color: 'var(--text-primary)', fontSize: '0.75rem'
+                  }}
+                >
+                  <option value="Inter, sans-serif">Inter</option>
+                  <option value="Arial, sans-serif">Arial</option>
+                  <option value="Georgia, serif">Georgia</option>
+                  <option value="'Courier New', monospace">Courier New</option>
+                  <option value="Impact, sans-serif">Impact</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.3rem' }}>Size</div>
+                <input
+                  type="number" min={8} max={200}
+                  value={selectedClip.textData.fontSize}
+                  onChange={e => updateClipText(selectedClip.id, { fontSize: Number(e.target.value) })}
+                  style={{
+                    width: '100%', padding: '0.35rem', background: 'var(--surface-3)',
+                    border: '1px solid var(--border-color)', borderRadius: '6px',
+                    color: 'var(--text-primary)', fontSize: '0.75rem'
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Style: Bold / Italic / Color */}
+            <div className="inspector-row" style={{ marginBottom: '0.9rem' }}>
+              <span className="inspector-label">Style</span>
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                <button
+                  className="btn-secondary"
+                  style={{ padding: '0.2rem 0.55rem', fontWeight: 700, fontSize: '0.85rem', background: selectedClip.textData.bold ? 'rgba(255,255,255,0.15)' : undefined }}
+                  onClick={() => updateClipText(selectedClip.id, { bold: !selectedClip.textData!.bold })}
+                >B</button>
+                <button
+                  className="btn-secondary"
+                  style={{ padding: '0.2rem 0.55rem', fontStyle: 'italic', fontSize: '0.85rem', background: selectedClip.textData.italic ? 'rgba(255,255,255,0.15)' : undefined }}
+                  onClick={() => updateClipText(selectedClip.id, { italic: !selectedClip.textData!.italic })}
+                >I</button>
+                <input
+                  type="color" value={selectedClip.textData.color}
+                  onChange={e => updateClipText(selectedClip.id, { color: e.target.value })}
+                  style={{ width: '28px', height: '28px', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: 0 }}
+                  title="Text Color"
+                />
+              </div>
+            </div>
+
+            {/* Position X / Y */}
+            <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+              <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                <span className="inspector-label">Position X</span>
+                <span className="inspector-value">{selectedClip.textData.x}%</span>
+              </div>
+              <input type="range" min={0} max={100}
+                value={selectedClip.textData.x}
+                onChange={e => updateClipText(selectedClip.id, { x: Number(e.target.value) })}
+                style={{ width: '100%' }} />
+            </div>
+            <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+              <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                <span className="inspector-label">Position Y</span>
+                <span className="inspector-value">{selectedClip.textData.y}%</span>
+              </div>
+              <input type="range" min={0} max={100}
+                value={selectedClip.textData.y}
+                onChange={e => updateClipText(selectedClip.id, { y: Number(e.target.value) })}
+                style={{ width: '100%' }} />
+            </div>
+
+            {/* Background Opacity */}
+            <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+              <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                <span className="inspector-label">Background</span>
+                <span className="inspector-value">{Math.round(selectedClip.textData.bgOpacity * 100)}%</span>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input type="color" value={selectedClip.textData.bgColor}
+                  onChange={e => updateClipText(selectedClip.id, { bgColor: e.target.value })}
+                  style={{ width: '28px', height: '28px', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+                />
+                <input type="range" min={0} max={1} step={0.05}
+                  value={selectedClip.textData.bgOpacity}
+                  onChange={e => updateClipText(selectedClip.id, { bgOpacity: Number(e.target.value) })}
+                  style={{ flex: 1 }} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Export Section */}
         <div style={{ marginTop: 'auto', paddingTop: '1.5rem' }}>
           <div className="inspector-section-title">Export</div>
-          {srtDownloadUrl ? (
+          {srtDownloadUrl && (
             <a href={srtDownloadUrl} download="subtitles.srt" style={{ textDecoration: 'none' }}>
-              <button className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+              <button className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="7 10 12 15 17 10"></polyline>
@@ -301,21 +422,16 @@ export const Inspector = () => {
                 Download Subtitles
               </button>
             </a>
-          ) : (
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textAlign: 'center', margin: '0 0 0.5rem 0' }}>
-              Export to compile the final video and generate SRT subtitles.
-            </p>
           )}
-          <button 
-            className="btn-primary" 
-            style={{ width: '100%', padding: '0.6rem', marginTop: srtDownloadUrl ? '0.5rem' : '0' }}
-            onClick={exportSequence}
+          <button
+            className="btn-primary"
+            style={{ width: '100%', padding: '0.6rem' }}
+            onClick={openExportModal}
             disabled={isProcessing || clips.length === 0}
           >
             {isProcessing ? 'Processing...' : 'Export & Transcribe'}
           </button>
         </div>
-
       </div>
     </div>
   );

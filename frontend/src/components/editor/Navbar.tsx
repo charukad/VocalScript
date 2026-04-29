@@ -1,7 +1,7 @@
 import { useEditorStore } from '../../store/editorStore';
 
 export const Navbar = () => {
-  const { clips, isProcessing, exportSequence, mediaUrl, assets } = useEditorStore();
+  const { clips, isProcessing, openExportModal, mediaUrl, assets } = useEditorStore();
   const visualAsset = assets.find(a => a.type === 'visual');
 
   return (
@@ -27,8 +27,8 @@ export const Navbar = () => {
         )}
         <button 
           className="btn-primary" 
-          onClick={exportSequence} 
-          disabled={clips.filter(c => c.type === 'audio').length === 0 || isProcessing}
+          onClick={openExportModal} 
+          disabled={clips.length === 0 || isProcessing}
         >
           {isProcessing ? 'Processing...' : 'Export & Transcribe'}
         </button>

@@ -60,6 +60,28 @@ export const TimelineToolbar = () => {
           </svg>
           Split (⌘K)
         </button>
+        <div className="toolbar-divider"></div>
+        <button 
+          className="btn-secondary toolbar-btn"
+          title="Add Text Overlay"
+          onClick={() => {
+            const store = useEditorStore.getState();
+            // Find or create a text track
+            let textTrack = store.tracks.find(t => t.type === 'text');
+            if (!textTrack) {
+              store.addTrack('text');
+              textTrack = useEditorStore.getState().tracks.find(t => t.type === 'text');
+            }
+            if (textTrack) store.addTextClip(textTrack.id, store.playheadTime);
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="4 7 4 4 20 4 20 7"></polyline>
+            <line x1="9" y1="20" x2="15" y2="20"></line>
+            <line x1="12" y1="4" x2="12" y2="20"></line>
+          </svg>
+          Add Text
+        </button>
       </div>
       <div className="toolbar-right">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>

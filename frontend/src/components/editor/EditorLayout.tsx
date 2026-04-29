@@ -6,6 +6,7 @@ import { MediaPool } from './MediaPool';
 import { PreviewWindow } from './PreviewWindow';
 import { Inspector } from './Inspector';
 import { TimelinePanel } from '../timeline/TimelinePanel';
+import { ExportModal } from './ExportModal';
 import { useEditorStore } from '../../store/editorStore';
 
 export const EditorLayout = () => {
@@ -16,7 +17,8 @@ export const EditorLayout = () => {
     assets,
     selectedClipId,
     removeClip,
-    togglePlayback
+    togglePlayback,
+    showExportModal
   } = useEditorStore();
   
   const sensors = useSensors(
@@ -98,6 +100,7 @@ export const EditorLayout = () => {
 
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+      {showExportModal && <ExportModal />}
       <div className="editor-layout">
         <Navbar />
         <div className="workspace">

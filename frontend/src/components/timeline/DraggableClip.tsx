@@ -72,6 +72,8 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
   };
 
   const clipWidth = Math.max(validDuration * zoom, 20);
+  const isTextClip = clip.type === 'text';
+  const isVisualClip = clip.type === 'visual';
 
   const style: React.CSSProperties = {
     left: `${clip.startTime * zoom}px`,
@@ -79,8 +81,8 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
     transform: transform && !isTrimmingRef.current ? `translate3d(${transform.x}px, 0, 0)` : undefined,
     zIndex: isDragging ? 100 : (isSelected ? 50 : 1),
     opacity: isDragging ? 0.8 : 1,
-    backgroundColor: clip.type === 'visual' ? '#2d1b6e' : '#0d385e', // Darker background for visuals
-    borderColor: isSelected ? '#fff' : (clip.type === 'visual' ? '#7c5ce0' : '#2f8fce'),
+    backgroundColor: isTextClip ? '#4a3412' : isVisualClip ? '#2d1b6e' : '#0d385e',
+    borderColor: isSelected ? '#fff' : isTextClip ? '#d99a22' : isVisualClip ? '#7c5ce0' : '#2f8fce',
     borderWidth: isSelected ? '2px' : '1px',
     boxShadow: isSelected ? '0 0 0 1px rgba(255,255,255,0.3), 0 2px 8px rgba(0,0,0,0.4)' : undefined,
     position: 'absolute',
@@ -94,9 +96,18 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
     overflow: 'hidden', // Crucial for trimming visuals
   };
 
-  // Calculate rendering offset for waveforms and filmstrips
-  const offsetPx = (clip.mediaOffset || 0) * zoom;
-  
+  const renderTextClip = () => (
+    <div
+      className="text-clip-background"
+      style={{
+        position: 'absolute',
+        inset: 0,
+        opacity: 0.75,
+        background: 'linear-gradient(135deg, rgba(251,191,36,0.2), rgba(0,0,0,0.05))',
+      }}
+    />
+  );
+
   // Audio Waveform Renderer
   const renderWaveform = () => {
     if (!asset?.waveform || asset.waveform.length === 0) {
@@ -163,7 +174,7 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
       {...(isTrimmingRef.current ? {} : listeners)}
     >
       {/* Background Visuals */}
-      {clip.type === 'audio' ? renderWaveform() : renderFilmstrip()}
+      {clip.type === 'audio' ? renderWaveform() : isTextClip ? renderTextClip() : renderFilmstrip()}
 
       {/* Left Trim Handle */}
       {isSelected && (
@@ -175,7 +186,7 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
       )}
 
       <div className="clip-name" style={{ position: 'relative', zIndex: 2, textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
-        {clip.file.name}
+        {clip.textData?.content || clip.file.name}
       </div>
       <button className="clip-remove" style={{ zIndex: 3 }} onPointerDown={(e) => {
         e.stopPropagation();

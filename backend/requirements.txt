@@ -4,3 +4,4 @@ faster-whisper
 python-multipart
 pydantic
 pydub
+Pillow

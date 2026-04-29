@@ -20,6 +20,19 @@ class AudioBlueprint(BaseModel):
     fadeIn: float = 0.0     # seconds
     fadeOut: float = 0.0    # seconds
 
+class TextBlueprint(BaseModel):
+    content: str = "Text"
+    fontFamily: str = "sans-serif"
+    fontSize: int = 48
+    color: str = "#ffffff"
+    bold: bool = False
+    italic: bool = False
+    align: Literal["left", "center", "right"] = "center"
+    x: float = 50.0
+    y: float = 85.0
+    bgColor: str = "#000000"
+    bgOpacity: float = 0.0
+
 class ClipBlueprint(BaseModel):
     file_id: str
     start_time: float
@@ -29,7 +42,8 @@ class ClipBlueprint(BaseModel):
     transform: TransformBlueprint = TransformBlueprint()
     color: ColorBlueprint = ColorBlueprint()
     audio: AudioBlueprint = AudioBlueprint()
-    
+    text: Optional[TextBlueprint] = None
+
 class TrackBlueprint(BaseModel):
     id: str
     name: str
@@ -40,4 +54,5 @@ class TimelineBlueprint(BaseModel):
     fps: int = 30
     width: int = 1920
     height: int = 1080
+    crf: int = 23
     tracks: List[TrackBlueprint]

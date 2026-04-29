@@ -20,6 +20,8 @@ const Track = ({ track, timelineWidth }: TrackProps) => {
 
   const trackClips = clips.filter(c => c.trackId === track.id);
   const isVisual = track.type === 'visual';
+  const isText = track.type === 'text';
+  const trackColor = isText ? '#fbbf24' : isVisual ? '#a78bfa' : '#60a5fa';
 
   return (
     <div 
@@ -32,7 +34,7 @@ const Track = ({ track, timelineWidth }: TrackProps) => {
     >
       <div className="track-header">
         <div className="track-header-top">
-          <span className="track-title" style={{ color: isVisual ? '#a78bfa' : '#60a5fa' }}>
+          <span className="track-title" style={{ color: trackColor }}>
             {track.name}
           </span>
         </div>
@@ -69,8 +71,9 @@ export const TimelinePanel = () => {
 
   const sortedTracks = React.useMemo(() => {
     const visualTracks = tracks.filter(t => t.type === 'visual').sort((a, b) => b.order - a.order);
+    const textTracks = tracks.filter(t => t.type === 'text').sort((a, b) => b.order - a.order);
     const audioTracks = tracks.filter(t => t.type === 'audio').sort((a, b) => a.order - b.order);
-    return { visualTracks, audioTracks };
+    return { visualTracks, textTracks, audioTracks };
   }, [tracks]);
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -92,8 +95,13 @@ export const TimelinePanel = () => {
           <Track key={track.id} track={track} timelineWidth={timelineWidth} />
         ))}
 
+        {/* Text Tracks */}
+        {sortedTracks.textTracks.map(track => (
+          <Track key={track.id} track={track} timelineWidth={timelineWidth} />
+        ))}
+
         {/* Separator between Video and Audio */}
-        {sortedTracks.visualTracks.length > 0 && sortedTracks.audioTracks.length > 0 && (
+        {(sortedTracks.visualTracks.length > 0 || sortedTracks.textTracks.length > 0) && sortedTracks.audioTracks.length > 0 && (
           <div className="track-separator">
             <div className="track-separator-line"></div>
           </div>

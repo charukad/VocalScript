@@ -6,6 +6,8 @@
   --bg-header: #252526;
   --bg-track: #2d2d30;
   --bg-item: #3e3e42;
+  --surface-2: var(--bg-panel);
+  --surface-3: var(--bg-item);
   --border-color: #333333;
   --text-primary: #cccccc;
   --text-secondary: #858585;

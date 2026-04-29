@@ -67,6 +67,11 @@ class ExportOrchestrator:
             output_path = os.path.join(self.output_dir, f"export_{session_id}{output_ext}")
             
             # 1. Compile Media
+            logger.info(f"=== file_paths keys: {list(file_paths.keys())}")
+            for track in blueprint.tracks:
+                logger.info(f"=== Track: {track.id} type={track.type} clips={len(track.clips)}")
+                for clip in track.clips:
+                    logger.info(f"    clip.file_id={clip.file_id} start={clip.start_time} dur={clip.duration}")
             logger.info("Compiling sequence blueprint...")
             self.compiler.compile_sequence(blueprint, file_paths, output_path)
             

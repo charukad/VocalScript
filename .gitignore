@@ -5,6 +5,10 @@ __pycache__/
 backend/venv/
 .env
 
+# App runtime artifacts
+backend/output/
+logs/
+
 # Node
 node_modules/
 dist/

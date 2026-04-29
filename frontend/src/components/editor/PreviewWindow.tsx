@@ -212,6 +212,42 @@ export const PreviewWindow = () => {
               />
             )}
 
+            {/* Text Overlays */}
+            {clips
+              .filter(c => c.type === 'text' && c.textData && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration)
+              .map(clip => {
+                const td = clip.textData!;
+                return (
+                  <div
+                    key={clip.id}
+                    style={{
+                      position: 'absolute',
+                      left: `${td.x}%`,
+                      top: `${td.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      fontFamily: td.fontFamily,
+                      fontSize: `${td.fontSize}px`,
+                      color: td.color,
+                      fontWeight: td.bold ? 700 : 400,
+                      fontStyle: td.italic ? 'italic' : 'normal',
+                      textAlign: td.align,
+                      backgroundColor: td.bgOpacity > 0
+                        ? `${td.bgColor}${Math.round(td.bgOpacity * 255).toString(16).padStart(2, '0')}`
+                        : 'transparent',
+                      padding: td.bgOpacity > 0 ? '0.2em 0.4em' : '0',
+                      borderRadius: td.bgOpacity > 0 ? '4px' : '0',
+                      whiteSpace: 'pre-wrap',
+                      maxWidth: '90%',
+                      pointerEvents: 'none',
+                      textShadow: td.bgOpacity === 0 ? '0 1px 4px rgba(0,0,0,0.8)' : 'none',
+                    }}
+                  >
+                    {td.content}
+                  </div>
+                );
+              })
+            }
+
             {/* If no visuals but exported media exists */}
             {!activeVisualClip && srtContent && mediaUrl && (
               <div className="audio-player-container" style={{ display: 'flex', justifyContent: 'center' }}>
