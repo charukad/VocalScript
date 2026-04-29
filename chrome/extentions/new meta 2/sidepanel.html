@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto Meta Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+    <style>
+        :root {
+            --bg-dark: #0f1115;
+            --bg-panel: #1a1d24;
+            --glass-bg: rgba(255, 255, 255, 0.04);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --primary: #3b82f6;
+            --primary-hover: #60a5fa;
+            --danger: #ef4444;
+            --danger-hover: #f87171;
+            --success: #10b981;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --font: 'Inter', sans-serif;
+            --radius: 12px;
+            --radius-sm: 8px;
+        }
+
+        body {
+            margin: 0;
+            padding: 16px;
+            font-family: var(--font);
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            height: 100vh;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow-x: hidden;
+            background-image: radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 40%);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 1.2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #60a5fa, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .section {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .section-header h2 {
+            margin: 0;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .section-header .material-symbols-outlined {
+            font-size: 18px;
+            color: var(--primary);
+        }
+
+        /* Inputs */
+        textarea, input[type="text"], input[type="number"] {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--glass-border);
+            color: var(--text-main);
+            border-radius: var(--radius-sm);
+            padding: 10px;
+            font-family: var(--font);
+            font-size: 0.85rem;
+            box-sizing: border-box;
+            transition: all 0.2s;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+            font-family: 'SF Mono', Consolas, monospace;
+        }
+
+        textarea:focus, input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+
+        /* Buttons */
+        .btn-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-main);
+            border-radius: var(--radius-sm);
+            padding: 8px 12px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: var(--font);
+        }
+
+        button:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: white;
+            flex: 1;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--primary-hover);
+            border-color: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: var(--danger-hover);
+            flex: 1;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: var(--danger);
+        }
+
+        /* Settings Grid */
+        .settings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .setting-item {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .setting-item label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* Toggle switch */
+        .toggle-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .toggle-row label {
+            font-size: 0.85rem;
+            color: var(--text-main);
+        }
+
+        /* Log area */
+        .log-area {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            padding: 10px;
+            font-family: 'SF Mono', Consolas, monospace;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            overflow-y: auto;
+            min-height: 100px;
+        }
+
+        .log-entry { margin-bottom: 4px; line-height: 1.4; }
+        .log-time { color: #64748b; margin-right: 6px; }
+        .log-info { color: #e2e8f0; }
+        .log-success { color: #34d399; }
+        .log-error { color: #f87171; }
+        .log-warn { color: #fbbf24; }
+
+        /* File Upload hidden */
+        #imageInput { display: none; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <span class="material-symbols-outlined" style="color: var(--primary);">auto_awesome</span>
+        <h1>Auto Meta</h1>
+    </div>
+
+    <!-- Mode Selection & Input -->
+    <div class="section">
+        <div class="section-header">
+            <h2><span class="material-symbols-outlined">edit_document</span> Prompt List</h2>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">Separate by empty line</span>
+        </div>
+        <textarea id="prompts" placeholder="A futuristic city cyberpunk...&#10;&#10;A cute cat playing in space..."></textarea>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <h2><span class="material-symbols-outlined">image</span> Reference Images</h2>
+            <span id="imageCount" style="font-size: 0.8rem; color: var(--primary); font-weight: 600;">0 selected</span>
+        </div>
+        <div class="btn-group">
+            <input type="file" id="imageInput" multiple accept="image/*">
+            <button id="uploadImageBtn" style="flex: 2;">
+                <span class="material-symbols-outlined" style="font-size: 18px;">add_photo_alternate</span> Add Images
+            </button>
+            <button id="clearImageBtn" style="flex: 1; color: var(--danger-hover);">Clear</button>
+        </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="section">
+        <div class="settings-grid">
+            <div class="setting-item">
+                <label>Wait Min (s)</label>
+                <input type="number" id="waitMin" value="15" min="5">
+            </div>
+            <div class="setting-item">
+                <label>Wait Max (s)</label>
+                <input type="number" id="waitMax" value="30" min="5">
+            </div>
+        </div>
+        <div class="toggle-row" style="margin-top: 8px;">
+            <label>Auto Download Results</label>
+            <input type="checkbox" id="autoDownload" checked>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="btn-group">
+        <button id="startBtn" class="btn-primary">
+            <span class="material-symbols-outlined">play_arrow</span> Start
+        </button>
+        <button id="stopBtn" class="btn-danger" disabled>
+            <span class="material-symbols-outlined">stop</span> Stop
+        </button>
+    </div>
+
+    <!-- Logs -->
+    <div class="log-area" id="logArea">
+        <div class="log-entry"><span class="log-time">System</span><span class="log-info">Ready to automate Meta AI...</span></div>
+    </div>
+
+    <script src="sidepanel.js"></script>
+</body>
+</html>

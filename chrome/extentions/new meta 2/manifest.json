@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Meta - Pro",
+  "version": "1.0.0",
+  "description": "A fully unminified, clean automation tool for Meta AI.",
+  "action": {
+    "default_title": "Open Auto Meta"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "host_permissions": [
+    "https://www.meta.ai/*"
+  ],
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs",
+    "downloads"
+  ],
+  "side_panel": {
+    "default_path": "gateway.html"
+  }
+}
