@@ -12,16 +12,17 @@ const META_SELECTORS = {
   ],
   media: [
     "div[data-testid='generated-video'][data-video-url]",
-    "video[src]",
-    "video source[src]",
-    "img[src^='blob:']",
-    "img[src^='https://']",
+    "video",
+    "video source",
+    "img",
     "a[href*='.mp4']",
     "a[href*='.webm']",
     "a[href*='.png']",
     "a[href*='.jpg']",
     "a[href*='.jpeg']",
     "a[href*='.webp']",
+    "[data-video-url]",
+    "[data-src]",
   ],
   manualAction: [
     "input[type='password']",
@@ -46,6 +47,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 async function runMetaJob(job, options) {
   const timeoutMs = Number(options.timeoutMs || 180000);
+  const requestedMediaType = job.mediaType || "image";
   const promptBox = await waitForElement(META_SELECTORS.promptBox, 30000);
   if (!promptBox) {
     if (hasManualActionElement()) {
@@ -55,16 +57,17 @@ async function runMetaJob(job, options) {
   }
 
   await primeExistingMediaSnapshot();
+  await ensureRequestedMode(requestedMediaType);
 
   const prompt = buildPrompt(job);
   fillPrompt(promptBox, prompt);
 
-  const generateButton = await waitForGenerateButton(20000);
+  const generateButton = await waitForGenerateButton(requestedMediaType === "video" ? 45000 : 25000);
   if (!generateButton) {
     if (hasManualActionElement()) {
       return manualActionResult(job, "Meta needs login or captcha before generation can start.");
     }
-    return manualActionResult(job, "Meta prompt was inserted, but the generate button was not enabled. Check the provider tab, then retry this scene.");
+    return manualActionResult(job, generateButtonDisabledMessage(requestedMediaType));
   }
 
   const mediaBefore = captureMediaBaseline();
@@ -72,7 +75,7 @@ async function runMetaJob(job, options) {
   let result = null;
   try {
     clickElement(generateButton);
-    result = await waitForGeneratedMedia(timeoutMs, mediaBefore, job.mediaType || "image", prompt, mediaObserver);
+    result = await waitForGeneratedMedia(timeoutMs, mediaBefore, requestedMediaType, prompt, mediaObserver);
   } finally {
     mediaObserver.disconnect();
   }
@@ -81,7 +84,18 @@ async function runMetaJob(job, options) {
     if (hasManualActionElement()) {
       return manualActionResult(job, "Meta needs manual action before media is available.");
     }
-    throw new Error("Timed out waiting for generated media.");
+    const diagnostics = mediaDebugSummary(mediaBefore, requestedMediaType, prompt);
+    if (requestedMediaType === "video" && diagnostics.videoCount === 0 && diagnostics.imageCount > 0) {
+      return manualActionResult(
+        job,
+        `Meta generated ${diagnostics.imageCount} image result(s), but this scene is configured for video. Switch Meta to video generation or retry this scene.`
+      );
+    }
+    throw new Error(`Timed out waiting for generated media. ${diagnostics.message}`);
+  }
+
+  if (result.variants.some((variant) => isLocalObjectUrl(variant.url))) {
+    result = await uploadLocalObjectVariants(job, result, options.httpBaseUrl);
   }
 
   return {
@@ -112,28 +126,43 @@ function manualActionResult(job, message) {
 function buildPrompt(job) {
   const prompt = String(job.prompt || "").trim();
   const aspectRatio = job.metadata?.aspectRatio;
-  if (!aspectRatio) return prompt;
   const labels = {
     "16:9": "wide landscape 16:9",
     "9:16": "vertical portrait 9:16",
     "1:1": "square 1:1",
     "4:5": "portrait 4:5",
   };
-  return `${prompt}\n\nCreate this in ${labels[aspectRatio] || `${aspectRatio} aspect ratio`}.`;
+  const mediaInstruction = job.mediaType === "video"
+    ? "Generate a short moving video clip, not a still image. Use real motion, cinematic camera movement, and no readable text."
+    : "Generate a still image, not a video. Use no readable text.";
+  const aspectInstruction = aspectRatio
+    ? `Create this in ${labels[aspectRatio] || `${aspectRatio} aspect ratio`}.`
+    : "";
+  return `${mediaInstruction}\n\n${prompt}\n\n${aspectInstruction}`.trim();
 }
 
 function fillPrompt(element, prompt) {
   element.focus();
   if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
-    element.value = prompt;
-    element.dispatchEvent(new Event("input", { bubbles: true }));
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
+    if (setter) setter.call(element, prompt);
+    else element.value = prompt;
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
+    element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: " " }));
     return;
   }
 
-  element.textContent = "";
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
   document.execCommand("insertText", false, prompt);
+  element.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: prompt }));
   element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
+  element.dispatchEvent(new Event("change", { bubbles: true }));
+  element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: " " }));
 }
 
 function clickElement(element) {
@@ -142,16 +171,75 @@ function clickElement(element) {
   element.click();
 }
 
+async function ensureRequestedMode(mediaType) {
+  const labels = mediaType === "video"
+    ? [/^video$/i, /\bvideo\b/i, /\banimate\b/i, /\bmotion\b/i]
+    : [/^image$/i, /\bimage\b/i, /\bimagine\b/i];
+  const control = findModeControl(labels);
+  if (!control) return false;
+  if (isSelectedControl(control)) return true;
+  clickElement(control);
+  await sleep(1200);
+  return true;
+}
+
+function findModeControl(labelPatterns) {
+  const controls = [
+    ...document.querySelectorAll("button, [role='tab'], [role='button'], a[role='tab'], a[role='button']")
+  ].filter(isVisibleElement);
+  const scored = controls
+    .map((element) => ({ element, score: modeControlScore(element, labelPatterns) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return scored[0]?.element || null;
+}
+
+function modeControlScore(element, labelPatterns) {
+  if (element.disabled || element.getAttribute("aria-disabled") === "true") return 0;
+  const text = normalizeText([
+    element.getAttribute("aria-label"),
+    element.getAttribute("title"),
+    element.textContent,
+  ].filter(Boolean).join(" "));
+  if (!text || text.length > 80) return 0;
+  let score = 0;
+  for (const pattern of labelPatterns) {
+    if (pattern.test(text)) score += pattern.source.startsWith("^") ? 50 : 20;
+  }
+  if (element.getAttribute("role") === "tab") score += 8;
+  if (isSelectedControl(element)) score += 5;
+  return score;
+}
+
+function isSelectedControl(element) {
+  return (
+    element.getAttribute("aria-selected") === "true" ||
+    element.getAttribute("aria-pressed") === "true" ||
+    element.dataset?.state === "active"
+  );
+}
+
 async function waitForGenerateButton(timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const button = findFirst(META_SELECTORS.generateButton);
+    const button = findFirst(META_SELECTORS.generateButton, true);
     if (button && !button.disabled && button.getAttribute("aria-disabled") !== "true") {
       return button;
     }
     await sleep(500);
   }
   return null;
+}
+
+function generateButtonDisabledMessage(mediaType) {
+  const buttons = META_SELECTORS.generateButton
+    .flatMap((selector) => [...document.querySelectorAll(selector)])
+    .filter(isVisibleElement);
+  const disabledCount = buttons.filter((button) =>
+    button.disabled || button.getAttribute("aria-disabled") === "true"
+  ).length;
+  const modeText = mediaType === "video" ? " Also check that Meta is in video mode." : "";
+  return `Meta prompt was inserted, but the generate button was not enabled. Visible generate buttons: ${buttons.length}, disabled: ${disabledCount}.${modeText}`;
 }
 
 async function waitForGeneratedMedia(timeoutMs, baseline, requestedMediaType, prompt, mediaObserver) {
@@ -165,9 +253,7 @@ async function waitForGeneratedMedia(timeoutMs, baseline, requestedMediaType, pr
 
   while (Date.now() < deadline) {
     const candidates = findMediaCandidates(prompt)
-      .filter((candidate) => !mediaObserver || mediaObserver.hasCandidate(candidate))
       .filter((candidate) => !baseline.urls.has(candidate.url))
-      .filter((candidate) => !baseline.groupElements.has(candidate.groupElement))
       .filter((candidate) => requestedMediaType !== "video" || candidate.mediaType === "video");
 
     for (const candidate of candidates) {
@@ -200,6 +286,15 @@ async function waitForGeneratedMedia(timeoutMs, baseline, requestedMediaType, pr
   }
 
   return null;
+}
+
+function mediaDebugSummary(baseline, requestedMediaType, prompt) {
+  const candidates = findMediaCandidates(prompt).filter((candidate) => !baseline.urls.has(candidate.url));
+  const videoCount = candidates.filter((candidate) => candidate.mediaType === "video").length;
+  const imageCount = candidates.filter((candidate) => candidate.mediaType === "image").length;
+  const blobCount = candidates.filter((candidate) => isLocalObjectUrl(candidate.url)).length;
+  const message = `Found ${candidates.length} new media candidate(s): ${videoCount} video, ${imageCount} image, ${blobCount} blob. Requested ${requestedMediaType}.`;
+  return { candidates, videoCount, imageCount, blobCount, message };
 }
 
 function findMediaUrls() {
@@ -331,9 +426,98 @@ function selectVariantGroup(candidates, requestedMediaType) {
     const bScore = Math.max(...b.map((item) => item.top)) * 10 + Math.max(...b.map((item) => item.index));
     return bScore - aScore;
   });
-  return (ranked[0] || usable)
+
+  const bestGroup = ranked[0] || [];
+  const selected = bestGroup.length > 1 || usable.length <= bestGroup.length
+    ? bestGroup
+    : selectNewestResultWindow(usable, bestGroup);
+
+  return uniqueCandidatesByUrl(selected.length > 0 ? selected : usable)
     .sort((a, b) => a.top - b.top || a.left - b.left || a.index - b.index)
     .slice(0, 4);
+}
+
+function selectNewestResultWindow(candidates, bestGroup) {
+  const bestPromptScore = Math.max(...candidates.map((item) => item.promptScore || 0));
+  const promptMatches = bestPromptScore > 0
+    ? candidates.filter((item) => (item.promptScore || 0) === bestPromptScore)
+    : [];
+  if (promptMatches.length > bestGroup.length) return promptMatches;
+
+  return [...candidates]
+    .sort((a, b) => {
+      const aSeenAt = a.seenAt || 0;
+      const bSeenAt = b.seenAt || 0;
+      if (aSeenAt !== bSeenAt) return bSeenAt - aSeenAt;
+      if (a.top !== b.top) return b.top - a.top;
+      return b.index - a.index;
+    })
+    .slice(0, 4);
+}
+
+function uniqueCandidatesByUrl(candidates) {
+  const seen = new Set();
+  const unique = [];
+  for (const candidate of candidates) {
+    if (seen.has(candidate.url)) continue;
+    seen.add(candidate.url);
+    unique.push(candidate);
+  }
+  return unique;
+}
+
+async function uploadLocalObjectVariants(job, result, httpBaseUrl) {
+  const baseUrl = String(httpBaseUrl || "http://127.0.0.1:8000").replace(/\/$/, "");
+  const formData = new FormData();
+  formData.append("mediaType", result.mediaType || job.mediaType || "image");
+  formData.append("metadata", JSON.stringify({
+    provider: "meta",
+    providerPageUrl: location.href,
+    variantCount: String(result.variants.length),
+    capturedVia: "content-script-blob-upload",
+  }));
+
+  let uploadedCount = 0;
+  for (const [index, variant] of result.variants.entries()) {
+    const response = await fetch(variant.url);
+    if (!response.ok) {
+      throw new Error(`Captured ${variant.mediaType} result, but could not read blob variant ${index + 1}.`);
+    }
+    const blob = await response.blob();
+    const extension = extensionForBlob(blob, variant.mediaType || result.mediaType || job.mediaType);
+    formData.append("files", blob, `${job.id}_variant_${index + 1}.${extension}`);
+    uploadedCount += 1;
+  }
+
+  if (uploadedCount === 0) {
+    throw new Error("Captured generated media, but no variants were available to upload.");
+  }
+
+  const uploadResponse = await fetch(`${baseUrl}/api/generation/jobs/${encodeURIComponent(job.id)}/result/upload-variants`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!uploadResponse.ok) {
+    throw new Error(`Generated blob media upload failed: ${await uploadResponse.text()}`);
+  }
+  const uploadedJob = await uploadResponse.json();
+  return {
+    status: "completed",
+    mediaUrl: uploadedJob.resultUrl,
+    mediaType: uploadedJob.mediaType,
+    variants: uploadedJob.resultVariants || [],
+    backendStored: true,
+  };
+}
+
+function extensionForBlob(blob, mediaType) {
+  const mime = String(blob?.type || "").toLowerCase();
+  if (mime.includes("webm")) return "webm";
+  if (mime.includes("quicktime")) return "mov";
+  if (mime.includes("mp4") || mediaType === "video") return "mp4";
+  if (mime.includes("jpeg") || mime.includes("jpg")) return "jpeg";
+  if (mime.includes("webp")) return "webp";
+  return "png";
 }
 
 function findMediaGroup(element) {
@@ -382,12 +566,17 @@ function normalizeText(value) {
 function extractUrl(element) {
   return firstDownloadableUrl([
     element.dataset?.videoUrl,
+    element.dataset?.src,
+    element.getAttribute("data-video-url"),
+    element.getAttribute("data-src"),
     element.currentSrc,
+    element.poster,
     element.src,
     element.href,
     firstSrcSetUrl(element.getAttribute("srcset")),
     element.getAttribute("src"),
     element.getAttribute("href"),
+    backgroundImageUrl(element),
   ]);
 }
 
@@ -400,12 +589,16 @@ function inferMediaType(element, url) {
 function isUsableMediaUrl(url) {
   if (!url) return false;
   if (url.startsWith("data:")) return false;
-  return url.startsWith("http://") || url.startsWith("https://");
+  return url.startsWith("http://") || url.startsWith("https://") || isLocalObjectUrl(url);
+}
+
+function isLocalObjectUrl(url) {
+  return String(url || "").startsWith("blob:");
 }
 
 function firstDownloadableUrl(urls) {
   const cleanUrls = urls.map((url) => String(url || "").trim()).filter(Boolean);
-  return cleanUrls.find((url) => url.startsWith("http://") || url.startsWith("https://")) || cleanUrls[0] || "";
+  return cleanUrls.find((url) => url.startsWith("http://") || url.startsWith("https://") || isLocalObjectUrl(url)) || cleanUrls[0] || "";
 }
 
 function firstSrcSetUrl(srcset) {
@@ -424,12 +617,32 @@ async function waitForElement(selectors, timeoutMs) {
   return null;
 }
 
-function findFirst(selectors) {
+function findFirst(selectors, visibleOnly = false) {
   for (const selector of selectors) {
-    const element = document.querySelector(selector);
+    const element = [...document.querySelectorAll(selector)]
+      .find((candidate) => !visibleOnly || isVisibleElement(candidate));
     if (element) return element;
   }
   return null;
+}
+
+function backgroundImageUrl(element) {
+  const value = window.getComputedStyle(element).backgroundImage || "";
+  const match = value.match(/url\((['"]?)(.*?)\1\)/);
+  return match ? match[2] : "";
+}
+
+function isVisibleElement(element) {
+  if (!element || !(element instanceof Element)) return false;
+  const rect = element.getBoundingClientRect();
+  const style = window.getComputedStyle(element);
+  return (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    style.visibility !== "hidden" &&
+    style.display !== "none" &&
+    Number(style.opacity || "1") > 0
+  );
 }
 
 function hasManualActionElement() {

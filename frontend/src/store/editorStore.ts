@@ -65,6 +65,9 @@ const DEFAULT_STORYBOARD_SETTINGS: StoryboardSettings = {
   motionIntensity: 'balanced',
   promptDetail: 'balanced',
   style: 'cinematic realistic',
+  autoRetryFailedScenes: false,
+  autoRetryMaxAttempts: 5,
+  autoRetryRewriteAfter: 2,
 };
 
 const DEFAULT_PROJECT_NAME = 'Untitled Project';
@@ -358,7 +361,8 @@ export type EditorState = {
   pauseGenerationBatch: () => Promise<void>;
   resumeGenerationBatch: () => Promise<void>;
   retryGenerationJob: (jobId: string) => Promise<void>;
-  autoRetryGenerationJob: (jobId: string) => Promise<void>;
+  autoRetryGenerationJob: (jobId: string, maxAttempts?: number) => Promise<void>;
+  regenerateFailedScene: (sceneId: string, rewrite?: boolean) => Promise<void>;
   syncGenerationBatch: (silent?: boolean) => Promise<void>;
   importGenerationVariant: (jobId: string, variantUrl?: string) => Promise<void>;
   importCompletedGenerationMedia: () => Promise<void>;
@@ -2041,11 +2045,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set({ storyboardStatus: 'Scene retry failed.' });
     }
   },
-  autoRetryGenerationJob: async (jobId) => {
+  autoRetryGenerationJob: async (jobId, maxAttempts) => {
     const batchId = getCurrentGenerationBatchId(get());
     set({ storyboardStatus: 'Rewriting prompt and retrying scene...' });
     try {
-      const retriedJob = await autoRetryGenerationJobRequest(jobId);
+      const retriedJob = await autoRetryGenerationJobRequest(jobId, maxAttempts);
       set(state => {
         const removedClipIds = new Set(
           state.clips
@@ -2081,6 +2085,65 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set({ storyboardStatus: 'Auto retry failed.' });
     }
   },
+  regenerateFailedScene: async (sceneId, rewrite = false) => {
+    const state = get();
+    const project = state.currentProject;
+    if (!project) {
+      alert('Create or load a project before regenerating a scene.');
+      return;
+    }
+    const batchId = getCurrentGenerationBatchId(state);
+    const existingJob = state.generationJobs.find(job =>
+      job.sceneId === sceneId &&
+      (!batchId || job.batchId === batchId) &&
+      job.projectId === project.id
+    );
+    if (existingJob) {
+      if (rewrite) {
+        await get().autoRetryGenerationJob(existingJob.id);
+      } else {
+        await get().retryGenerationJob(existingJob.id);
+      }
+      return;
+    }
+
+    const scene = state.storyboardScenes.find(item => item.id === sceneId);
+    if (!scene) {
+      alert('Scene not found.');
+      return;
+    }
+    set({ storyboardStatus: 'Creating one generation job for this scene...' });
+    try {
+      const response = await createGenerationJobs(
+        [{ ...scene, status: 'approved' }],
+        state.storyboardSettings.provider,
+        state.storyboardSettings.aspectRatio,
+        project.id,
+        project.name,
+        batchId,
+      );
+      const activeBatchId = response.batchId ?? batchId ?? response.jobs[0]?.batchId ?? null;
+      set(current => {
+        const existingIds = new Set(current.generationJobs.map(job => job.id));
+        const nextJobs = [
+          ...current.generationJobs,
+          ...response.jobs.filter(job => !existingIds.has(job.id)),
+        ];
+        return {
+          currentGenerationBatchId: activeBatchId,
+          generationJobs: nextJobs,
+          storyboardScenes: mergeSceneStatuses(current.storyboardScenes, nextJobs, current.clips, activeBatchId),
+          storyboardStatus: 'Scene queued for regeneration.',
+        };
+      });
+      if (get().currentProject) void get().saveProject();
+      void get().syncGenerationBatch(true);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Could not regenerate scene');
+      set({ storyboardStatus: 'Scene regeneration failed.' });
+    }
+  },
   syncGenerationBatch: async (silent = false) => {
     const batchId = getCurrentGenerationBatchId(get());
     if (!batchId) {
@@ -2106,10 +2169,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const mediaResponse = await listGeneratedMediaAssets(true, { batchId, projectId });
       set({ generatedMediaAssets: mediaResponse.assets });
       const generatedAssets = selectGeneratedAssetsForImport(mediaResponse.assets, get().clips)
+        .filter(asset => asset.status === 'completed' && Boolean(asset.resultUrl))
         .filter(asset => getAssetVariantUrls(asset).length <= 1);
 
+      if (silent) return;
+
       if (generatedAssets.length === 0) {
-        if (!silent) set({ storyboardStatus: 'No new generated media to import.' });
+        set({ storyboardStatus: 'No new generated media to import.' });
         return;
       }
 

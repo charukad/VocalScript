@@ -2,7 +2,7 @@ import os
 import json
 import shutil
 import tempfile
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -192,19 +192,22 @@ def build_generation_router(
         return job
 
     @router.post("/jobs/{job_id}/retry-auto", response_model=GenerationJob)
-    async def auto_retry_generation_job(job_id: str):
+    async def auto_retry_generation_job(
+        job_id: str,
+        max_attempts: int = Query(50, alias="maxAttempts", ge=1, le=50),
+    ):
         existing_job = queue_service.get_job(job_id)
         if not existing_job:
             raise HTTPException(status_code=404, detail="Job not found")
         if existing_job.status not in ("failed", "canceled", "manual_action_required"):
             return existing_job
         run_attempt = _safe_int(existing_job.metadata.get("runAttempt"), 0)
-        if run_attempt >= 2:
+        if run_attempt >= max_attempts:
             return queue_service.update_status(
                 job_id,
                 existing_job.status,
-                error=existing_job.error or "Auto retry limit reached. Use manual retry if you want another attempt.",
-                metadata={**existing_job.metadata, "autoRetryBlocked": "true"},
+                error=existing_job.error or f"Auto retry limit reached after {max_attempts} attempts.",
+                metadata={**existing_job.metadata, "autoRetryBlocked": "true", "autoRetryMaxAttempts": str(max_attempts)},
             ) or existing_job
         rewritten_prompt = storyboard_service.rewrite_generation_prompt(existing_job)
         job = queue_service.retry_job(
@@ -252,6 +255,28 @@ def build_generation_router(
             job_id,
             source_filename=file.filename or "",
             source_stream=file.file,
+            media_type=media_type,
+            metadata=_parse_metadata_form(metadata),
+        )
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
+
+    @router.post("/jobs/{job_id}/result/upload-variants", response_model=GenerationJob)
+    async def upload_generation_job_result_variants(
+        job_id: str,
+        files: List[UploadFile] = File(...),
+        media_type: Optional[GeneratedMediaType] = Form(None, alias="mediaType"),
+        metadata: Optional[str] = Form(None),
+    ):
+        if not files:
+            raise HTTPException(status_code=400, detail="At least one generated file is required")
+        job = queue_service.complete_job_with_files(
+            job_id,
+            files=[
+                (file.filename or f"variant-{index}", file.file)
+                for index, file in enumerate(files, 1)
+            ],
             media_type=media_type,
             metadata=_parse_metadata_form(metadata),
         )

@@ -160,6 +160,9 @@ export type StoryboardSettings = {
   motionIntensity: StoryboardMotionIntensity;
   promptDetail: StoryboardPromptDetail;
   style: string;
+  autoRetryFailedScenes: boolean;
+  autoRetryMaxAttempts: number;
+  autoRetryRewriteAfter: number;
 };
 
 export type GenerationMediaVariant = {

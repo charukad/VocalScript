@@ -349,12 +349,13 @@ export const createGenerationJobs = async (
   aspectRatio: GenerationAspectRatio,
   projectId?: string | null,
   projectName?: string | null,
+  batchId?: string | null,
   signal?: AbortSignal
 ): Promise<GenerationJobListResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/generation/jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenes, provider, aspectRatio, projectId, projectName }),
+    body: JSON.stringify({ scenes, provider, aspectRatio, projectId, projectName, batchId }),
     signal,
   });
 
@@ -444,9 +445,11 @@ export const retryGenerationJob = async (
 
 export const autoRetryGenerationJob = async (
   jobId: string,
+  maxAttempts?: number,
   signal?: AbortSignal
 ): Promise<GenerationJob> => {
-  const response = await fetch(`${API_BASE_URL}/api/generation/jobs/${jobId}/retry-auto`, {
+  const query = maxAttempts ? `?maxAttempts=${encodeURIComponent(String(maxAttempts))}` : '';
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs/${jobId}/retry-auto${query}`, {
     method: 'POST',
     signal,
   });

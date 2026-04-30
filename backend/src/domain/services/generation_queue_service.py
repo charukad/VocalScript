@@ -379,6 +379,60 @@ class GenerationQueueService:
             metadata=merged_metadata,
         )
 
+    def complete_job_with_files(
+        self,
+        job_id: str,
+        files: List[tuple[str, BinaryIO]],
+        media_type: Optional[GeneratedMediaType] = None,
+        metadata: Optional[Dict[str, str]] = None,
+    ) -> Optional[GenerationJob]:
+        job = self._jobs.get(job_id)
+        if not job:
+            return None
+
+        resolved_media_type = media_type or job.media_type
+        output_dir = self._job_generated_media_dir(job)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        variants: List[GenerationMediaVariant] = []
+
+        for index, (source_filename, source_stream) in enumerate(files, 1):
+            safe_name = self._safe_filename(
+                source_filename or f"{job_id}_v{index}.{self._default_extension(resolved_media_type)}"
+            )
+            extension = Path(safe_name).suffix or f".{self._default_extension(resolved_media_type)}"
+            output_name = f"{job_id}_v{index}_{uuid.uuid4().hex[:8]}{extension}"
+            output_path = output_dir / output_name
+            with output_path.open("wb") as output:
+                shutil.copyfileobj(source_stream, output)
+            media_url = self._job_media_url(job, output_name)
+            variants.append(
+                GenerationMediaVariant(
+                    id=f"stored-{index}",
+                    url=media_url,
+                    mediaType=resolved_media_type,
+                    localPath=str(output_path),
+                    source="backend",
+                )
+            )
+
+        if not variants:
+            return None
+
+        merged_metadata = dict(job.metadata)
+        if metadata:
+            merged_metadata.update(metadata)
+        merged_metadata["storedVariantCount"] = str(len(variants))
+        return self._replace_job(
+            job_id,
+            status="completed",
+            media_type=resolved_media_type,
+            result_url=variants[0].url,
+            result_variants=variants,
+            local_path=variants[0].local_path,
+            error=None,
+            metadata=merged_metadata,
+        )
+
     def store_remote_result(
         self,
         job_id: str,
@@ -628,10 +682,16 @@ class GenerationQueueService:
             "remoteContentType",
             "storageErrors",
             "storedVariantCount",
+            "variantCount",
             "claimedAt",
             "claimExpiresAt",
             "workerId",
             "batchPaused",
+            "providerPageUrl",
+            "selectedVariantUrl",
+            "selectedVariantAt",
+            "autoRetryBlocked",
+            "autoRetryMaxAttempts",
         ):
             next_metadata.pop(key, None)
         next_metadata["retriedAt"] = _utc_now_iso()

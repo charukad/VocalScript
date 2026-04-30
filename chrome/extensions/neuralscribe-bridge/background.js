@@ -480,6 +480,7 @@ async function runMetaJob(job, settings) {
     job,
     options: {
       timeoutMs: settings.jobTimeoutMs,
+      httpBaseUrl: settings.httpBaseUrl,
     },
   });
   if (!response?.ok) {

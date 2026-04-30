@@ -5,7 +5,6 @@ import type {
   GeneratedMediaAsset,
   GeneratedMediaType,
   GenerationAspectRatio,
-  GenerationJobStatus,
   ProviderName,
   StoryboardMotionIntensity,
   StoryboardPromptDetail,
@@ -60,8 +59,6 @@ const promptDetailOptions: { value: StoryboardPromptDetail; label: string }[] = 
   { value: 'detailed', label: 'Detailed' },
 ];
 
-const terminalJobStatuses: GenerationJobStatus[] = ['completed', 'failed', 'canceled', 'manual_action_required'];
-
 type SceneField = keyof Pick<StoryboardScene, 'start' | 'end' | 'transcript' | 'prompt' | 'visualType' | 'camera'>;
 
 const getAssetVariantCount = (asset: GeneratedMediaAsset | undefined): number => {
@@ -91,6 +88,7 @@ export const AutoGeneratePanel = () => {
     resumeGenerationBatch,
     retryGenerationJob,
     autoRetryGenerationJob,
+    regenerateFailedScene,
     syncGenerationBatch,
     importCompletedGenerationMedia,
     importGenerationVariant,
@@ -148,10 +146,9 @@ export const AutoGeneratePanel = () => {
     };
   });
   const importReadyCount = sceneJobRows.filter(row =>
-    row.job &&
-    terminalJobStatuses.includes(row.job.status) &&
+    row.job?.status === 'completed' &&
     !row.imported &&
-    row.asset &&
+    row.asset?.resultUrl &&
     getAssetVariantCount(row.asset) <= 1
   ).length;
   const needsChoiceCount = sceneJobRows.filter(row =>
@@ -164,10 +161,7 @@ export const AutoGeneratePanel = () => {
     currentGenerationBatchId &&
     currentBatchJobs.length > 0 &&
     !isGenerationBatchPaused &&
-    (
-      currentBatchJobs.some(job => job.status === 'queued' || job.status === 'running') ||
-      importReadyCount > 0
-    )
+    currentBatchJobs.some(job => job.status === 'queued' || job.status === 'running')
   );
 
   useEffect(() => {
@@ -421,21 +415,19 @@ export const AutoGeneratePanel = () => {
                         ))}
                       </div>
                     )}
-                    {row.job && ['failed', 'canceled', 'manual_action_required'].includes(row.job.status) && (
+                    {((row.job && ['failed', 'canceled', 'manual_action_required'].includes(row.job.status)) || row.status === 'failed') && (
                       <div className="generation-retry-actions">
                         <button
                           className="btn-secondary"
-                          onClick={() => retryGenerationJob(row.job!.id)}
-                          disabled={isSyncingGeneration}
+                          onClick={() => row.job ? retryGenerationJob(row.job.id) : regenerateFailedScene(row.scene.id, false)}
                         >
-                          Retry Scene
+                          Regenerate
                         </button>
                         <button
                           className="btn-secondary"
-                          onClick={() => autoRetryGenerationJob(row.job!.id)}
-                          disabled={isSyncingGeneration}
+                          onClick={() => row.job ? autoRetryGenerationJob(row.job.id) : regenerateFailedScene(row.scene.id, true)}
                         >
-                          Auto Rewrite
+                          Rewrite + Regenerate
                         </button>
                       </div>
                     )}
