@@ -10,6 +10,7 @@ const elements = {
   sessionToken: document.getElementById("sessionToken"),
   metaUrl: document.getElementById("metaUrl"),
   jobTimeoutSeconds: document.getElementById("jobTimeoutSeconds"),
+  providerDelaySeconds: document.getElementById("providerDelaySeconds"),
   providerMeta: document.getElementById("providerMeta"),
   providerGrok: document.getElementById("providerGrok"),
   saveBtn: document.getElementById("saveBtn"),
@@ -107,6 +108,7 @@ function readSettings() {
     sessionToken: elements.sessionToken.value,
     metaUrl: elements.metaUrl.value,
     jobTimeoutMs: Math.max(30, Number(elements.jobTimeoutSeconds.value) || 180) * 1000,
+    providerDelayMs: Math.max(0, Number(elements.providerDelaySeconds.value) || 0) * 1000,
     providers,
   };
 }
@@ -120,6 +122,7 @@ function renderSettings(settings) {
   elements.sessionToken.value = settings.sessionToken || "";
   elements.metaUrl.value = settings.metaUrl || "";
   elements.jobTimeoutSeconds.value = Math.round((settings.jobTimeoutMs || 180000) / 1000);
+  elements.providerDelaySeconds.value = Math.round((settings.providerDelayMs || 12000) / 1000);
   elements.providerMeta.checked = (settings.providers || []).includes("meta");
   elements.providerGrok.checked = (settings.providers || []).includes("grok");
 }
@@ -215,6 +218,9 @@ async function refreshJobList() {
     const response = await fetch(url);
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
+    if (data.batchPaused) {
+      renderJobListMessage("Batch is paused. Resume it in NeuralScribe before running more jobs.");
+    }
     const jobs = Array.isArray(data.jobs) ? data.jobs : [];
     if (jobs.length === 0) {
       renderJobListMessage("No jobs for this project.");

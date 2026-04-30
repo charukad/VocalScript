@@ -13,15 +13,23 @@ const DEFAULT_SETTINGS = {
   projectId: "",
   metaUrl: "https://www.meta.ai/create",
   claimIntervalMs: 5000,
+  providerDelayMs: 12000,
   jobTimeoutMs: 180000,
+};
+
+const JOB_LOOP_ALARM = "neuralscribe-job-loop";
+const STORAGE_KEYS = {
+  activeJob: "activeJob",
+  jobLoopActive: "jobLoopActive",
+  providerAvailableAt: "providerAvailableAt",
 };
 
 let socket = null;
 let reconnectTimer = null;
 let heartbeatTimer = null;
-let jobLoopTimer = null;
 let jobLoopActive = false;
 let currentJob = null;
+let currentJobInProgress = false;
 let manualDisconnect = false;
 let currentStatus = {
   connected: false,
@@ -47,6 +55,20 @@ chrome.runtime.onInstalled.addListener(async () => {
   await chrome.storage.local.set({ ...DEFAULT_SETTINGS, ...stored });
 });
 
+chrome.runtime.onStartup.addListener(() => {
+  restoreRuntimeState().catch((error) => {
+    updateStatus({ jobMessage: `Runner restore failed: ${error.message}` });
+  });
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== JOB_LOOP_ALARM) return;
+  handleJobLoopAlarm().catch((error) => {
+    updateStatus({ jobMessage: `Job runner alarm failed: ${error.message}` });
+    scheduleJobLoop();
+  });
+});
+
 chrome.action.onClicked.addListener((tab) => {
   if (tab.windowId) {
     chrome.sidePanel.open({ windowId: tab.windowId });
@@ -63,6 +85,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 async function handleRuntimeMessage(message) {
   switch (message?.type) {
     case "bridge.getStatus":
+      await restoreRuntimeState();
       return { ok: true, status: currentStatus, settings: await getSettings() };
     case "bridge.saveSettings":
       await chrome.storage.local.set(sanitizeSettings(message.settings || {}));
@@ -105,6 +128,7 @@ function sanitizeSettings(settings) {
     projectId: String(settings.projectId || "").trim(),
     metaUrl: String(settings.metaUrl || DEFAULT_SETTINGS.metaUrl).trim(),
     claimIntervalMs: Number(settings.claimIntervalMs || DEFAULT_SETTINGS.claimIntervalMs),
+    providerDelayMs: Number(settings.providerDelayMs || DEFAULT_SETTINGS.providerDelayMs),
     jobTimeoutMs: Number(settings.jobTimeoutMs || DEFAULT_SETTINGS.jobTimeoutMs),
   };
 }
@@ -251,6 +275,7 @@ function messageLabel(payload) {
 
 async function startJobLoop() {
   jobLoopActive = true;
+  await chrome.storage.local.set({ [STORAGE_KEYS.jobLoopActive]: true });
   updateStatus({
     jobRunning: true,
     jobMessage: "Job runner started",
@@ -261,29 +286,60 @@ async function startJobLoop() {
 
 function stopJobLoop(message) {
   jobLoopActive = false;
-  if (jobLoopTimer) {
-    clearTimeout(jobLoopTimer);
-    jobLoopTimer = null;
-  }
+  chrome.storage.local.set({ [STORAGE_KEYS.jobLoopActive]: false }).catch(() => {});
+  chrome.alarms.clear(JOB_LOOP_ALARM).catch(() => {});
   updateStatus({
     jobRunning: false,
     jobMessage: message,
   });
 }
 
-function scheduleJobLoop() {
+async function scheduleJobLoop(delayOverrideMs = null) {
   if (!jobLoopActive) return;
-  if (jobLoopTimer) clearTimeout(jobLoopTimer);
-  getSettings().then((settings) => {
-    jobLoopTimer = setTimeout(async () => {
-      await claimAndRunNextJob();
-      scheduleJobLoop();
-    }, Math.max(1000, settings.claimIntervalMs));
+  const settings = await getSettings();
+  const delayMs = Math.max(1000, delayOverrideMs ?? settings.claimIntervalMs);
+  await chrome.alarms.clear(JOB_LOOP_ALARM);
+  await chrome.alarms.create(JOB_LOOP_ALARM, { when: Date.now() + delayMs });
+}
+
+async function handleJobLoopAlarm() {
+  const stored = await chrome.storage.local.get([
+    STORAGE_KEYS.jobLoopActive,
+    STORAGE_KEYS.activeJob,
+  ]);
+  jobLoopActive = Boolean(stored[STORAGE_KEYS.jobLoopActive]);
+  if (stored[STORAGE_KEYS.activeJob] && !currentJob) {
+    currentJob = stored[STORAGE_KEYS.activeJob];
+  }
+  if (!jobLoopActive) return;
+  updateStatus({ jobRunning: true });
+  await claimAndRunNextJob();
+  scheduleJobLoop();
+}
+
+async function restoreRuntimeState() {
+  const stored = await chrome.storage.local.get([
+    STORAGE_KEYS.activeJob,
+    STORAGE_KEYS.jobLoopActive,
+  ]);
+  if (stored[STORAGE_KEYS.activeJob] && !currentJob) {
+    currentJob = stored[STORAGE_KEYS.activeJob];
+  }
+  jobLoopActive = Boolean(stored[STORAGE_KEYS.jobLoopActive]);
+  updateStatus({
+    jobRunning: jobLoopActive,
+    currentJob,
+    jobMessage: currentJob
+      ? `Recovering ${formatJobLabel(currentJob)}`
+      : jobLoopActive
+        ? "Job runner resumed"
+        : currentStatus.jobMessage,
   });
+  if (jobLoopActive) await scheduleJobLoop(1000);
 }
 
 async function claimAndRunNextJob() {
-  if (currentJob) {
+  if (currentJobInProgress) {
     updateStatus({ jobMessage: `Already running ${currentJob.id}` });
     return;
   }
@@ -300,13 +356,22 @@ async function claimAndRunNextJob() {
   }
   const adapter = PROVIDER_ADAPTERS[provider];
 
-  const workerId = await getWorkerId();
-  let job = null;
-  try {
-    job = await claimQueuedJob(settings, adapter.claimProvider, workerId);
-  } catch (error) {
-    updateStatus({ jobMessage: `Queue claim failed: ${error.message}` });
+  const providerWaitMs = await getProviderDelayMs(settings);
+  if (providerWaitMs > 0) {
+    updateStatus({ jobMessage: `Waiting ${Math.ceil(providerWaitMs / 1000)}s before next provider request` });
+    if (jobLoopActive) await scheduleJobLoop(providerWaitMs);
     return;
+  }
+
+  const workerId = await getWorkerId();
+  let job = currentJob;
+  if (!job) {
+    try {
+      job = await claimQueuedJob(settings, adapter.claimProvider, workerId);
+    } catch (error) {
+      updateStatus({ jobMessage: `Queue claim failed: ${error.message}` });
+      return;
+    }
   }
 
   if (!job) {
@@ -315,6 +380,8 @@ async function claimAndRunNextJob() {
   }
 
   currentJob = job;
+  currentJobInProgress = true;
+  await chrome.storage.local.set({ [STORAGE_KEYS.activeJob]: job });
   updateStatus({
     currentJob: job,
     jobMessage: `Running ${formatJobLabel(job)}`,
@@ -329,12 +396,15 @@ async function claimAndRunNextJob() {
     }
 
     await completeJob(settings, job.id, result.mediaUrl, result.mediaType, result.metadata, result.mediaVariants);
+    await markProviderDelay(settings);
     updateStatus({ jobMessage: `Completed ${formatJobLabel(job)}` });
   } catch (error) {
     await updateJobStatus(settings, job.id, "failed", error.message, { provider: "meta" });
     updateStatus({ jobMessage: `Failed ${formatJobLabel(job)}: ${error.message}` });
   } finally {
     currentJob = null;
+    currentJobInProgress = false;
+    await chrome.storage.local.remove(STORAGE_KEYS.activeJob);
     updateStatus({ currentJob: null });
   }
 }
@@ -348,6 +418,19 @@ async function claimQueuedJob(settings, provider, workerId) {
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(await responseText(response));
   return response.json();
+}
+
+async function getProviderDelayMs(settings) {
+  if (Number(settings.providerDelayMs || 0) <= 0) return 0;
+  const stored = await chrome.storage.local.get(STORAGE_KEYS.providerAvailableAt);
+  const availableAt = Number(stored[STORAGE_KEYS.providerAvailableAt] || 0);
+  return Math.max(0, availableAt - Date.now());
+}
+
+async function markProviderDelay(settings) {
+  const delayMs = Math.max(0, Number(settings.providerDelayMs || 0));
+  if (delayMs === 0) return;
+  await chrome.storage.local.set({ [STORAGE_KEYS.providerAvailableAt]: Date.now() + delayMs });
 }
 
 function formatJobLabel(job) {
@@ -406,8 +489,9 @@ async function findOrOpenProviderTab(targetUrl, queryUrl) {
   const tabs = await chrome.tabs.query({ url: queryUrl });
   const existing = tabs.find((tab) => tab.url?.startsWith(targetUrl)) || tabs[0];
   if (existing?.id) {
-    await chrome.tabs.update(existing.id, { active: true, url: existing.url || targetUrl });
-    return existing;
+    const tab = await chrome.tabs.update(existing.id, { active: true, url: targetUrl });
+    await chrome.tabs.reload(existing.id, { bypassCache: true });
+    return tab;
   }
   return chrome.tabs.create({ url: targetUrl, active: true });
 }

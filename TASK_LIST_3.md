@@ -159,14 +159,14 @@ Manual tests after Phase 7:
 
 ## Phase 8: Reliability And Batch Controls
 
-- [ ] Add batch pause.
-- [ ] Add batch resume.
-- [ ] Add per-job retry.
-- [ ] Add provider rate-limit delay.
-- [ ] Add duplicate result protection.
-- [ ] Add job persistence across backend restart.
-- [ ] Add extension job resume after service worker sleep.
-- [ ] Add clearer error messages.
+- [x] Add batch pause.
+- [x] Add batch resume.
+- [x] Add per-job retry.
+- [x] Add provider rate-limit delay.
+- [x] Add duplicate result protection.
+- [x] Add job persistence across backend restart.
+- [x] Add extension job resume after service worker sleep.
+- [x] Add clearer error messages.
 
 Manual tests after Phase 8:
 
@@ -220,6 +220,6 @@ Manual tests after Phase 10:
 - [x] Phase 5: Chrome Extension Bridge MVP
 - [x] Phase 6: Provider Adapter MVP
 - [x] Phase 7: Timeline Import
-- [ ] Phase 8: Reliability And Batch Controls
+- [x] Phase 8: Reliability And Batch Controls
 - [ ] Phase 9: Grok Provider
 - [ ] Phase 10: Video Generation And Polish

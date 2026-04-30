@@ -5,6 +5,7 @@ import shutil
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime, timedelta, timezone
 from mimetypes import guess_extension
 from pathlib import Path
 from urllib.parse import urlparse
@@ -22,6 +23,26 @@ from backend.src.domain.models.generation import (
 )
 
 
+RUNNING_JOB_TIMEOUT_SECONDS = 900
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat()
+
+
+def _parse_iso(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 class GenerationQueueService:
     def __init__(self, generated_media_dir: str, projects_dir: Optional[str] = None):
         self.generated_media_dir = Path(generated_media_dir)
@@ -29,8 +50,11 @@ class GenerationQueueService:
         self.projects_dir = Path(projects_dir) if projects_dir else None
         if self.projects_dir:
             self.projects_dir.mkdir(parents=True, exist_ok=True)
+        self.state_file = (self.projects_dir or self.generated_media_dir) / "generation_state.json"
         self._jobs: Dict[str, GenerationJob] = {}
         self._job_order: List[str] = []
+        self._paused_batches: set[str] = set()
+        self._load_state()
 
     def create_jobs(
         self,
@@ -68,6 +92,7 @@ class GenerationQueueService:
             self._jobs[job_id] = job
             self._job_order.append(job_id)
             jobs.append(job)
+        self._save_state()
         return jobs
 
     def list_jobs(
@@ -141,6 +166,7 @@ class GenerationQueueService:
         worker_id: Optional[str] = None,
         project_id: Optional[str] = None,
     ) -> Optional[GenerationJob]:
+        self._recover_stale_running_jobs(provider=provider, project_id=project_id)
         for job_id in self._job_order:
             job = self._jobs[job_id]
             if job.status != "queued":
@@ -149,11 +175,44 @@ class GenerationQueueService:
                 continue
             if project_id and job.project_id != project_id:
                 continue
+            if self.is_batch_paused(job.batch_id, job.project_id):
+                continue
             metadata = dict(job.metadata)
+            run_attempt = self._metadata_int(metadata.get("runAttempt"), 0) + 1
+            claimed_at = _utc_now()
             if worker_id:
                 metadata["workerId"] = worker_id
+            metadata["runAttempt"] = str(run_attempt)
+            metadata["claimedAt"] = claimed_at.isoformat()
+            metadata["claimExpiresAt"] = (claimed_at + timedelta(seconds=RUNNING_JOB_TIMEOUT_SECONDS)).isoformat()
             return self._replace_job(job_id, status="running", metadata=metadata)
         return None
+
+    def pause_batch(self, batch_id: str, project_id: Optional[str] = None) -> List[GenerationJob]:
+        self._paused_batches.add(self._batch_key(batch_id, project_id))
+        jobs = self.list_jobs(batch_id=batch_id, project_id=project_id)
+        for job in jobs:
+            if job.status in ("queued", "running"):
+                metadata = dict(job.metadata)
+                metadata["batchPaused"] = "true"
+                self._jobs[job.id] = job.model_copy(update={"metadata": metadata})
+        self._save_state()
+        return self.list_jobs(batch_id=batch_id, project_id=project_id)
+
+    def resume_batch(self, batch_id: str, project_id: Optional[str] = None) -> List[GenerationJob]:
+        self._paused_batches.discard(self._batch_key(batch_id, project_id))
+        jobs = self.list_jobs(batch_id=batch_id, project_id=project_id)
+        for job in jobs:
+            metadata = dict(job.metadata)
+            metadata.pop("batchPaused", None)
+            self._jobs[job.id] = job.model_copy(update={"metadata": metadata})
+        self._save_state()
+        return self.list_jobs(batch_id=batch_id, project_id=project_id)
+
+    def is_batch_paused(self, batch_id: Optional[str], project_id: Optional[str] = None) -> bool:
+        if not batch_id:
+            return False
+        return self._batch_key(batch_id, project_id) in self._paused_batches
 
     def cancel_job(self, job_id: str) -> Optional[GenerationJob]:
         job = self._jobs.get(job_id)
@@ -174,7 +233,9 @@ class GenerationQueueService:
             status="queued",
             error=None,
             result_url=None,
+            result_variants=[],
             local_path=None,
+            metadata=self._retry_metadata(job.metadata),
         )
 
     def update_status(
@@ -203,6 +264,8 @@ class GenerationQueueService:
         job = self._jobs.get(job_id)
         if not job:
             return None
+        if job.status == "completed" and job.result_url:
+            return job
         variants = self._normalize_variants(media_url, media_type or job.media_type, media_variants)
         resolved_media_url = media_url or (variants[0].url if variants else None)
         if not resolved_media_url:
@@ -210,12 +273,26 @@ class GenerationQueueService:
         merged_metadata = dict(job.metadata)
         if metadata:
             merged_metadata.update(metadata)
+        stored_variants, storage_errors = self._store_remote_variants_for_job(
+            job,
+            variants,
+            media_type or job.media_type,
+        )
+        if stored_variants:
+            variants = stored_variants
+            resolved_media_url = variants[0].url
+            merged_metadata["storedVariantCount"] = str(
+                len([variant for variant in variants if variant.local_path])
+            )
+        if storage_errors:
+            merged_metadata["storageErrors"] = " | ".join(storage_errors)[:1000]
         return self._replace_job(
             job_id,
             status="completed",
             media_type=media_type or job.media_type,
             result_url=resolved_media_url,
             result_variants=variants,
+            local_path=variants[0].local_path if variants else None,
             error=None,
             metadata=merged_metadata,
         )
@@ -301,6 +378,65 @@ class GenerationQueueService:
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Could not download remote media: {exc}") from exc
 
+    def _store_remote_variants_for_job(
+        self,
+        job: GenerationJob,
+        variants: List[GenerationMediaVariant],
+        fallback_media_type: GeneratedMediaType,
+    ) -> tuple[List[GenerationMediaVariant], List[str]]:
+        if not variants:
+            return [], []
+
+        stored_variants: List[GenerationMediaVariant] = []
+        errors: List[str] = []
+        for index, variant in enumerate(variants, 1):
+            if not variant.url.startswith(("http://", "https://")):
+                stored_variants.append(variant)
+                errors.append(f"{variant.id or index}: unsupported URL scheme")
+                continue
+            try:
+                stored_variants.append(
+                    self._download_remote_variant(job, variant, index, fallback_media_type)
+                )
+            except (OSError, urllib.error.URLError, ValueError) as exc:
+                stored_variants.append(variant)
+                errors.append(f"{variant.id or index}: {exc}")
+        return stored_variants, errors
+
+    def _download_remote_variant(
+        self,
+        job: GenerationJob,
+        variant: GenerationMediaVariant,
+        index: int,
+        fallback_media_type: GeneratedMediaType,
+    ) -> GenerationMediaVariant:
+        request = urllib.request.Request(
+            variant.url,
+            headers={"User-Agent": "NeuralScribe/1.0"},
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+            inferred_type = self._media_type_from_content_type(content_type) or variant.media_type or fallback_media_type
+            filename = self._remote_filename(variant.url, content_type, inferred_type)
+            safe_name = self._safe_filename(filename)
+            extension = Path(safe_name).suffix or f".{self._default_extension(inferred_type)}"
+            output_name = f"{job.id}_v{index}_{uuid.uuid4().hex[:8]}{extension}"
+            output_dir = self._job_generated_media_dir(job)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / output_name
+            with output_path.open("wb") as output:
+                shutil.copyfileobj(response, output)
+
+        return variant.model_copy(
+            update={
+                "id": variant.id or f"variant-{index}",
+                "url": self._job_media_url(job, output_name),
+                "media_type": inferred_type,
+                "local_path": str(output_path),
+                "source": "backend",
+            }
+        )
+
     def resolve_media_path(self, filename: str, project_id: Optional[str] = None) -> Optional[Path]:
         safe_name = self._safe_filename(filename)
         root = self._project_generated_media_dir(project_id) if project_id else self.generated_media_dir
@@ -320,7 +456,150 @@ class GenerationQueueService:
     def _replace_job(self, job_id: str, **updates) -> GenerationJob:
         job = self._jobs[job_id].model_copy(update=updates)
         self._jobs[job_id] = job
+        self._save_state()
         return job
+
+    def _load_state(self) -> None:
+        changed = False
+        if not self.state_file.exists():
+            raw = {}
+        else:
+            try:
+                raw = json.loads(self.state_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                raw = {}
+
+        if raw:
+            jobs: Dict[str, GenerationJob] = {}
+            for item in raw.get("jobs", []):
+                try:
+                    job = GenerationJob(**item)
+                except ValueError:
+                    continue
+                job, was_recovered = self._recover_job_after_restart(job)
+                changed = changed or was_recovered
+                jobs[job.id] = job
+
+            ordered_ids = [job_id for job_id in raw.get("jobOrder", []) if job_id in jobs]
+            missing_ids = [job_id for job_id in jobs if job_id not in ordered_ids]
+            self._jobs = jobs
+            self._job_order = ordered_ids + missing_ids
+            self._paused_batches = set(str(key) for key in raw.get("pausedBatches", []))
+
+        changed = self._merge_project_saved_jobs() or changed
+        if changed:
+            self._save_state()
+
+    def _save_state(self) -> None:
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "updatedAt": _utc_now_iso(),
+            "jobOrder": self._job_order,
+            "pausedBatches": sorted(self._paused_batches),
+            "jobs": [
+                self._jobs[job_id].model_dump(by_alias=True)
+                for job_id in self._job_order
+                if job_id in self._jobs
+            ],
+        }
+        tmp_file = self.state_file.with_suffix(".tmp")
+        tmp_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp_file.replace(self.state_file)
+
+    def _batch_key(self, batch_id: str, project_id: Optional[str] = None) -> str:
+        return f"{project_id or 'legacy'}:{batch_id}"
+
+    def _retry_metadata(self, metadata: Dict[str, str]) -> Dict[str, str]:
+        next_metadata = dict(metadata)
+        for key in (
+            "remoteSourceUrl",
+            "remoteContentType",
+            "storageErrors",
+            "storedVariantCount",
+            "claimedAt",
+            "claimExpiresAt",
+            "workerId",
+            "batchPaused",
+        ):
+            next_metadata.pop(key, None)
+        next_metadata["retriedAt"] = _utc_now_iso()
+        return next_metadata
+
+    def _recover_stale_running_jobs(
+        self,
+        provider: Optional[ProviderName] = None,
+        project_id: Optional[str] = None,
+    ) -> None:
+        now = _utc_now()
+        changed = False
+        for job_id in list(self._job_order):
+            job = self._jobs.get(job_id)
+            if not job or job.status != "running":
+                continue
+            if provider and job.provider != provider:
+                continue
+            if project_id and job.project_id != project_id:
+                continue
+
+            expires_at = _parse_iso(job.metadata.get("claimExpiresAt"))
+            claimed_at = _parse_iso(job.metadata.get("claimedAt"))
+            is_expired = expires_at and expires_at <= now
+            is_legacy_stale = not expires_at and claimed_at and claimed_at + timedelta(seconds=RUNNING_JOB_TIMEOUT_SECONDS) <= now
+            if not is_expired and not is_legacy_stale:
+                continue
+
+            metadata = dict(job.metadata)
+            metadata["requeuedAfterTimeout"] = now.isoformat()
+            metadata.pop("workerId", None)
+            metadata.pop("claimedAt", None)
+            metadata.pop("claimExpiresAt", None)
+            self._jobs[job_id] = job.model_copy(
+                update={
+                    "status": "queued",
+                    "error": "Previous browser worker stopped before finishing; job was re-queued.",
+                    "metadata": metadata,
+                }
+            )
+            changed = True
+
+        if changed:
+            self._save_state()
+
+    def _merge_project_saved_jobs(self) -> bool:
+        changed = False
+        for project_file in self._known_project_files():
+            try:
+                raw = json.loads(project_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            saved_state = raw.get("state") if isinstance(raw, dict) else None
+            saved_jobs = saved_state.get("generationJobs", []) if isinstance(saved_state, dict) else []
+            for item in saved_jobs:
+                try:
+                    job = GenerationJob(**item)
+                except ValueError:
+                    continue
+                if job.id in self._jobs:
+                    continue
+                job, _ = self._recover_job_after_restart(job)
+                self._jobs[job.id] = job
+                self._job_order.append(job.id)
+                changed = True
+        return changed
+
+    def _recover_job_after_restart(self, job: GenerationJob) -> tuple[GenerationJob, bool]:
+        if job.status != "running":
+            return job, False
+        metadata = dict(job.metadata)
+        metadata["recoveredAfterBackendRestart"] = _utc_now_iso()
+        return job.model_copy(
+            update={
+                "status": "queued",
+                "error": "Recovered after backend restart before the provider completed.",
+                "metadata": metadata,
+            }
+        ), True
 
     def _safe_filename(self, filename: str) -> str:
         base_name = os.path.basename(filename)
@@ -414,6 +693,14 @@ class GenerationQueueService:
             return fallback
         try:
             return float(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    def _metadata_int(self, value: Optional[str], fallback: int) -> int:
+        if value is None:
+            return fallback
+        try:
+            return int(value)
         except (TypeError, ValueError):
             return fallback
 

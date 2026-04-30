@@ -48,6 +48,7 @@ export type StoryboardGenerationOptions = {
 export type GenerationJobListResponse = {
   jobs: GenerationJob[];
   batchId?: string | null;
+  batchPaused?: boolean;
 };
 
 export type GeneratedMediaListResponse = {
@@ -354,6 +355,65 @@ export const listGenerationJobs = async (
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(formatApiError(errorData.detail, 'Could not refresh generation jobs'));
+  }
+
+  return response.json();
+};
+
+export const pauseGenerationBatch = async (
+  batchId: string,
+  projectId?: string | null,
+  signal?: AbortSignal
+): Promise<GenerationJobListResponse> => {
+  const params = new URLSearchParams();
+  if (projectId) params.set('projectId', projectId);
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const response = await fetch(`${API_BASE_URL}/api/generation/batches/${batchId}/pause${suffix}`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not pause generation batch'));
+  }
+
+  return response.json();
+};
+
+export const resumeGenerationBatch = async (
+  batchId: string,
+  projectId?: string | null,
+  signal?: AbortSignal
+): Promise<GenerationJobListResponse> => {
+  const params = new URLSearchParams();
+  if (projectId) params.set('projectId', projectId);
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const response = await fetch(`${API_BASE_URL}/api/generation/batches/${batchId}/resume${suffix}`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not resume generation batch'));
+  }
+
+  return response.json();
+};
+
+export const retryGenerationJob = async (
+  jobId: string,
+  signal?: AbortSignal
+): Promise<GenerationJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs/${jobId}/retry`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not retry generation job'));
   }
 
   return response.json();

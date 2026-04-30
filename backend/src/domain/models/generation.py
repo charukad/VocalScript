@@ -118,6 +118,7 @@ class GenerationJobCreateRequest(ApiModel):
 class GenerationJobListResponse(ApiModel):
     jobs: List[GenerationJob]
     batch_id: Optional[str] = Field(default=None, alias="batchId")
+    batch_paused: bool = Field(default=False, alias="batchPaused")
 
 
 class GeneratedMediaAsset(ApiModel):

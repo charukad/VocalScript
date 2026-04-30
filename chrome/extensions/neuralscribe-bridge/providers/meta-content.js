@@ -54,7 +54,10 @@ async function runMetaJob(job, options) {
     throw new Error("Could not find Meta prompt input.");
   }
 
-  fillPrompt(promptBox, buildPrompt(job));
+  await primeExistingMediaSnapshot();
+
+  const prompt = buildPrompt(job);
+  fillPrompt(promptBox, prompt);
 
   const generateButton = await waitForGenerateButton(20000);
   if (!generateButton) {
@@ -64,10 +67,10 @@ async function runMetaJob(job, options) {
     throw new Error("Could not find enabled Meta generate button.");
   }
 
-  const mediaBefore = new Set(findMediaCandidates().map((candidate) => candidate.url));
+  const mediaBefore = captureMediaBaseline();
   clickElement(generateButton);
 
-  const result = await waitForGeneratedMedia(timeoutMs, mediaBefore, job.mediaType || "image");
+  const result = await waitForGeneratedMedia(timeoutMs, mediaBefore, job.mediaType || "image", prompt);
   if (!result) {
     if (hasManualActionElement()) {
       return manualActionResult(job, "Meta needs manual action before media is available.");
@@ -145,26 +148,30 @@ async function waitForGenerateButton(timeoutMs) {
   return null;
 }
 
-async function waitForGeneratedMedia(timeoutMs, seenBefore, requestedMediaType) {
+async function waitForGeneratedMedia(timeoutMs, baseline, requestedMediaType, prompt) {
   const deadline = Date.now() + timeoutMs;
+  const startedAt = Date.now();
   const found = new Map();
   let firstFoundAt = 0;
   let lastFoundAt = 0;
+  const minWaitMs = requestedMediaType === "video" ? 25000 : 12000;
+  const settleMs = requestedMediaType === "video" ? 8000 : 5000;
 
   while (Date.now() < deadline) {
-    const candidates = findMediaCandidates()
-      .filter((candidate) => !seenBefore.has(candidate.url))
+    const candidates = findMediaCandidates(prompt)
+      .filter((candidate) => !baseline.urls.has(candidate.url))
+      .filter((candidate) => !baseline.groupElements.has(candidate.groupElement))
       .filter((candidate) => requestedMediaType !== "video" || candidate.mediaType === "video");
 
     for (const candidate of candidates) {
       if (!found.has(candidate.url)) {
-        found.set(candidate.url, candidate);
+        found.set(candidate.url, { ...candidate, seenAt: Date.now() });
         firstFoundAt = firstFoundAt || Date.now();
         lastFoundAt = Date.now();
       }
     }
 
-    if (found.size > 0 && (Date.now() - lastFoundAt > 5000 || found.size >= 4 || Date.now() - firstFoundAt > 12000)) {
+    if (found.size > 0 && Date.now() - startedAt > minWaitMs && Date.now() - lastFoundAt > settleMs) {
       const variants = selectVariantGroup([...found.values()], requestedMediaType);
       if (variants.length > 0) {
         return {
@@ -192,7 +199,33 @@ function findMediaUrls() {
   return findMediaCandidates().map((candidate) => candidate.url);
 }
 
-function findMediaCandidates() {
+async function primeExistingMediaSnapshot() {
+  const originalX = window.scrollX;
+  const originalY = window.scrollY;
+  findMediaCandidates();
+  window.scrollTo(0, 0);
+  await sleep(500);
+  findMediaCandidates();
+  window.scrollTo(0, document.body.scrollHeight);
+  await sleep(1000);
+  findMediaCandidates();
+  window.scrollTo(originalX, originalY);
+  await sleep(300);
+}
+
+function captureMediaBaseline() {
+  const candidates = findMediaCandidates();
+  const groupElements = new WeakSet();
+  for (const candidate of candidates) {
+    if (candidate.groupElement) groupElements.add(candidate.groupElement);
+  }
+  return {
+    urls: new Set(candidates.map((candidate) => candidate.url)),
+    groupElements,
+  };
+}
+
+function findMediaCandidates(prompt = "") {
   const candidates = [];
   let index = 0;
   for (const selector of META_SELECTORS.media) {
@@ -209,7 +242,9 @@ function findMediaCandidates() {
         top: rect.top + window.scrollY,
         left: rect.left + window.scrollX,
         index: index++,
+        groupElement,
         groupKey: getElementPath(groupElement),
+        promptScore: getPromptProximityScore(groupElement, prompt),
       });
     });
   }
@@ -226,8 +261,18 @@ function selectVariantGroup(candidates, requestedMediaType) {
     groups.set(candidate.groupKey, group);
   }
   const ranked = [...groups.values()].sort((a, b) => {
-    const aScore = a.length * 100000 + Math.max(...a.map((item) => item.top)) * 10 + Math.max(...a.map((item) => item.index));
-    const bScore = b.length * 100000 + Math.max(...b.map((item) => item.top)) * 10 + Math.max(...b.map((item) => item.index));
+    const aPromptScore = Math.max(...a.map((item) => item.promptScore || 0));
+    const bPromptScore = Math.max(...b.map((item) => item.promptScore || 0));
+    if (aPromptScore !== bPromptScore) return bPromptScore - aPromptScore;
+
+    const aSeenAt = Math.max(...a.map((item) => item.seenAt || 0));
+    const bSeenAt = Math.max(...b.map((item) => item.seenAt || 0));
+    if (aSeenAt !== bSeenAt) return bSeenAt - aSeenAt;
+
+    if (a.length !== b.length) return b.length - a.length;
+
+    const aScore = Math.max(...a.map((item) => item.top)) * 10 + Math.max(...a.map((item) => item.index));
+    const bScore = Math.max(...b.map((item) => item.top)) * 10 + Math.max(...b.map((item) => item.index));
     return bScore - aScore;
   });
   return (ranked[0] || usable)
@@ -260,12 +305,34 @@ function getElementPath(element) {
   return parts.join("/");
 }
 
+function getPromptProximityScore(element, prompt) {
+  const normalizedPrompt = normalizeText(prompt).slice(0, 80);
+  if (!element || normalizedPrompt.length < 24) return 0;
+  let current = element;
+  for (let depth = 0; current && depth < 8; depth++) {
+    const text = normalizeText(current.textContent || "");
+    if (text.includes(normalizedPrompt) || text.includes(normalizedPrompt.slice(0, 48))) {
+      return 100 - depth;
+    }
+    current = current.parentElement;
+  }
+  return 0;
+}
+
+function normalizeText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
 function extractUrl(element) {
-  if (element.dataset?.videoUrl) return element.dataset.videoUrl;
-  if (element.currentSrc) return element.currentSrc;
-  if (element.src) return element.src;
-  if (element.href) return element.href;
-  return element.getAttribute("src") || element.getAttribute("href") || "";
+  return firstDownloadableUrl([
+    element.dataset?.videoUrl,
+    element.currentSrc,
+    element.src,
+    element.href,
+    firstSrcSetUrl(element.getAttribute("srcset")),
+    element.getAttribute("src"),
+    element.getAttribute("href"),
+  ]);
 }
 
 function inferMediaType(element, url) {
@@ -277,7 +344,18 @@ function inferMediaType(element, url) {
 function isUsableMediaUrl(url) {
   if (!url) return false;
   if (url.startsWith("data:")) return false;
-  return url.startsWith("blob:") || url.startsWith("http://") || url.startsWith("https://");
+  return url.startsWith("http://") || url.startsWith("https://");
+}
+
+function firstDownloadableUrl(urls) {
+  const cleanUrls = urls.map((url) => String(url || "").trim()).filter(Boolean);
+  return cleanUrls.find((url) => url.startsWith("http://") || url.startsWith("https://")) || cleanUrls[0] || "";
+}
+
+function firstSrcSetUrl(srcset) {
+  if (!srcset) return "";
+  const firstCandidate = srcset.split(",").map((candidate) => candidate.trim()).find(Boolean);
+  return firstCandidate ? firstCandidate.split(/\s+/)[0] : "";
 }
 
 async function waitForElement(selectors, timeoutMs) {

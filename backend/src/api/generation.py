@@ -105,6 +105,7 @@ def build_generation_router(
                 project_id=project_id,
             ),
             batchId=batch_id,
+            batchPaused=queue_service.is_batch_paused(batch_id, project_id),
         )
 
     @router.get("/media-assets", response_model=GeneratedMediaListResponse)
@@ -128,6 +129,30 @@ def build_generation_router(
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
         return job
+
+    @router.post("/batches/{batch_id}/pause", response_model=GenerationJobListResponse)
+    async def pause_generation_batch(
+        batch_id: str,
+        project_id: Optional[str] = Query(None, alias="projectId"),
+    ):
+        jobs = queue_service.pause_batch(batch_id, project_id)
+        return GenerationJobListResponse(
+            jobs=jobs,
+            batchId=batch_id,
+            batchPaused=True,
+        )
+
+    @router.post("/batches/{batch_id}/resume", response_model=GenerationJobListResponse)
+    async def resume_generation_batch(
+        batch_id: str,
+        project_id: Optional[str] = Query(None, alias="projectId"),
+    ):
+        jobs = queue_service.resume_batch(batch_id, project_id)
+        return GenerationJobListResponse(
+            jobs=jobs,
+            batchId=batch_id,
+            batchPaused=False,
+        )
 
     @router.post("/jobs/claim", response_model=GenerationJob)
     async def claim_generation_job(request: GenerationJobClaimRequest):

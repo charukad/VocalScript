@@ -14,7 +14,8 @@
     "sidePanel",
     "storage",
     "tabs",
-    "scripting"
+    "scripting",
+    "alarms"
   ],
   "content_scripts": [
     {

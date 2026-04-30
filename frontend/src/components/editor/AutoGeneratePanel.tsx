@@ -58,6 +58,9 @@ export const AutoGeneratePanel = () => {
     approveStoryboard,
     createJobsFromApprovedScenes,
     refreshGenerationJobs,
+    pauseGenerationBatch,
+    resumeGenerationBatch,
+    retryGenerationJob,
     syncGenerationBatch,
     importCompletedGenerationMedia,
     importGenerationVariant,
@@ -65,6 +68,7 @@ export const AutoGeneratePanel = () => {
     generationJobs,
     generatedMediaAssets,
     isSyncingGeneration,
+    isGenerationBatchPaused,
     clips,
     currentProject,
   } = state;
@@ -127,6 +131,7 @@ export const AutoGeneratePanel = () => {
   const shouldAutoSync = Boolean(
     currentGenerationBatchId &&
     currentBatchJobs.length > 0 &&
+    !isGenerationBatchPaused &&
     (
       currentBatchJobs.some(job => job.status === 'queued' || job.status === 'running') ||
       importReadyCount > 0
@@ -260,6 +265,20 @@ export const AutoGeneratePanel = () => {
                 </button>
                 <button
                   className="btn-secondary"
+                  onClick={pauseGenerationBatch}
+                  disabled={isSyncingGeneration || isGenerationBatchPaused}
+                >
+                  Pause
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={resumeGenerationBatch}
+                  disabled={isSyncingGeneration || !isGenerationBatchPaused}
+                >
+                  Resume
+                </button>
+                <button
+                  className="btn-secondary"
                   onClick={importCompletedGenerationMedia}
                   disabled={isSyncingGeneration || importReadyCount === 0}
                 >
@@ -267,7 +286,7 @@ export const AutoGeneratePanel = () => {
                 </button>
               </div>
               <div className="generation-summary">
-                queued {jobCounts.queued ?? 0} - running {jobCounts.running ?? 0} - completed {jobCounts.completed ?? 0} - choose {needsChoiceCount} - needs action {jobCounts.manual_action_required ?? 0} - failed {jobCounts.failed ?? 0}
+                {isGenerationBatchPaused ? 'paused - ' : ''}queued {jobCounts.queued ?? 0} - running {jobCounts.running ?? 0} - completed {jobCounts.completed ?? 0} - choose {needsChoiceCount} - needs action {jobCounts.manual_action_required ?? 0} - failed {jobCounts.failed ?? 0}
               </div>
               {currentGenerationBatchId && (
                 <div className="generation-batch">Batch {currentGenerationBatchId.replace(/^batch-/, '')}</div>
@@ -304,6 +323,18 @@ export const AutoGeneratePanel = () => {
                           </button>
                         ))}
                       </div>
+                    )}
+                    {row.job && ['failed', 'canceled', 'manual_action_required'].includes(row.job.status) && (
+                      <button
+                        className="btn-secondary"
+                        onClick={() => retryGenerationJob(row.job!.id)}
+                        disabled={isSyncingGeneration}
+                      >
+                        Retry Scene
+                      </button>
+                    )}
+                    {row.job?.error && (
+                      <div className="auto-status">{row.job.error}</div>
                     )}
                   </div>
                   );

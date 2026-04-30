@@ -28,7 +28,10 @@ import {
   listGeneratedMediaAssets,
   listGenerationJobs,
   loadProjectRecordFromPath,
+  pauseGenerationBatch,
+  retryGenerationJob as retryGenerationJobRequest,
   resolveBackendMediaUrl,
+  resumeGenerationBatch,
   saveProjectRecord,
   storeRemoteGenerationJob,
   transcribeMedia,
@@ -318,6 +321,7 @@ export type EditorState = {
   generatedMediaAssets: GeneratedMediaAsset[];
   isGeneratingStoryboard: boolean;
   isSyncingGeneration: boolean;
+  isGenerationBatchPaused: boolean;
   storyboardStatus: string | null;
   setStoryboardSettings: (settings: Partial<StoryboardSettings>) => void;
   generateStoryboard: () => Promise<void>;
@@ -328,6 +332,9 @@ export type EditorState = {
   approveStoryboard: () => void;
   createJobsFromApprovedScenes: () => Promise<void>;
   refreshGenerationJobs: () => Promise<void>;
+  pauseGenerationBatch: () => Promise<void>;
+  resumeGenerationBatch: () => Promise<void>;
+  retryGenerationJob: (jobId: string) => Promise<void>;
   syncGenerationBatch: (silent?: boolean) => Promise<void>;
   importGenerationVariant: (jobId: string, variantUrl?: string) => Promise<void>;
   importCompletedGenerationMedia: () => Promise<void>;
@@ -347,6 +354,7 @@ const buildProjectSnapshot = (state: EditorState): Record<string, unknown> => ({
   currentGenerationBatchId: state.currentGenerationBatchId,
   generationJobs: state.generationJobs,
   generatedMediaAssets: state.generatedMediaAssets,
+  isGenerationBatchPaused: state.isGenerationBatchPaused,
 });
 
 const persistProjectSnapshot = async (state: EditorState): Promise<ProjectSummary> => {
@@ -580,6 +588,7 @@ const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<
     currentGenerationBatchId: saved?.currentGenerationBatchId ?? null,
     generationJobs,
     generatedMediaAssets,
+    isGenerationBatchPaused: Boolean(saved?.isGenerationBatchPaused),
     mediaUrl: null,
     srtContent: null,
     srtDownloadUrl: null,
@@ -749,6 +758,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         currentGenerationBatchId: null,
         generationJobs: [],
         generatedMediaAssets: [],
+        isGenerationBatchPaused: false,
       } as Partial<EditorState>);
       return project;
     } catch (err: any) {
@@ -836,6 +846,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       currentGenerationBatchId: null,
       generationJobs: [],
       generatedMediaAssets: [],
+      isGenerationBatchPaused: false,
       storyboardStatus: null,
     } as Partial<EditorState>);
   },
@@ -1318,6 +1329,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   generatedMediaAssets: [],
   isGeneratingStoryboard: false,
   isSyncingGeneration: false,
+  isGenerationBatchPaused: false,
   storyboardStatus: null,
   exportSequence: async () => {
     const abortController = new AbortController();
@@ -1507,6 +1519,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         currentGenerationBatchId: null,
         generationJobs: [],
         generatedMediaAssets: [],
+        isGenerationBatchPaused: false,
         storyboardSettings: {
           ...settings,
           sourceMediaId: source?.id ?? settings.sourceMediaId,
@@ -1619,6 +1632,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         currentGenerationBatchId: batchId,
         generationJobs: response.jobs,
         generatedMediaAssets: [],
+        isGenerationBatchPaused: Boolean(response.batchPaused),
         storyboardScenes: mergeSceneStatuses(state.storyboardScenes, response.jobs, state.clips, batchId),
         storyboardStatus: `Created ${response.jobs.length} generation jobs.`,
       });
@@ -1644,6 +1658,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set(state => ({
         currentGenerationBatchId: batchId,
         generationJobs: response.jobs,
+        isGenerationBatchPaused: Boolean(response.batchPaused),
         storyboardScenes: mergeSceneStatuses(state.storyboardScenes, response.jobs, state.clips, batchId),
         storyboardStatus: `Generation jobs refreshed: ${response.jobs.length} total.`,
       }));
@@ -1651,6 +1666,93 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       console.error(err);
       alert(err.message || 'Could not refresh generation jobs');
       set({ storyboardStatus: 'Generation job refresh failed.' });
+    }
+  },
+  pauseGenerationBatch: async () => {
+    const batchId = getCurrentGenerationBatchId(get());
+    if (!batchId) {
+      set({ storyboardStatus: 'Create generation jobs before pausing.' });
+      return;
+    }
+
+    set({ storyboardStatus: 'Pausing generation batch...' });
+    try {
+      const projectId = get().currentProject?.id ?? null;
+      const response = await pauseGenerationBatch(batchId, projectId);
+      set(state => ({
+        generationJobs: response.jobs,
+        isGenerationBatchPaused: true,
+        storyboardScenes: mergeSceneStatuses(state.storyboardScenes, response.jobs, state.clips, batchId),
+        storyboardStatus: 'Generation batch paused. Running provider work may finish, but no new jobs will be claimed.',
+      }));
+      if (get().currentProject) void get().saveProject();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Could not pause generation batch');
+      set({ storyboardStatus: 'Generation batch pause failed.' });
+    }
+  },
+  resumeGenerationBatch: async () => {
+    const batchId = getCurrentGenerationBatchId(get());
+    if (!batchId) {
+      set({ storyboardStatus: 'Create generation jobs before resuming.' });
+      return;
+    }
+
+    set({ storyboardStatus: 'Resuming generation batch...' });
+    try {
+      const projectId = get().currentProject?.id ?? null;
+      const response = await resumeGenerationBatch(batchId, projectId);
+      set(state => ({
+        generationJobs: response.jobs,
+        isGenerationBatchPaused: false,
+        storyboardScenes: mergeSceneStatuses(state.storyboardScenes, response.jobs, state.clips, batchId),
+        storyboardStatus: 'Generation batch resumed.',
+      }));
+      if (get().currentProject) void get().saveProject();
+      void get().syncGenerationBatch(true);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Could not resume generation batch');
+      set({ storyboardStatus: 'Generation batch resume failed.' });
+    }
+  },
+  retryGenerationJob: async (jobId) => {
+    const batchId = getCurrentGenerationBatchId(get());
+    set({ storyboardStatus: 'Retrying scene generation...' });
+    try {
+      const retriedJob = await retryGenerationJobRequest(jobId);
+      set(state => {
+        const removedClipIds = new Set(
+          state.clips
+            .filter(clip => clip.generation?.jobId === jobId)
+            .map(clip => clip.id)
+        );
+        const removedAssetIds = new Set(
+          state.clips
+            .filter(clip => clip.generation?.jobId === jobId)
+            .map(clip => clip.assetId)
+        );
+        const nextClips = state.clips.filter(clip => !removedClipIds.has(clip.id));
+        const nextJobs = state.generationJobs.map(job => job.id === jobId ? retriedJob : job);
+        const activeBatchId = batchId ?? retriedJob.batchId;
+        return {
+          ...withHistory(state),
+          assets: state.assets.filter(asset => !removedAssetIds.has(asset.id)),
+          clips: nextClips,
+          selectedClipId: removedClipIds.has(state.selectedClipId || '') ? null : state.selectedClipId,
+          generationJobs: nextJobs,
+          generatedMediaAssets: state.generatedMediaAssets.filter(asset => asset.jobId !== jobId),
+          storyboardScenes: mergeSceneStatuses(state.storyboardScenes, nextJobs, nextClips, activeBatchId),
+          storyboardStatus: 'Scene queued for retry.',
+        };
+      });
+      if (get().currentProject) void get().saveProject();
+      void get().syncGenerationBatch(true);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Could not retry generation job');
+      set({ storyboardStatus: 'Scene retry failed.' });
     }
   },
   syncGenerationBatch: async (silent = false) => {
@@ -1671,6 +1773,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set(state => ({
         currentGenerationBatchId: batchId,
         generationJobs: jobsResponse.jobs,
+        isGenerationBatchPaused: Boolean(jobsResponse.batchPaused),
         storyboardScenes: mergeSceneStatuses(state.storyboardScenes, jobsResponse.jobs, state.clips, batchId),
       }));
 
