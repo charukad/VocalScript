@@ -2074,7 +2074,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           storyboardScenes: mergeSceneStatuses(state.storyboardScenes, nextJobs, nextClips, activeBatchId),
           storyboardStatus: retriedJob.status === 'queued'
             ? 'Scene queued with rewritten prompt.'
-            : 'Auto retry limit reached. Use manual retry if needed.',
+            : 'Auto retry limit reached for this scene.',
         };
       });
       if (get().currentProject) void get().saveProject();

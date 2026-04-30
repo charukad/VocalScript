@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getStoryboardSources, useEditorStore } from '../../store/editorStore';
 import { resolveBackendMediaUrl } from '../../lib/api/client';
 import type {
@@ -11,6 +11,8 @@ import type {
   StoryboardScene,
   StoryboardSceneDensity,
 } from '../../types';
+
+type AutoPanelMode = 'dock' | 'wide' | 'full';
 
 const STYLE_OPTIONS = [
   'cinematic realistic',
@@ -67,7 +69,17 @@ const getAssetVariantCount = (asset: GeneratedMediaAsset | undefined): number =>
   return asset.resultUrl ? 1 : 0;
 };
 
+const getRunAttempt = (job: { metadata?: Record<string, string> }): number => (
+  Number.parseInt(String(job.metadata?.runAttempt ?? '0'), 10) || 0
+);
+
+const clampRetryNumber = (value: number, min: number, max: number): number => (
+  Math.min(max, Math.max(min, Math.round(value || min)))
+);
+
 export const AutoGeneratePanel = () => {
+  const [panelMode, setPanelMode] = useState<AutoPanelMode>('dock');
+  const autoRetryInFlight = useRef<Set<string>>(new Set());
   const state = useEditorStore();
   const {
     captions,
@@ -173,6 +185,44 @@ export const AutoGeneratePanel = () => {
     return () => window.clearInterval(interval);
   }, [shouldAutoSync, isSyncingGeneration, syncGenerationBatch]);
 
+  useEffect(() => {
+    if (!storyboardSettings.autoRetryFailedScenes || isGenerationBatchPaused) return;
+
+    const maxAttempts = clampRetryNumber(storyboardSettings.autoRetryMaxAttempts, 1, 50);
+    const rewriteAfter = clampRetryNumber(storyboardSettings.autoRetryRewriteAfter, 1, maxAttempts);
+    const retryableJobs = currentBatchJobs.filter(job =>
+      ['failed', 'canceled', 'manual_action_required'].includes(job.status)
+    );
+
+    for (const job of retryableJobs) {
+      const runAttempt = getRunAttempt(job);
+      if (runAttempt >= maxAttempts) continue;
+
+      const retryKey = `${job.id}:${job.status}:${runAttempt}:${job.error ?? ''}`;
+      if (autoRetryInFlight.current.has(retryKey)) continue;
+      autoRetryInFlight.current.add(retryKey);
+
+      const useRewrite = runAttempt >= rewriteAfter;
+      const retry = useRewrite
+        ? autoRetryGenerationJob(job.id, maxAttempts)
+        : retryGenerationJob(job.id);
+
+      void retry.finally(() => {
+        window.setTimeout(() => {
+          autoRetryInFlight.current.delete(retryKey);
+        }, 4000);
+      });
+    }
+  }, [
+    storyboardSettings.autoRetryFailedScenes,
+    storyboardSettings.autoRetryMaxAttempts,
+    storyboardSettings.autoRetryRewriteAfter,
+    isGenerationBatchPaused,
+    currentBatchJobs,
+    retryGenerationJob,
+    autoRetryGenerationJob,
+  ]);
+
   const updateScene = (id: string, field: SceneField, value: string) => {
     if (field === 'start' || field === 'end') {
       updateStoryboardScene(id, { [field]: Number(value) || 0 });
@@ -182,9 +232,18 @@ export const AutoGeneratePanel = () => {
   };
 
   return (
-    <div className="inspector-section auto-generate-panel">
-      <div className="inspector-section-title">Auto Generate Video</div>
+    <div className={`inspector-section auto-generate-panel auto-panel-${panelMode}`}>
+      <div className="inspector-section-title auto-panel-title">
+        <span>Auto Generate Video</span>
+        <div className="auto-panel-mode-controls">
+          <button className={panelMode === 'dock' ? 'active' : ''} onClick={() => setPanelMode('dock')} title="Dock in inspector">Dock</button>
+          <button className={panelMode === 'wide' ? 'active' : ''} onClick={() => setPanelMode('wide')} title="Open half screen">Half</button>
+          <button className={panelMode === 'full' ? 'active' : ''} onClick={() => setPanelMode('full')} title="Open full screen">Full</button>
+        </div>
+      </div>
 
+      <div className="auto-panel-body">
+        <div className="auto-panel-setup">
       <div className="auto-grid">
         <label className="auto-field">
           <span>Source</span>
@@ -315,6 +374,47 @@ export const AutoGeneratePanel = () => {
             </select>
           </label>
         </div>
+
+        <div className="auto-retry-controls">
+          <label className="auto-toggle">
+            <input
+              type="checkbox"
+              checked={storyboardSettings.autoRetryFailedScenes}
+              onChange={event => setStoryboardSettings({ autoRetryFailedScenes: event.target.checked })}
+            />
+            <span>Auto regenerate failed scenes</span>
+          </label>
+          <div className="auto-row-2">
+            <label className="auto-field">
+              <span>Max Tries</span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={storyboardSettings.autoRetryMaxAttempts}
+                onChange={event => setStoryboardSettings({
+                  autoRetryMaxAttempts: clampRetryNumber(Number(event.target.value), 1, 50),
+                })}
+              />
+            </label>
+            <label className="auto-field">
+              <span>Rewrite After</span>
+              <input
+                type="number"
+                min={1}
+                max={storyboardSettings.autoRetryMaxAttempts}
+                value={storyboardSettings.autoRetryRewriteAfter}
+                onChange={event => setStoryboardSettings({
+                  autoRetryRewriteAfter: clampRetryNumber(
+                    Number(event.target.value),
+                    1,
+                    storyboardSettings.autoRetryMaxAttempts,
+                  ),
+                })}
+              />
+            </label>
+          </div>
+        </div>
       </div>
 
       <button
@@ -329,7 +429,14 @@ export const AutoGeneratePanel = () => {
       {storyboardStatus && (
         <div className="auto-status">{storyboardStatus}</div>
       )}
+        </div>
 
+        <div className="auto-panel-workspace">
+      {storyboardScenes.length === 0 && (
+        <div className="auto-workspace-empty">
+          Generate a storyboard to review scenes, queue jobs, and select generated results.
+        </div>
+      )}
       {storyboardScenes.length > 0 && (
         <>
           <div className="storyboard-toolbar">
@@ -408,7 +515,15 @@ export const AutoGeneratePanel = () => {
                             {variant.mediaType === 'image' ? (
                               <img src={resolveBackendMediaUrl(variant.url)} alt={`Scene ${row.index + 1} result ${variantIndex + 1}`} />
                             ) : (
-                              <span>Video {variantIndex + 1}</span>
+                              <video
+                                src={resolveBackendMediaUrl(variant.url)}
+                                muted
+                                loop
+                                playsInline
+                                preload="metadata"
+                                onMouseEnter={event => void event.currentTarget.play().catch(() => {})}
+                                onMouseLeave={event => event.currentTarget.pause()}
+                              />
                             )}
                             <span>Use {variantIndex + 1}</span>
                           </button>
@@ -425,7 +540,7 @@ export const AutoGeneratePanel = () => {
                         </button>
                         <button
                           className="btn-secondary"
-                          onClick={() => row.job ? autoRetryGenerationJob(row.job.id) : regenerateFailedScene(row.scene.id, true)}
+                          onClick={() => row.job ? autoRetryGenerationJob(row.job.id, storyboardSettings.autoRetryMaxAttempts) : regenerateFailedScene(row.scene.id, true)}
                         >
                           Rewrite + Regenerate
                         </button>
@@ -511,6 +626,8 @@ export const AutoGeneratePanel = () => {
           </div>
         </>
       )}
+        </div>
+      </div>
     </div>
   );
 };
