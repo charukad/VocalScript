@@ -21,6 +21,7 @@ from backend.src.domain.models.generation import (
     ProviderName,
     StoryboardScene,
 )
+from backend.src.domain.services.sqlite_store import SQLiteStore
 
 
 RUNNING_JOB_TIMEOUT_SECONDS = 900
@@ -44,13 +45,19 @@ def _parse_iso(value: Optional[str]) -> Optional[datetime]:
 
 
 class GenerationQueueService:
-    def __init__(self, generated_media_dir: str, projects_dir: Optional[str] = None):
+    def __init__(
+        self,
+        generated_media_dir: str,
+        projects_dir: Optional[str] = None,
+        store: Optional[SQLiteStore] = None,
+    ):
         self.generated_media_dir = Path(generated_media_dir)
         self.generated_media_dir.mkdir(parents=True, exist_ok=True)
         self.projects_dir = Path(projects_dir) if projects_dir else None
         if self.projects_dir:
             self.projects_dir.mkdir(parents=True, exist_ok=True)
         self.state_file = (self.projects_dir or self.generated_media_dir) / "generation_state.json"
+        self.store = store
         self._jobs: Dict[str, GenerationJob] = {}
         self._job_order: List[str] = []
         self._paused_batches: set[str] = set()
@@ -63,6 +70,7 @@ class GenerationQueueService:
         aspect_ratio: GenerationAspectRatio = "16:9",
         batch_id: Optional[str] = None,
         project_id: Optional[str] = None,
+        project_name: Optional[str] = None,
     ) -> List[GenerationJob]:
         resolved_batch_id = batch_id or f"batch-{uuid.uuid4().hex[:12]}"
         jobs: List[GenerationJob] = []
@@ -82,6 +90,7 @@ class GenerationQueueService:
                     "batchId": resolved_batch_id,
                     **({"projectId": project_id} if project_id else {}),
                     "aspectRatio": aspect_ratio,
+                    **({"projectName": project_name} if project_name else {}),
                     "sceneStart": str(scene.start),
                     "sceneEnd": str(scene.end),
                     "sceneStyle": scene.style,
@@ -102,6 +111,7 @@ class GenerationQueueService:
         batch_id: Optional[str] = None,
         project_id: Optional[str] = None,
     ) -> List[GenerationJob]:
+        self._refresh_from_store()
         jobs = [self._jobs[job_id] for job_id in self._job_order if job_id in self._jobs]
         if status:
             jobs = [job for job in jobs if job.status == status]
@@ -158,6 +168,7 @@ class GenerationQueueService:
         return assets
 
     def get_job(self, job_id: str) -> Optional[GenerationJob]:
+        self._refresh_from_store()
         return self._jobs.get(job_id)
 
     def claim_next_job(
@@ -166,6 +177,18 @@ class GenerationQueueService:
         worker_id: Optional[str] = None,
         project_id: Optional[str] = None,
     ) -> Optional[GenerationJob]:
+        if self.store:
+            claimed = self.store.claim_next_generation_job(
+                provider=provider,
+                worker_id=worker_id,
+                project_id=project_id,
+            )
+            if claimed:
+                self._jobs[claimed.id] = claimed
+                if claimed.id not in self._job_order:
+                    self._job_order.append(claimed.id)
+            return claimed
+
         self._recover_stale_running_jobs(provider=provider, project_id=project_id)
         for job_id in self._job_order:
             job = self._jobs[job_id]
@@ -190,6 +213,8 @@ class GenerationQueueService:
 
     def pause_batch(self, batch_id: str, project_id: Optional[str] = None) -> List[GenerationJob]:
         self._paused_batches.add(self._batch_key(batch_id, project_id))
+        if self.store:
+            self.store.set_batch_paused(batch_id, True, project_id)
         jobs = self.list_jobs(batch_id=batch_id, project_id=project_id)
         for job in jobs:
             if job.status in ("queued", "running"):
@@ -201,6 +226,8 @@ class GenerationQueueService:
 
     def resume_batch(self, batch_id: str, project_id: Optional[str] = None) -> List[GenerationJob]:
         self._paused_batches.discard(self._batch_key(batch_id, project_id))
+        if self.store:
+            self.store.set_batch_paused(batch_id, False, project_id)
         jobs = self.list_jobs(batch_id=batch_id, project_id=project_id)
         for job in jobs:
             metadata = dict(job.metadata)
@@ -222,20 +249,31 @@ class GenerationQueueService:
             return job
         return self._replace_job(job_id, status="canceled")
 
-    def retry_job(self, job_id: str) -> Optional[GenerationJob]:
+    def retry_job(
+        self,
+        job_id: str,
+        prompt_override: Optional[str] = None,
+        retry_mode: str = "manual",
+    ) -> Optional[GenerationJob]:
         job = self._jobs.get(job_id)
         if not job:
             return None
         if job.status not in ("failed", "canceled", "manual_action_required"):
             return job
+        metadata = self._retry_metadata(job.metadata)
+        metadata["retryMode"] = retry_mode
+        if prompt_override and prompt_override.strip():
+            metadata["originalPrompt"] = job.prompt
+            metadata["promptRewrittenAt"] = _utc_now_iso()
         return self._replace_job(
             job_id,
+            prompt=prompt_override.strip() if prompt_override and prompt_override.strip() else job.prompt,
             status="queued",
             error=None,
             result_url=None,
             result_variants=[],
             local_path=None,
-            metadata=self._retry_metadata(job.metadata),
+            metadata=metadata,
         )
 
     def update_status(
@@ -378,6 +416,35 @@ class GenerationQueueService:
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Could not download remote media: {exc}") from exc
 
+    def select_job_variant(self, job_id: str, variant_url: str) -> Optional[GenerationJob]:
+        self._refresh_from_store()
+        job = self._jobs.get(job_id)
+        if not job:
+            return None
+        selected = next((variant for variant in job.result_variants if variant.url == variant_url), None)
+        if not selected and job.result_url == variant_url:
+            selected = GenerationMediaVariant(
+                id="selected",
+                url=variant_url,
+                mediaType=job.media_type,
+                localPath=job.local_path,
+                source="backend" if job.local_path else "provider",
+            )
+        if not selected:
+            return None
+        metadata = dict(job.metadata)
+        metadata["selectedVariantUrl"] = variant_url
+        metadata["selectedVariantAt"] = _utc_now_iso()
+        return self._replace_job(
+            job_id,
+            status="completed",
+            media_type=selected.media_type or job.media_type,
+            result_url=selected.url,
+            local_path=selected.local_path or job.local_path,
+            error=None,
+            metadata=metadata,
+        )
+
     def _store_remote_variants_for_job(
         self,
         job: GenerationJob,
@@ -459,9 +526,34 @@ class GenerationQueueService:
         self._save_state()
         return job
 
+    def _refresh_from_store(self) -> None:
+        if not self.store:
+            return
+        stored_jobs, stored_order, paused_batches = self.store.load_generation_state()
+        if not stored_jobs:
+            return
+        self._jobs = {job.id: job for job in stored_jobs}
+        self._job_order = [job_id for job_id in stored_order if job_id in self._jobs]
+        missing_ids = [job.id for job in stored_jobs if job.id not in self._job_order]
+        self._job_order.extend(missing_ids)
+        self._paused_batches = set(paused_batches)
+
     def _load_state(self) -> None:
         changed = False
-        if not self.state_file.exists():
+        loaded_from_store = False
+        if self.store:
+            stored_jobs, stored_order, paused_batches = self.store.load_generation_state()
+            if stored_jobs:
+                self._jobs = {job.id: job for job in stored_jobs}
+                self._job_order = [job_id for job_id in stored_order if job_id in self._jobs]
+                missing_ids = [job.id for job in stored_jobs if job.id not in self._job_order]
+                self._job_order.extend(missing_ids)
+                self._paused_batches = set(paused_batches)
+                loaded_from_store = True
+
+        if loaded_from_store:
+            raw = {}
+        elif not self.state_file.exists():
             raw = {}
         else:
             try:
@@ -470,28 +562,38 @@ class GenerationQueueService:
                 raw = {}
 
         if raw:
-            jobs: Dict[str, GenerationJob] = {}
+            jobs: Dict[str, GenerationJob] = dict(self._jobs)
             for item in raw.get("jobs", []):
                 try:
                     job = GenerationJob(**item)
                 except ValueError:
                     continue
-                job, was_recovered = self._recover_job_after_restart(job)
-                changed = changed or was_recovered
+                if job.id in jobs:
+                    continue
+                job, _ = self._recover_job_after_restart(job)
+                changed = True
                 jobs[job.id] = job
 
             ordered_ids = [job_id for job_id in raw.get("jobOrder", []) if job_id in jobs]
+            ordered_ids = [job_id for job_id in self._job_order if job_id in jobs] + [
+                job_id for job_id in ordered_ids if job_id not in self._job_order
+            ]
             missing_ids = [job_id for job_id in jobs if job_id not in ordered_ids]
             self._jobs = jobs
             self._job_order = ordered_ids + missing_ids
-            self._paused_batches = set(str(key) for key in raw.get("pausedBatches", []))
+            raw_paused_batches = {str(key) for key in raw.get("pausedBatches", [])}
+            if raw_paused_batches - self._paused_batches:
+                changed = True
+            self._paused_batches.update(raw_paused_batches)
 
-        changed = self._merge_project_saved_jobs() or changed
+        if not loaded_from_store:
+            changed = self._merge_project_saved_jobs() or changed
         if changed:
             self._save_state()
 
     def _save_state(self) -> None:
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file = self.state_file.with_name("generation_state.backup.json") if self.store else self.state_file
+        state_file.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "version": 1,
             "updatedAt": _utc_now_iso(),
@@ -503,9 +605,18 @@ class GenerationQueueService:
                 if job_id in self._jobs
             ],
         }
-        tmp_file = self.state_file.with_suffix(".tmp")
+        tmp_file = state_file.with_suffix(".tmp")
         tmp_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp_file.replace(self.state_file)
+        tmp_file.replace(state_file)
+        if self.store:
+            self.store.save_generation_state(
+                [
+                    self._jobs[job_id]
+                    for job_id in self._job_order
+                    if job_id in self._jobs
+                ],
+                self._paused_batches,
+            )
 
     def _batch_key(self, batch_id: str, project_id: Optional[str] = None) -> str:
         return f"{project_id or 'legacy'}:{batch_id}"

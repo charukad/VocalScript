@@ -391,6 +391,7 @@ async function claimAndRunNextJob() {
     const result = await adapter.run(job, settings);
     if (result.status === "manual_action_required") {
       await updateJobStatus(settings, job.id, "manual_action_required", result.message, result.metadata);
+      await markProviderDelay(settings);
       updateStatus({ jobMessage: `Manual action needed for ${formatJobLabel(job)}` });
       return;
     }
@@ -400,6 +401,7 @@ async function claimAndRunNextJob() {
     updateStatus({ jobMessage: `Completed ${formatJobLabel(job)}` });
   } catch (error) {
     await updateJobStatus(settings, job.id, "failed", error.message, { provider: "meta" });
+    await markProviderDelay(settings);
     updateStatus({ jobMessage: `Failed ${formatJobLabel(job)}: ${error.message}` });
   } finally {
     currentJob = null;
@@ -434,8 +436,9 @@ async function markProviderDelay(settings) {
 }
 
 function formatJobLabel(job) {
-  const project = job.projectId || job.metadata?.projectId || "no-project";
-  return `${job.id} / ${project} / ${job.sceneId || "scene"}`;
+  const project = job.metadata?.projectName || job.projectId || job.metadata?.projectId || "no-project";
+  const attempt = job.metadata?.runAttempt ? ` / attempt ${job.metadata.runAttempt}` : "";
+  return `${job.id} / ${project} / ${job.sceneId || "scene"}${attempt}`;
 }
 
 async function updateJobStatus(settings, jobId, status, error, metadata = {}) {

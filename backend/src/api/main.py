@@ -1,4 +1,5 @@
 from typing import List, Optional
+from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +18,7 @@ from backend.src.domain.services.export_orchestrator import ExportOrchestrator, 
 from backend.src.domain.services.browser_bridge_service import BrowserBridgeService
 from backend.src.domain.services.generation_queue_service import GenerationQueueService
 from backend.src.domain.services.project_service import ProjectService
+from backend.src.domain.services.sqlite_store import SQLiteStore
 from backend.src.domain.services.storyboard_service import StoryboardService
 from backend.src.api.browser_bridge import build_browser_bridge_router
 from backend.src.api.generation import build_generation_router
@@ -41,10 +43,14 @@ whisper_engine = FasterWhisperService(model_size="tiny", device="cpu", compute_t
 orchestrator = ExportOrchestrator(compiler, whisper_engine)
 local_llm_service = LocalLLMService(settings.llm)
 storyboard_service = StoryboardService(local_llm_service)
-project_service = ProjectService(settings.projects.projects_dir)
+registry_database_path = settings.projects.database_path or str(Path(settings.projects.projects_dir) / "neuralscribe_registry.db")
+legacy_database_path = str(Path(settings.projects.projects_dir) / "neuralscribe.db")
+sqlite_store = SQLiteStore(registry_database_path, legacy_database_path=legacy_database_path)
+project_service = ProjectService(settings.projects.projects_dir, store=sqlite_store)
 generation_queue_service = GenerationQueueService(
     settings.browser_bridge.generated_media_dir,
     projects_dir=settings.projects.projects_dir,
+    store=sqlite_store,
 )
 browser_bridge_service = BrowserBridgeService()
 app.include_router(build_generation_router(storyboard_service, whisper_engine, generation_queue_service))

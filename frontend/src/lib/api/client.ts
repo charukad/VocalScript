@@ -6,6 +6,9 @@ import type {
   GenerationAspectRatio,
   GeneratedMediaType,
   GeneratedMediaAsset,
+  StoryboardMotionIntensity,
+  StoryboardPromptDetail,
+  StoryboardSceneDensity,
   ProviderName,
   GenerationJob,
   ProjectDetail,
@@ -42,6 +45,10 @@ export type StoryboardResponse = {
 export type StoryboardGenerationOptions = {
   provider: ProviderName;
   preferredVisualType: GeneratedMediaType;
+  videoMixPercent: number;
+  sceneDensity: StoryboardSceneDensity;
+  motionIntensity: StoryboardMotionIntensity;
+  promptDetail: StoryboardPromptDetail;
   style: string;
 };
 
@@ -66,6 +73,13 @@ export type ProjectSaveState = Record<string, unknown>;
 
 export type ProjectListResponse = {
   projects: ProjectSummary[];
+};
+
+export type ProjectAssetResponse = {
+  assetId: string;
+  filename: string;
+  url: string;
+  localPath: string;
 };
 
 export const resolveBackendMediaUrl = (url: string): string => {
@@ -282,6 +296,10 @@ export const createStoryboardFromTranscript = async (
       transcript,
       segments,
       preferredVisualType: options.preferredVisualType,
+      videoMixPercent: options.videoMixPercent,
+      sceneDensity: options.sceneDensity,
+      motionIntensity: options.motionIntensity,
+      promptDetail: options.promptDetail,
       style: options.style,
       provider: options.provider,
     }),
@@ -304,6 +322,10 @@ export const createStoryboardFromAudio = async (
   const formData = new FormData();
   formData.append('file', file);
   formData.append('preferredVisualType', options.preferredVisualType);
+  formData.append('videoMixPercent', String(options.videoMixPercent));
+  formData.append('sceneDensity', options.sceneDensity);
+  formData.append('motionIntensity', options.motionIntensity);
+  formData.append('promptDetail', options.promptDetail);
   formData.append('style', options.style);
   formData.append('provider', options.provider);
 
@@ -326,12 +348,13 @@ export const createGenerationJobs = async (
   provider: ProviderName,
   aspectRatio: GenerationAspectRatio,
   projectId?: string | null,
+  projectName?: string | null,
   signal?: AbortSignal
 ): Promise<GenerationJobListResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/generation/jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenes, provider, aspectRatio, projectId }),
+    body: JSON.stringify({ scenes, provider, aspectRatio, projectId, projectName }),
     signal,
   });
 
@@ -414,6 +437,23 @@ export const retryGenerationJob = async (
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(formatApiError(errorData.detail, 'Could not retry generation job'));
+  }
+
+  return response.json();
+};
+
+export const autoRetryGenerationJob = async (
+  jobId: string,
+  signal?: AbortSignal
+): Promise<GenerationJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs/${jobId}/retry-auto`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not auto retry generation job'));
   }
 
   return response.json();
@@ -540,6 +580,30 @@ export const saveProjectRecord = async (
   return response.json();
 };
 
+export const uploadProjectAsset = async (
+  projectId: string,
+  assetId: string,
+  file: File,
+  signal?: AbortSignal
+): Promise<ProjectAssetResponse> => {
+  const formData = new FormData();
+  formData.append('assetId', assetId);
+  formData.append('file', file);
+
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/assets`, {
+    method: 'POST',
+    body: formData,
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not save project media'));
+  }
+
+  return response.json();
+};
+
 export const storeRemoteGenerationJob = async (
   jobId: string,
   mediaUrl?: string,
@@ -555,6 +619,26 @@ export const storeRemoteGenerationJob = async (
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(formatApiError(errorData.detail, 'Could not store remote generated media'));
+  }
+
+  return response.json();
+};
+
+export const selectGenerationJobVariant = async (
+  jobId: string,
+  mediaUrl: string,
+  signal?: AbortSignal
+): Promise<GenerationJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs/${jobId}/select-variant`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mediaUrl }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not select generated variant'));
   }
 
   return response.json();

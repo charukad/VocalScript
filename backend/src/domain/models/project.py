@@ -33,6 +33,13 @@ class ProjectDirectoryResponse(ApiModel):
     path: str
 
 
+class ProjectAssetResponse(ApiModel):
+    asset_id: str = Field(alias="assetId")
+    filename: str
+    url: str
+    local_path: str = Field(alias="localPath")
+
+
 class ProjectSaveRequest(ApiModel):
     name: Optional[str] = None
     state: Dict[str, Any] = Field(default_factory=dict)

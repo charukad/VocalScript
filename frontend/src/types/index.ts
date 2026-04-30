@@ -8,6 +8,8 @@ export type MediaAsset = {
   thumbnailUrl?: string;
   waveform?: number[];
   filmstrip?: string[];
+  sourceUrl?: string | null;
+  localPath?: string | null;
 };
 
 export type TimelineTrack = {
@@ -81,9 +83,19 @@ export type TimelineClip = {
     projectId?: string | null;
     sceneId: string;
     provider: ProviderName;
+    mediaType?: GeneratedMediaType;
     status: GenerationJobStatus;
+    resultUrl?: string | null;
+    resultVariants?: GenerationMediaVariant[];
+    localPath?: string | null;
     prompt: string;
+    negativePrompt?: string;
+    start?: number;
+    end?: number;
+    duration?: number;
     transcript: string;
+    error?: string | null;
+    metadata?: Record<string, string>;
   };
 };
 
@@ -106,6 +118,9 @@ export type ProviderName = 'meta' | 'grok';
 
 export type GeneratedMediaType = 'image' | 'video';
 export type GenerationAspectRatio = '16:9' | '9:16' | '1:1' | '4:5';
+export type StoryboardSceneDensity = 'low' | 'medium' | 'high' | 'extra_high';
+export type StoryboardMotionIntensity = 'subtle' | 'balanced' | 'dynamic';
+export type StoryboardPromptDetail = 'simple' | 'balanced' | 'detailed';
 
 export type StoryboardSceneStatus =
   | 'draft'
@@ -139,7 +154,11 @@ export type StoryboardSettings = {
   sourceMediaId: string | null;
   provider: ProviderName;
   visualType: GeneratedMediaType;
+  videoMixPercent: number;
   aspectRatio: GenerationAspectRatio;
+  sceneDensity: StoryboardSceneDensity;
+  motionIntensity: StoryboardMotionIntensity;
+  promptDetail: StoryboardPromptDetail;
   style: string;
 };
 

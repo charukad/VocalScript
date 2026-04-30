@@ -64,13 +64,19 @@ async function runMetaJob(job, options) {
     if (hasManualActionElement()) {
       return manualActionResult(job, "Meta needs login or captcha before generation can start.");
     }
-    throw new Error("Could not find enabled Meta generate button.");
+    return manualActionResult(job, "Meta prompt was inserted, but the generate button was not enabled. Check the provider tab, then retry this scene.");
   }
 
   const mediaBefore = captureMediaBaseline();
-  clickElement(generateButton);
+  const mediaObserver = createNewMediaObserver();
+  let result = null;
+  try {
+    clickElement(generateButton);
+    result = await waitForGeneratedMedia(timeoutMs, mediaBefore, job.mediaType || "image", prompt, mediaObserver);
+  } finally {
+    mediaObserver.disconnect();
+  }
 
-  const result = await waitForGeneratedMedia(timeoutMs, mediaBefore, job.mediaType || "image", prompt);
   if (!result) {
     if (hasManualActionElement()) {
       return manualActionResult(job, "Meta needs manual action before media is available.");
@@ -148,7 +154,7 @@ async function waitForGenerateButton(timeoutMs) {
   return null;
 }
 
-async function waitForGeneratedMedia(timeoutMs, baseline, requestedMediaType, prompt) {
+async function waitForGeneratedMedia(timeoutMs, baseline, requestedMediaType, prompt, mediaObserver) {
   const deadline = Date.now() + timeoutMs;
   const startedAt = Date.now();
   const found = new Map();
@@ -159,6 +165,7 @@ async function waitForGeneratedMedia(timeoutMs, baseline, requestedMediaType, pr
 
   while (Date.now() < deadline) {
     const candidates = findMediaCandidates(prompt)
+      .filter((candidate) => !mediaObserver || mediaObserver.hasCandidate(candidate))
       .filter((candidate) => !baseline.urls.has(candidate.url))
       .filter((candidate) => !baseline.groupElements.has(candidate.groupElement))
       .filter((candidate) => requestedMediaType !== "video" || candidate.mediaType === "video");
@@ -225,6 +232,54 @@ function captureMediaBaseline() {
   };
 }
 
+function createNewMediaObserver() {
+  const mediaElements = new WeakSet();
+  const mediaGroups = new WeakSet();
+  const mediaSelector = META_SELECTORS.media.join(",");
+
+  const rememberMediaElement = (element) => {
+    if (!element || !(element instanceof Element)) return;
+    mediaElements.add(element);
+    const group = findMediaGroup(element);
+    if (group) mediaGroups.add(group);
+  };
+
+  const rememberNode = (node) => {
+    if (!node || !(node instanceof Element)) return;
+    if (node.matches(mediaSelector)) rememberMediaElement(node);
+    node.querySelectorAll?.(mediaSelector).forEach(rememberMediaElement);
+  };
+
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type === "childList") {
+        mutation.addedNodes.forEach(rememberNode);
+      } else if (mutation.type === "attributes") {
+        rememberNode(mutation.target);
+      }
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["src", "srcset", "href", "data-video-url"],
+  });
+
+  return {
+    hasCandidate(candidate) {
+      return Boolean(
+        (candidate.element && mediaElements.has(candidate.element)) ||
+        (candidate.groupElement && mediaGroups.has(candidate.groupElement))
+      );
+    },
+    disconnect() {
+      observer.disconnect();
+    },
+  };
+}
+
 function findMediaCandidates(prompt = "") {
   const candidates = [];
   let index = 0;
@@ -236,6 +291,7 @@ function findMediaCandidates(prompt = "") {
       const groupElement = findMediaGroup(element);
       candidates.push({
         url,
+        element,
         mediaType: inferMediaType(element, url),
         width: element.naturalWidth || element.videoWidth || rect.width || null,
         height: element.naturalHeight || element.videoHeight || rect.height || null,

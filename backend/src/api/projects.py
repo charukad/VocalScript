@@ -1,8 +1,10 @@
 import subprocess
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from backend.src.domain.models.project import (
+    ProjectAssetResponse,
     ProjectCreateRequest,
     ProjectDirectoryResponse,
     ProjectDetail,
@@ -68,5 +70,28 @@ def build_projects_router(project_service: ProjectService) -> APIRouter:
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         return project
+
+    @router.post("/{project_id}/assets", response_model=ProjectAssetResponse)
+    async def upload_project_asset(
+        project_id: str,
+        asset_id: str = Form(..., alias="assetId"),
+        file: UploadFile = File(...),
+    ):
+        saved = project_service.save_asset_file(
+            project_id,
+            asset_id=asset_id,
+            source_filename=file.filename or "media",
+            source_stream=file.file,
+        )
+        if not saved:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return ProjectAssetResponse(**saved)
+
+    @router.get("/{project_id}/assets/{filename}")
+    async def get_project_asset(project_id: str, filename: str):
+        asset_path = project_service.resolve_asset_path(project_id, filename)
+        if not asset_path:
+            raise HTTPException(status_code=404, detail="Project asset not found")
+        return FileResponse(asset_path)
 
     return router

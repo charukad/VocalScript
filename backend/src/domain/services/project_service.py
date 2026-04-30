@@ -1,17 +1,22 @@
 import json
 import re
+import shutil
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, BinaryIO, Dict, List, Optional
 
 from backend.src.domain.models.project import ProjectDetail, ProjectSummary, utc_now_iso
+from backend.src.domain.services.sqlite_store import SQLiteStore
 
 
 class ProjectService:
-    def __init__(self, projects_dir: str):
+    def __init__(self, projects_dir: str, store: Optional[SQLiteStore] = None):
         self.projects_dir = Path(projects_dir)
         self.projects_dir.mkdir(parents=True, exist_ok=True)
         self.registry_file = self.projects_dir / "registry.json"
+        self.store = store
+        if self.store:
+            self._bootstrap_database_from_project_files()
 
     def create_project(self, name: str, parent_directory: Optional[str] = None) -> ProjectDetail:
         project_id = f"project-{uuid.uuid4().hex[:12]}"
@@ -33,20 +38,54 @@ class ProjectService:
 
     def list_projects(self) -> List[ProjectSummary]:
         projects_by_id: Dict[str, ProjectSummary] = {}
+        if self.store:
+            for project in self.store.list_projects():
+                projects_by_id[project.id] = self._summary(project)
         for project_file in self._known_project_files():
+            database_project = self._read_project_database(project_file.parent)
+            if database_project:
+                projects_by_id[database_project.id] = self._summary(database_project)
+                continue
             project = self._read_project_file(project_file)
             if project:
+                if self.store:
+                    self.store.upsert_project(project)
                 projects_by_id[project.id] = self._summary(project)
         return sorted(projects_by_id.values(), key=lambda project: project.updated_at, reverse=True)
 
     def get_project(self, project_id: str) -> Optional[ProjectDetail]:
+        if self.store:
+            project = self.store.get_project(project_id)
+            if project:
+                return project
         project_file = self._find_project_file(project_id)
         if not project_file:
             return None
-        return self._read_project_file(project_file)
+        project = self._read_project_file(project_file)
+        if project and self.store:
+            self.store.upsert_project(project)
+        return project
 
     def load_project_from_path(self, path: str) -> Optional[ProjectDetail]:
         project_path = Path(path).expanduser()
+        if project_path.is_dir() and (project_path / "project.db").exists() and self.store:
+            project = self.store.get_project_from_database_path(project_path / "project.db")
+            if project:
+                self._write_project(project)
+                self._register_project(project)
+                return project
+        if project_path.is_file() and project_path.name == "project.db" and self.store:
+            project = self.store.get_project_from_database_path(project_path)
+            if project:
+                self._write_project(project)
+                self._register_project(project)
+                return project
+        if project_path.is_file() and project_path.name == "project.json":
+            database_project = self._read_project_database(project_path.parent)
+            if database_project:
+                self._write_project(database_project)
+                self._register_project(database_project)
+                return database_project
         if project_path.is_dir():
             project_path = project_path / "project.json"
         if not project_path.exists():
@@ -73,7 +112,7 @@ class ProjectService:
             update={
                 "name": self._clean_name(name or existing.name),
                 "updated_at": utc_now_iso(),
-                "state": state,
+                "state": self._sanitize_state(state),
             }
         )
         self._write_project(project)
@@ -89,18 +128,59 @@ class ProjectService:
     def generated_media_dir(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "generated"
 
+    def assets_dir(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "assets"
+
+    def save_asset_file(
+        self,
+        project_id: str,
+        asset_id: str,
+        source_filename: str,
+        source_stream: BinaryIO,
+    ) -> Optional[Dict[str, str]]:
+        project = self.get_project(project_id)
+        if not project:
+            return None
+        assets_dir = Path(project.folder_path) / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        filename = self._asset_filename(asset_id, source_filename)
+        output_path = assets_dir / filename
+        with output_path.open("wb") as output:
+            shutil.copyfileobj(source_stream, output)
+        return {
+            "assetId": asset_id,
+            "filename": filename,
+            "url": f"/api/projects/{project_id}/assets/{filename}",
+            "localPath": str(output_path),
+        }
+
+    def resolve_asset_path(self, project_id: str, filename: str) -> Optional[Path]:
+        project = self.get_project(project_id)
+        if not project:
+            return None
+        assets_dir = (Path(project.folder_path) / "assets").resolve()
+        candidate = (assets_dir / Path(filename).name).resolve()
+        if not str(candidate).startswith(str(assets_dir)):
+            return None
+        if not candidate.exists() or not candidate.is_file():
+            return None
+        return candidate
+
     def project_file(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "project.json"
 
     def _write_project(self, project: ProjectDetail) -> None:
         folder = Path(project.folder_path)
         folder.mkdir(parents=True, exist_ok=True)
+        (folder / "assets").mkdir(parents=True, exist_ok=True)
         Path(project.generated_media_path).mkdir(parents=True, exist_ok=True)
         project_file = Path(project.project_file_path or (folder / "project.json"))
         project_file.write_text(
             project.model_dump_json(by_alias=True, indent=2),
             encoding="utf-8",
         )
+        if self.store:
+            self.store.upsert_project(project)
 
     def _read_project_file(self, project_file: Path) -> Optional[ProjectDetail]:
         try:
@@ -165,8 +245,55 @@ class ProjectService:
             encoding="utf-8",
         )
 
+    def _bootstrap_database_from_project_files(self) -> None:
+        for project_file in self._known_project_files():
+            if self._read_project_database(project_file.parent):
+                continue
+            project = self._read_project_file(project_file)
+            if project:
+                self.store.upsert_project(project)
+
+    def _read_project_database(self, project_dir: Path) -> Optional[ProjectDetail]:
+        if not self.store:
+            return None
+        database_path = project_dir / "project.db"
+        if not database_path.exists():
+            return None
+        return self.store.get_project_from_database_path(database_path)
+
+    def _sanitize_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(state, dict):
+            return {}
+        clean_state = dict(state)
+        project = clean_state.get("project")
+        if isinstance(project, dict):
+            clean_state["project"] = {
+                key: project.get(key)
+                for key in (
+                    "id",
+                    "name",
+                    "folderPath",
+                    "generatedMediaPath",
+                    "projectFilePath",
+                    "createdAt",
+                    "updatedAt",
+                )
+                if project.get(key) is not None
+            }
+        try:
+            return json.loads(json.dumps(clean_state))
+        except (TypeError, ValueError, RecursionError):
+            clean_state.pop("project", None)
+            return json.loads(json.dumps(clean_state, default=str))
+
     def _safe_project_id(self, project_id: str) -> str:
         return re.sub(r"[^A-Za-z0-9._-]", "_", project_id) or f"project-{uuid.uuid4().hex[:12]}"
+
+    def _asset_filename(self, asset_id: str, source_filename: str) -> str:
+        safe_asset_id = re.sub(r"[^A-Za-z0-9._-]", "_", asset_id) or uuid.uuid4().hex[:12]
+        safe_source = re.sub(r"[^A-Za-z0-9._ -]", "_", Path(source_filename or "media").name).strip()
+        safe_source = safe_source or "media"
+        return f"{safe_asset_id}_{safe_source}"
 
     def _safe_slug(self, value: str) -> str:
         slug = re.sub(r"[^A-Za-z0-9._-]+", "-", self._clean_name(value).lower()).strip("-")

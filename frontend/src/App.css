@@ -737,6 +737,15 @@
   font-size: 0.72rem;
 }
 
+.auto-field input[type="range"] {
+  padding: 0;
+  accent-color: var(--accent-color);
+}
+
+.auto-inline-value {
+  text-align: right;
+}
+
 .auto-field textarea {
   resize: vertical;
   line-height: 1.35;
@@ -879,6 +888,17 @@
   object-fit: cover;
   border-radius: 4px;
   background: var(--surface-3);
+}
+
+.generation-retry-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.generation-retry-actions .btn-secondary {
+  padding: 0.35rem 0.45rem;
+  font-size: 0.66rem;
 }
 
 .storyboard-list {

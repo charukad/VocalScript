@@ -19,9 +19,12 @@ from backend.src.domain.models.generation import (
     GenerationJobResultRequest,
     GenerationJobStatus,
     GenerationJobStatusUpdate,
+    StoryboardMotionIntensity,
+    StoryboardPromptDetail,
     ProviderName,
     StoryboardRequest,
     StoryboardResponse,
+    StoryboardSceneDensity,
     TranscriptSlice,
 )
 from backend.src.domain.services.generation_queue_service import GenerationQueueService
@@ -45,6 +48,10 @@ def build_generation_router(
     async def create_storyboard_from_audio(
         file: UploadFile = File(...),
         preferred_visual_type: GeneratedMediaType = Form("image", alias="preferredVisualType"),
+        video_mix_percent: Optional[int] = Form(None, alias="videoMixPercent"),
+        scene_density: StoryboardSceneDensity = Form("medium", alias="sceneDensity"),
+        motion_intensity: StoryboardMotionIntensity = Form("balanced", alias="motionIntensity"),
+        prompt_detail: StoryboardPromptDetail = Form("balanced", alias="promptDetail"),
         style: str = Form("cinematic realistic"),
         provider: ProviderName = Form("meta"),
     ):
@@ -60,6 +67,10 @@ def build_generation_router(
                     for segment in transcription.segments
                 ],
                 preferredVisualType=preferred_visual_type,
+                videoMixPercent=video_mix_percent,
+                sceneDensity=scene_density,
+                motionIntensity=motion_intensity,
+                promptDetail=prompt_detail,
                 style=style,
                 provider=provider,
             )
@@ -87,6 +98,7 @@ def build_generation_router(
             aspect_ratio=request.aspect_ratio,
             batch_id=request.batch_id,
             project_id=request.project_id,
+            project_name=request.project_name,
         )
         return GenerationJobListResponse(jobs=jobs, batchId=jobs[0].batch_id if jobs else request.batch_id)
 
@@ -179,6 +191,31 @@ def build_generation_router(
             raise HTTPException(status_code=404, detail="Job not found")
         return job
 
+    @router.post("/jobs/{job_id}/retry-auto", response_model=GenerationJob)
+    async def auto_retry_generation_job(job_id: str):
+        existing_job = queue_service.get_job(job_id)
+        if not existing_job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if existing_job.status not in ("failed", "canceled", "manual_action_required"):
+            return existing_job
+        run_attempt = _safe_int(existing_job.metadata.get("runAttempt"), 0)
+        if run_attempt >= 2:
+            return queue_service.update_status(
+                job_id,
+                existing_job.status,
+                error=existing_job.error or "Auto retry limit reached. Use manual retry if you want another attempt.",
+                metadata={**existing_job.metadata, "autoRetryBlocked": "true"},
+            ) or existing_job
+        rewritten_prompt = storyboard_service.rewrite_generation_prompt(existing_job)
+        job = queue_service.retry_job(
+            job_id,
+            prompt_override=rewritten_prompt,
+            retry_mode="auto_rewrite",
+        )
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
+
     @router.post("/jobs/{job_id}/status", response_model=GenerationJob)
     async def update_generation_job_status(job_id: str, request: GenerationJobStatusUpdate):
         job = queue_service.update_status(
@@ -251,6 +288,18 @@ def build_generation_router(
             raise HTTPException(status_code=404, detail="Job not found")
         return job
 
+    @router.post("/jobs/{job_id}/select-variant", response_model=GenerationJob)
+    async def select_generation_job_variant(
+        job_id: str,
+        request: GenerationJobRemoteStoreRequest,
+    ):
+        if not request.media_url:
+            raise HTTPException(status_code=400, detail="Variant mediaUrl is required")
+        job = queue_service.select_job_variant(job_id, request.media_url)
+        if not job:
+            raise HTTPException(status_code=404, detail="Variant not found")
+        return job
+
     @router.get("/media/{filename}")
     async def get_generated_media(filename: str):
         media_path = queue_service.resolve_media_path(filename)
@@ -285,3 +334,10 @@ def _parse_metadata_form(metadata: Optional[str]) -> dict[str, str]:
     if not isinstance(parsed, dict):
         raise HTTPException(status_code=400, detail="Metadata must be a JSON object")
     return {str(key): str(value) for key, value in parsed.items()}
+
+
+def _safe_int(value: object, fallback: int = 0) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return fallback

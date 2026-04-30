@@ -1,7 +1,17 @@
 import { useEffect } from 'react';
 import { getStoryboardSources, useEditorStore } from '../../store/editorStore';
 import { resolveBackendMediaUrl } from '../../lib/api/client';
-import type { GeneratedMediaAsset, GeneratedMediaType, GenerationAspectRatio, GenerationJobStatus, ProviderName, StoryboardScene } from '../../types';
+import type {
+  GeneratedMediaAsset,
+  GeneratedMediaType,
+  GenerationAspectRatio,
+  GenerationJobStatus,
+  ProviderName,
+  StoryboardMotionIntensity,
+  StoryboardPromptDetail,
+  StoryboardScene,
+  StoryboardSceneDensity,
+} from '../../types';
 
 const STYLE_OPTIONS = [
   'cinematic realistic',
@@ -29,6 +39,25 @@ const aspectRatioOptions: { value: GenerationAspectRatio; label: string }[] = [
   { value: '9:16', label: '9:16' },
   { value: '1:1', label: '1:1' },
   { value: '4:5', label: '4:5' },
+];
+
+const sceneDensityOptions: { value: StoryboardSceneDensity; label: string }[] = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'extra_high', label: 'Extra High' },
+];
+
+const motionOptions: { value: StoryboardMotionIntensity; label: string }[] = [
+  { value: 'subtle', label: 'Subtle' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'dynamic', label: 'Dynamic' },
+];
+
+const promptDetailOptions: { value: StoryboardPromptDetail; label: string }[] = [
+  { value: 'simple', label: 'Simple' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'detailed', label: 'Detailed' },
 ];
 
 const terminalJobStatuses: GenerationJobStatus[] = ['completed', 'failed', 'canceled', 'manual_action_required'];
@@ -61,6 +90,7 @@ export const AutoGeneratePanel = () => {
     pauseGenerationBatch,
     resumeGenerationBatch,
     retryGenerationJob,
+    autoRetryGenerationJob,
     syncGenerationBatch,
     importCompletedGenerationMedia,
     importGenerationVariant,
@@ -96,7 +126,9 @@ export const AutoGeneratePanel = () => {
     clips
       .filter(clip =>
         clip.generation?.batchId === currentGenerationBatchId &&
-        clip.generation?.projectId === currentProjectId
+        clip.generation?.projectId === currentProjectId &&
+        clip.type === 'visual' &&
+        clip.generation.status === 'completed'
       )
       .map(clip => clip.generation!.sceneId)
   );
@@ -192,7 +224,13 @@ export const AutoGeneratePanel = () => {
             <span>Type</span>
             <select
               value={storyboardSettings.visualType}
-              onChange={event => setStoryboardSettings({ visualType: event.target.value as GeneratedMediaType })}
+              onChange={event => {
+                const visualType = event.target.value as GeneratedMediaType;
+                setStoryboardSettings({
+                  visualType,
+                  videoMixPercent: visualType === 'video' ? 100 : 0,
+                });
+              }}
             >
               {mediaTypeOptions.map(option => (
                 <option key={option.value} value={option.value}>{option.label}</option>
@@ -224,6 +262,65 @@ export const AutoGeneratePanel = () => {
             ))}
           </select>
         </label>
+
+        <div className="auto-row-2">
+          <label className="auto-field">
+            <span>Scene Count</span>
+            <select
+              value={storyboardSettings.sceneDensity}
+              onChange={event => setStoryboardSettings({ sceneDensity: event.target.value as StoryboardSceneDensity })}
+            >
+              {sceneDensityOptions.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="auto-field">
+            <span>Video Mix</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="10"
+              value={storyboardSettings.videoMixPercent}
+              onChange={event => {
+                const value = Number(event.target.value);
+                setStoryboardSettings({
+                  videoMixPercent: value,
+                  visualType: value >= 50 ? 'video' : 'image',
+                });
+              }}
+            />
+            <span className="auto-inline-value">{storyboardSettings.videoMixPercent}% video</span>
+          </label>
+        </div>
+
+        <div className="auto-row-2">
+          <label className="auto-field">
+            <span>Motion</span>
+            <select
+              value={storyboardSettings.motionIntensity}
+              onChange={event => setStoryboardSettings({ motionIntensity: event.target.value as StoryboardMotionIntensity })}
+            >
+              {motionOptions.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="auto-field">
+            <span>Prompt Detail</span>
+            <select
+              value={storyboardSettings.promptDetail}
+              onChange={event => setStoryboardSettings({ promptDetail: event.target.value as StoryboardPromptDetail })}
+            >
+              {promptDetailOptions.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       <button
@@ -325,13 +422,22 @@ export const AutoGeneratePanel = () => {
                       </div>
                     )}
                     {row.job && ['failed', 'canceled', 'manual_action_required'].includes(row.job.status) && (
-                      <button
-                        className="btn-secondary"
-                        onClick={() => retryGenerationJob(row.job!.id)}
-                        disabled={isSyncingGeneration}
-                      >
-                        Retry Scene
-                      </button>
+                      <div className="generation-retry-actions">
+                        <button
+                          className="btn-secondary"
+                          onClick={() => retryGenerationJob(row.job!.id)}
+                          disabled={isSyncingGeneration}
+                        >
+                          Retry Scene
+                        </button>
+                        <button
+                          className="btn-secondary"
+                          onClick={() => autoRetryGenerationJob(row.job!.id)}
+                          disabled={isSyncingGeneration}
+                        >
+                          Auto Rewrite
+                        </button>
+                      </div>
                     )}
                     {row.job?.error && (
                       <div className="auto-status">{row.job.error}</div>

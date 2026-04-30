@@ -229,9 +229,12 @@ async function refreshJobList() {
     jobs.forEach((job) => {
       const row = document.createElement("div");
       row.className = "job-row";
+      const attempt = job.metadata?.runAttempt ? ` · attempt ${escapeHtml(job.metadata.runAttempt)}` : "";
+      const projectLabel = job.metadata?.projectName || projectName(job.projectId) || job.projectId || "No project";
+      const aspect = job.metadata?.aspectRatio ? ` · ${escapeHtml(job.metadata.aspectRatio)}` : "";
       row.innerHTML = `
-        <strong>${escapeHtml(job.status)} · ${escapeHtml(job.sceneId || "scene")}</strong>
-        <span>${escapeHtml(projectName(job.projectId) || job.projectId || "No project")}</span>
+        <strong>${escapeHtml(job.status)} · ${escapeHtml(job.sceneId || "scene")}${attempt}</strong>
+        <span>${escapeHtml(projectLabel)} · ${escapeHtml(job.mediaType || "media")}${aspect}</span>
         <span>${escapeHtml(job.id)} · ${escapeHtml(job.batchId || "no batch")}</span>
       `;
       elements.jobList.append(row);

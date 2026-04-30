@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field
 ProviderName = Literal["meta", "grok"]
 GeneratedMediaType = Literal["image", "video"]
 GenerationAspectRatio = Literal["16:9", "9:16", "1:1", "4:5"]
+StoryboardSceneDensity = Literal["low", "medium", "high", "extra_high"]
+StoryboardMotionIntensity = Literal["subtle", "balanced", "dynamic"]
+StoryboardPromptDetail = Literal["simple", "balanced", "detailed"]
 StoryboardSceneStatus = Literal[
     "draft",
     "approved",
@@ -77,6 +80,10 @@ class StoryboardRequest(ApiModel):
     transcript: str
     segments: List[TranscriptSlice] = Field(default_factory=list)
     preferred_visual_type: GeneratedMediaType = Field(default="image", alias="preferredVisualType")
+    video_mix_percent: Optional[int] = Field(default=None, alias="videoMixPercent")
+    scene_density: StoryboardSceneDensity = Field(default="medium", alias="sceneDensity")
+    motion_intensity: StoryboardMotionIntensity = Field(default="balanced", alias="motionIntensity")
+    prompt_detail: StoryboardPromptDetail = Field(default="balanced", alias="promptDetail")
     style: str = "cinematic realistic"
     provider: ProviderName = "meta"
 
@@ -113,6 +120,7 @@ class GenerationJobCreateRequest(ApiModel):
     aspect_ratio: GenerationAspectRatio = Field(default="16:9", alias="aspectRatio")
     batch_id: Optional[str] = Field(default=None, alias="batchId")
     project_id: Optional[str] = Field(default=None, alias="projectId")
+    project_name: Optional[str] = Field(default=None, alias="projectName")
 
 
 class GenerationJobListResponse(ApiModel):

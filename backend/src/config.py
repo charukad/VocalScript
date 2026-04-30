@@ -51,6 +51,7 @@ class BrowserBridgeSettings:
 @dataclass(frozen=True)
 class ProjectSettings:
     projects_dir: str = os.getenv("NEURALSCRIBE_PROJECTS_DIR", "backend/output/projects")
+    database_path: str = os.getenv("NEURALSCRIBE_DATABASE_PATH", "")
 
 
 @dataclass(frozen=True)
