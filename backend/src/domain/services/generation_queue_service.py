@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shutil
@@ -22,9 +23,12 @@ from backend.src.domain.models.generation import (
 
 
 class GenerationQueueService:
-    def __init__(self, generated_media_dir: str):
+    def __init__(self, generated_media_dir: str, projects_dir: Optional[str] = None):
         self.generated_media_dir = Path(generated_media_dir)
         self.generated_media_dir.mkdir(parents=True, exist_ok=True)
+        self.projects_dir = Path(projects_dir) if projects_dir else None
+        if self.projects_dir:
+            self.projects_dir.mkdir(parents=True, exist_ok=True)
         self._jobs: Dict[str, GenerationJob] = {}
         self._job_order: List[str] = []
 
@@ -34,6 +38,7 @@ class GenerationQueueService:
         provider: ProviderName,
         aspect_ratio: GenerationAspectRatio = "16:9",
         batch_id: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> List[GenerationJob]:
         resolved_batch_id = batch_id or f"batch-{uuid.uuid4().hex[:12]}"
         jobs: List[GenerationJob] = []
@@ -42,6 +47,7 @@ class GenerationQueueService:
             job = GenerationJob(
                 id=job_id,
                 batchId=resolved_batch_id,
+                projectId=project_id,
                 sceneId=scene.id,
                 provider=provider,
                 mediaType=scene.visual_type,
@@ -50,6 +56,7 @@ class GenerationQueueService:
                 status="queued",
                 metadata={
                     "batchId": resolved_batch_id,
+                    **({"projectId": project_id} if project_id else {}),
                     "aspectRatio": aspect_ratio,
                     "sceneStart": str(scene.start),
                     "sceneEnd": str(scene.end),
@@ -68,6 +75,7 @@ class GenerationQueueService:
         status: Optional[GenerationJobStatus] = None,
         provider: Optional[ProviderName] = None,
         batch_id: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> List[GenerationJob]:
         jobs = [self._jobs[job_id] for job_id in self._job_order if job_id in self._jobs]
         if status:
@@ -76,15 +84,18 @@ class GenerationQueueService:
             jobs = [job for job in jobs if job.provider == provider]
         if batch_id:
             jobs = [job for job in jobs if job.batch_id == batch_id]
+        if project_id:
+            jobs = [job for job in jobs if job.project_id == project_id]
         return jobs
 
     def list_generated_media_assets(
         self,
         include_placeholders: bool = True,
         batch_id: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> List[GeneratedMediaAsset]:
         assets: List[GeneratedMediaAsset] = []
-        for job in self.list_jobs(batch_id=batch_id):
+        for job in self.list_jobs(batch_id=batch_id, project_id=project_id):
             if job.status == "completed" and not job.result_url:
                 continue
             if job.status != "completed" and not (
@@ -101,6 +112,7 @@ class GenerationQueueService:
                 GeneratedMediaAsset(
                     jobId=job.id,
                     batchId=job.batch_id,
+                    projectId=job.project_id,
                     sceneId=job.scene_id,
                     provider=job.provider,
                     mediaType=job.media_type,
@@ -123,12 +135,19 @@ class GenerationQueueService:
     def get_job(self, job_id: str) -> Optional[GenerationJob]:
         return self._jobs.get(job_id)
 
-    def claim_next_job(self, provider: Optional[ProviderName] = None, worker_id: Optional[str] = None) -> Optional[GenerationJob]:
+    def claim_next_job(
+        self,
+        provider: Optional[ProviderName] = None,
+        worker_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+    ) -> Optional[GenerationJob]:
         for job_id in self._job_order:
             job = self._jobs[job_id]
             if job.status != "queued":
                 continue
             if provider and job.provider != provider:
+                continue
+            if project_id and job.project_id != project_id:
                 continue
             metadata = dict(job.metadata)
             if worker_id:
@@ -216,22 +235,25 @@ class GenerationQueueService:
         safe_name = self._safe_filename(source_filename or f"{job_id}.{self._default_extension(media_type or job.media_type)}")
         extension = Path(safe_name).suffix or f".{self._default_extension(media_type or job.media_type)}"
         output_name = f"{job_id}_{uuid.uuid4().hex[:8]}{extension}"
-        output_path = self.generated_media_dir / output_name
+        output_dir = self._job_generated_media_dir(job)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / output_name
         with output_path.open("wb") as output:
             shutil.copyfileobj(source_stream, output)
 
         merged_metadata = dict(job.metadata)
         if metadata:
             merged_metadata.update(metadata)
+        media_url = self._job_media_url(job, output_name)
         return self._replace_job(
             job_id,
             status="completed",
             media_type=media_type or job.media_type,
-            result_url=f"/api/generation/media/{output_name}",
+            result_url=media_url,
             result_variants=[
                 GenerationMediaVariant(
                     id="stored-1",
-                    url=f"/api/generation/media/{output_name}",
+                    url=media_url,
                     mediaType=media_type or job.media_type,
                     localPath=str(output_path),
                     source="backend",
@@ -279,10 +301,11 @@ class GenerationQueueService:
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Could not download remote media: {exc}") from exc
 
-    def resolve_media_path(self, filename: str) -> Optional[Path]:
+    def resolve_media_path(self, filename: str, project_id: Optional[str] = None) -> Optional[Path]:
         safe_name = self._safe_filename(filename)
-        media_path = (self.generated_media_dir / safe_name).resolve()
-        root = self.generated_media_dir.resolve()
+        root = self._project_generated_media_dir(project_id) if project_id else self.generated_media_dir
+        media_path = (root / safe_name).resolve()
+        root = root.resolve()
         try:
             media_path.relative_to(root)
         except ValueError:
@@ -290,6 +313,9 @@ class GenerationQueueService:
         if not media_path.exists() or not media_path.is_file():
             return None
         return media_path
+
+    def project_generated_media_dir(self, project_id: str) -> Path:
+        return self._project_generated_media_dir(project_id)
 
     def _replace_job(self, job_id: str, **updates) -> GenerationJob:
         job = self._jobs[job_id].model_copy(update=updates)
@@ -299,6 +325,53 @@ class GenerationQueueService:
     def _safe_filename(self, filename: str) -> str:
         base_name = os.path.basename(filename)
         return re.sub(r"[^A-Za-z0-9._-]", "_", base_name) or f"media-{uuid.uuid4().hex[:8]}"
+
+    def _safe_project_id(self, project_id: str) -> str:
+        return re.sub(r"[^A-Za-z0-9._-]", "_", project_id) or f"project-{uuid.uuid4().hex[:12]}"
+
+    def _project_generated_media_dir(self, project_id: Optional[str]) -> Path:
+        if project_id and self.projects_dir:
+            project_generated_dir = self._registered_project_generated_dir(project_id)
+            if project_generated_dir:
+                return project_generated_dir
+            return self.projects_dir / self._safe_project_id(project_id) / "generated"
+        return self.generated_media_dir
+
+    def _job_generated_media_dir(self, job: GenerationJob) -> Path:
+        return self._project_generated_media_dir(job.project_id)
+
+    def _job_media_url(self, job: GenerationJob, filename: str) -> str:
+        if job.project_id:
+            return f"/api/generation/projects/{self._safe_project_id(job.project_id)}/media/{filename}"
+        return f"/api/generation/media/{filename}"
+
+    def _registered_project_generated_dir(self, project_id: str) -> Optional[Path]:
+        for project_file in self._known_project_files():
+            try:
+                raw = json.loads(project_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if raw.get("id") != project_id:
+                continue
+            generated_path = raw.get("generatedMediaPath")
+            if generated_path:
+                return Path(generated_path)
+            return project_file.parent / "generated"
+        return None
+
+    def _known_project_files(self) -> List[Path]:
+        if not self.projects_dir:
+            return []
+        files = list(self.projects_dir.glob("*/project.json"))
+        registry_file = self.projects_dir / "registry.json"
+        try:
+            raw = json.loads(registry_file.read_text(encoding="utf-8"))
+            project_files = raw.get("projectFiles") if isinstance(raw, dict) else []
+        except (OSError, json.JSONDecodeError):
+            project_files = []
+        if isinstance(project_files, list):
+            files.extend(Path(str(path)).expanduser() for path in project_files)
+        return files
 
     def _default_extension(self, media_type: GeneratedMediaType) -> str:
         return "mp4" if media_type == "video" else "png"

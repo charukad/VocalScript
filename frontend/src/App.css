@@ -16,6 +16,7 @@
   justify-content: space-between;
   padding: 0 1rem;
   flex-shrink: 0;
+  gap: 0.75rem;
 }
 
 .brand {
@@ -25,11 +26,166 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.project-bar {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) auto auto minmax(120px, 1fr);
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 720px;
+}
+
+.project-name-input {
+  min-width: 0;
+  height: 28px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0 0.5rem;
+  font-family: inherit;
+  font-size: 0.78rem;
+}
+
+.project-folder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
 }
 
 .nav-actions {
   display: flex;
   gap: 0.5rem;
+  flex: 0 0 auto;
+}
+
+.project-gate {
+  min-height: 100vh;
+  width: 100vw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-app);
+  padding: 2rem;
+}
+
+.project-gate-panel {
+  width: min(920px, 100%);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.project-gate-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.project-gate-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0;
+}
+
+.project-gate-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1.25rem;
+  min-width: 0;
+}
+
+.project-gate-section + .project-gate-section {
+  border-left: 1px solid var(--border-color);
+}
+
+.project-gate-section h2 {
+  margin: 0;
+  color: var(--text-highlight);
+  font-size: 1rem;
+}
+
+.project-gate-section label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.project-gate-section input {
+  min-width: 0;
+  height: 34px;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0 0.6rem;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.project-directory-row,
+.project-load-path,
+.project-gate-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.project-directory-row input,
+.project-load-path input {
+  flex: 1;
+}
+
+.project-gate-action {
+  align-self: flex-start;
+}
+
+.previous-project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 310px;
+  overflow-y: auto;
+}
+
+.project-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  width: 100%;
+  background: var(--bg-item);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.7rem;
+  text-align: left;
+}
+
+.project-row span,
+.project-empty {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
 }
 
 .btn-primary {

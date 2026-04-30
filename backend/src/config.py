@@ -49,9 +49,15 @@ class BrowserBridgeSettings:
 
 
 @dataclass(frozen=True)
+class ProjectSettings:
+    projects_dir: str = os.getenv("NEURALSCRIBE_PROJECTS_DIR", "backend/output/projects")
+
+
+@dataclass(frozen=True)
 class AppSettings:
     llm: LocalLLMSettings = field(default_factory=LocalLLMSettings)
     browser_bridge: BrowserBridgeSettings = field(default_factory=BrowserBridgeSettings)
+    projects: ProjectSettings = field(default_factory=ProjectSettings)
 
 
 settings = AppSettings()

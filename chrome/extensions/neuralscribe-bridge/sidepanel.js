@@ -5,6 +5,8 @@ const elements = {
   updatedAt: document.getElementById("updatedAt"),
   wsUrl: document.getElementById("wsUrl"),
   httpBaseUrl: document.getElementById("httpBaseUrl"),
+  projectSelect: document.getElementById("projectSelect"),
+  refreshProjectsBtn: document.getElementById("refreshProjectsBtn"),
   sessionToken: document.getElementById("sessionToken"),
   metaUrl: document.getElementById("metaUrl"),
   jobTimeoutSeconds: document.getElementById("jobTimeoutSeconds"),
@@ -15,13 +17,22 @@ const elements = {
   disconnectBtn: document.getElementById("disconnectBtn"),
   jobRunnerText: document.getElementById("jobRunnerText"),
   currentJobText: document.getElementById("currentJobText"),
+  currentProjectText: document.getElementById("currentProjectText"),
   startJobsBtn: document.getElementById("startJobsBtn"),
   claimOnceBtn: document.getElementById("claimOnceBtn"),
   stopJobsBtn: document.getElementById("stopJobsBtn"),
+  jobList: document.getElementById("jobList"),
   logEntries: document.getElementById("logEntries"),
 };
 
+let projects = [];
+
 elements.saveBtn.addEventListener("click", saveSettings);
+elements.refreshProjectsBtn.addEventListener("click", () => refreshProjects());
+elements.projectSelect.addEventListener("change", async () => {
+  await saveSettings();
+  await refreshJobList();
+});
 elements.connectBtn.addEventListener("click", connectBridge);
 elements.disconnectBtn.addEventListener("click", disconnectBridge);
 elements.startJobsBtn.addEventListener("click", startJobs);
@@ -44,7 +55,9 @@ async function init() {
     return;
   }
   renderSettings(response.settings);
+  await refreshProjects(response.settings.projectId);
   renderStatus(response.status);
+  await refreshJobList();
   addLog(response.status.message || "Ready");
 }
 
@@ -55,6 +68,7 @@ async function saveSettings() {
   });
   if (response.ok) {
     renderSettings(response.settings);
+    await refreshJobList();
     addLog("Settings saved");
   } else {
     addLog(response.error || "Settings save failed");
@@ -89,6 +103,7 @@ function readSettings() {
   return {
     wsUrl: elements.wsUrl.value,
     httpBaseUrl: elements.httpBaseUrl.value,
+    projectId: elements.projectSelect.value,
     sessionToken: elements.sessionToken.value,
     metaUrl: elements.metaUrl.value,
     jobTimeoutMs: Math.max(30, Number(elements.jobTimeoutSeconds.value) || 180) * 1000,
@@ -99,6 +114,9 @@ function readSettings() {
 function renderSettings(settings) {
   elements.wsUrl.value = settings.wsUrl || "";
   elements.httpBaseUrl.value = settings.httpBaseUrl || "";
+  if (settings.projectId && elements.projectSelect.value !== settings.projectId) {
+    elements.projectSelect.value = settings.projectId;
+  }
   elements.sessionToken.value = settings.sessionToken || "";
   elements.metaUrl.value = settings.metaUrl || "";
   elements.jobTimeoutSeconds.value = Math.round((settings.jobTimeoutMs || 180000) / 1000);
@@ -114,7 +132,8 @@ function renderStatus(status) {
   elements.workerId.textContent = status.workerId || "Worker pending";
   elements.updatedAt.textContent = status.updatedAt ? new Date(status.updatedAt).toLocaleTimeString() : "-";
   elements.jobRunnerText.textContent = status.jobMessage || (status.jobRunning ? "Running" : "Stopped");
-  elements.currentJobText.textContent = status.currentJob?.id || "-";
+  elements.currentJobText.textContent = status.currentJob ? formatJob(status.currentJob) : "-";
+  elements.currentProjectText.textContent = projectName(status.currentJob?.projectId || elements.projectSelect.value) || "-";
 }
 
 async function startJobs() {
@@ -122,6 +141,7 @@ async function startJobs() {
   const response = await send({ type: "jobs.start" });
   if (response.ok) {
     renderStatus(response.status);
+    await refreshJobList();
     addLog("Job runner started");
   } else {
     addLog(response.error || "Job runner start failed");
@@ -133,6 +153,7 @@ async function claimOnce() {
   const response = await send({ type: "jobs.claimOnce" });
   if (response.ok) {
     renderStatus(response.status);
+    await refreshJobList();
     addLog(response.status.jobMessage || "Run once complete");
   } else {
     addLog(response.error || "Run once failed");
@@ -143,10 +164,101 @@ async function stopJobs() {
   const response = await send({ type: "jobs.stop" });
   if (response.ok) {
     renderStatus(response.status);
+    await refreshJobList();
     addLog("Job runner stopped");
   } else {
     addLog(response.error || "Job runner stop failed");
   }
+}
+
+async function refreshProjects(selectedProjectId) {
+  try {
+    const response = await fetch(`${elements.httpBaseUrl.value.replace(/\/$/, "")}/api/projects`);
+    if (!response.ok) throw new Error(await response.text());
+    const data = await response.json();
+    projects = Array.isArray(data.projects) ? data.projects : [];
+    renderProjects(selectedProjectId || elements.projectSelect.value);
+    await refreshJobList();
+  } catch (error) {
+    addLog(`Project refresh failed: ${error.message}`);
+    renderProjects(selectedProjectId || elements.projectSelect.value);
+  }
+}
+
+function renderProjects(selectedProjectId = "") {
+  const current = selectedProjectId || "";
+  elements.projectSelect.innerHTML = "";
+  const emptyOption = document.createElement("option");
+  emptyOption.value = "";
+  emptyOption.textContent = "Select project";
+  elements.projectSelect.append(emptyOption);
+  projects.forEach((project) => {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = `${project.name} (${project.id.replace(/^project-/, "")})`;
+    elements.projectSelect.append(option);
+  });
+  elements.projectSelect.value = current;
+}
+
+async function refreshJobList() {
+  const projectId = elements.projectSelect.value;
+  elements.jobList.innerHTML = "";
+  if (!projectId) {
+    renderJobListMessage("Select a project before running jobs.");
+    return;
+  }
+  try {
+    const url = new URL(`${elements.httpBaseUrl.value.replace(/\/$/, "")}/api/generation/jobs`);
+    url.searchParams.set("provider", "meta");
+    url.searchParams.set("projectId", projectId);
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(await response.text());
+    const data = await response.json();
+    const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+    if (jobs.length === 0) {
+      renderJobListMessage("No jobs for this project.");
+      return;
+    }
+    jobs.forEach((job) => {
+      const row = document.createElement("div");
+      row.className = "job-row";
+      row.innerHTML = `
+        <strong>${escapeHtml(job.status)} · ${escapeHtml(job.sceneId || "scene")}</strong>
+        <span>${escapeHtml(projectName(job.projectId) || job.projectId || "No project")}</span>
+        <span>${escapeHtml(job.id)} · ${escapeHtml(job.batchId || "no batch")}</span>
+      `;
+      elements.jobList.append(row);
+    });
+  } catch (error) {
+    renderJobListMessage(`Could not load jobs: ${error.message}`);
+  }
+}
+
+function renderJobListMessage(message) {
+  const row = document.createElement("div");
+  row.className = "job-row";
+  row.textContent = message;
+  elements.jobList.append(row);
+}
+
+function projectName(projectId) {
+  if (!projectId) return "";
+  const project = projects.find((candidate) => candidate.id === projectId);
+  return project ? project.name : projectId;
+}
+
+function formatJob(job) {
+  return `${job.id} · ${projectName(job.projectId) || "No project"} · ${job.sceneId || "scene"}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function addLog(message) {

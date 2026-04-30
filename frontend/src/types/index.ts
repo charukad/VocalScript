@@ -78,6 +78,7 @@ export type TimelineClip = {
   generation?: {
     jobId: string;
     batchId: string;
+    projectId?: string | null;
     sceneId: string;
     provider: ProviderName;
     status: GenerationJobStatus;
@@ -163,6 +164,7 @@ export type GenerationJobStatus =
 export type GenerationJob = {
   id: string;
   batchId: string;
+  projectId: string | null;
   sceneId: string;
   provider: ProviderName;
   mediaType: GeneratedMediaType;
@@ -179,6 +181,7 @@ export type GenerationJob = {
 export type GeneratedMediaAsset = {
   jobId: string;
   batchId: string;
+  projectId: string | null;
   sceneId: string;
   provider: ProviderName;
   mediaType: GeneratedMediaType;
@@ -194,4 +197,18 @@ export type GeneratedMediaAsset = {
   transcript: string;
   error: string | null;
   metadata: Record<string, string>;
+};
+
+export type ProjectSummary = {
+  id: string;
+  name: string;
+  folderPath: string;
+  generatedMediaPath: string;
+  projectFilePath: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectDetail = ProjectSummary & {
+  state: Record<string, unknown>;
 };

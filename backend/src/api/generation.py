@@ -86,6 +86,7 @@ def build_generation_router(
             request.provider,
             aspect_ratio=request.aspect_ratio,
             batch_id=request.batch_id,
+            project_id=request.project_id,
         )
         return GenerationJobListResponse(jobs=jobs, batchId=jobs[0].batch_id if jobs else request.batch_id)
 
@@ -94,9 +95,15 @@ def build_generation_router(
         status: Optional[GenerationJobStatus] = None,
         provider: Optional[ProviderName] = None,
         batch_id: Optional[str] = Query(None, alias="batchId"),
+        project_id: Optional[str] = Query(None, alias="projectId"),
     ):
         return GenerationJobListResponse(
-            jobs=queue_service.list_jobs(status=status, provider=provider, batch_id=batch_id),
+            jobs=queue_service.list_jobs(
+                status=status,
+                provider=provider,
+                batch_id=batch_id,
+                project_id=project_id,
+            ),
             batchId=batch_id,
         )
 
@@ -104,11 +111,13 @@ def build_generation_router(
     async def list_generated_media_assets(
         include_placeholders: bool = True,
         batch_id: Optional[str] = Query(None, alias="batchId"),
+        project_id: Optional[str] = Query(None, alias="projectId"),
     ):
         return GeneratedMediaListResponse(
             assets=queue_service.list_generated_media_assets(
                 include_placeholders=include_placeholders,
                 batch_id=batch_id,
+                project_id=project_id,
             ),
             batchId=batch_id,
         )
@@ -122,7 +131,11 @@ def build_generation_router(
 
     @router.post("/jobs/claim", response_model=GenerationJob)
     async def claim_generation_job(request: GenerationJobClaimRequest):
-        job = queue_service.claim_next_job(provider=request.provider, worker_id=request.worker_id)
+        job = queue_service.claim_next_job(
+            provider=request.provider,
+            worker_id=request.worker_id,
+            project_id=request.project_id,
+        )
         if not job:
             raise HTTPException(status_code=404, detail="No queued jobs available")
         return job
@@ -216,6 +229,13 @@ def build_generation_router(
     @router.get("/media/{filename}")
     async def get_generated_media(filename: str):
         media_path = queue_service.resolve_media_path(filename)
+        if not media_path:
+            raise HTTPException(status_code=404, detail="Generated media not found")
+        return FileResponse(media_path)
+
+    @router.get("/projects/{project_id}/media/{filename}")
+    async def get_project_generated_media(project_id: str, filename: str):
+        media_path = queue_service.resolve_media_path(filename, project_id=project_id)
         if not media_path:
             raise HTTPException(status_code=404, detail="Generated media not found")
         return FileResponse(media_path)

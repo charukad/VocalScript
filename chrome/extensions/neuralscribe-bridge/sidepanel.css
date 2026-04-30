@@ -73,6 +73,7 @@ p {
 
 .status-card,
 .settings,
+.job-list-card,
 .log {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -108,7 +109,8 @@ legend {
 
 input[type="text"],
 input[type="password"],
-input[type="number"] {
+input[type="number"],
+select {
   width: 100%;
   margin-top: 5px;
   padding: 8px;
@@ -118,6 +120,17 @@ input[type="number"] {
   color: var(--text);
   font: inherit;
   font-size: 12px;
+}
+
+.inline-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.inline-field button {
+  margin-top: 5px;
 }
 
 fieldset {
@@ -192,4 +205,35 @@ button:hover {
   padding-bottom: 6px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   overflow-wrap: anywhere;
+}
+
+.job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.job-row {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--surface-2);
+}
+
+.job-row strong,
+.job-row span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.job-row strong {
+  font-size: 12px;
+}
+
+.job-row span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
 }

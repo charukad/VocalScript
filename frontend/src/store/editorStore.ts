@@ -10,18 +10,26 @@ import type {
   GeneratedMediaAsset,
   GenerationJob,
   KeyframeProperty,
+  ProjectDetail,
+  ProjectSummary,
   StoryboardScene,
   StoryboardSettings,
 } from '../types';
 import { getMediaDuration, generateThumbnail, generateWaveform, generateFilmstrip } from '../lib/utils/media';
 import {
   createGenerationJobs,
+  createProjectRecord,
   createStoryboardFromAudio,
   createStoryboardFromTranscript,
+  chooseProjectDirectory,
   exportTimeline,
+  getProjectRecord,
+  listProjectRecords,
   listGeneratedMediaAssets,
   listGenerationJobs,
+  loadProjectRecordFromPath,
   resolveBackendMediaUrl,
+  saveProjectRecord,
   storeRemoteGenerationJob,
   transcribeMedia,
 } from '../lib/api/client';
@@ -49,6 +57,9 @@ const DEFAULT_STORYBOARD_SETTINGS: StoryboardSettings = {
   style: 'cinematic realistic',
 };
 
+const DEFAULT_PROJECT_NAME = 'Untitled Project';
+const PROJECT_POINTER_KEY = 'neuralscribe.currentProject';
+
 type StoryboardSource = {
   id: string;
   file: File;
@@ -58,6 +69,18 @@ type StoryboardSource = {
 type TimelineSnapshot = {
   clips: TimelineClip[];
   tracks: TimelineTrack[];
+};
+
+type SerializableClip = Omit<TimelineClip, 'file'> & {
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+};
+
+type SerializableAsset = Omit<MediaAsset, 'file' | 'thumbnailUrl' | 'waveform' | 'filmstrip'> & {
+  fileName: string;
+  fileType: string;
+  fileSize: number;
 };
 
 const HISTORY_LIMIT = 50;
@@ -136,6 +159,48 @@ const captionsToVtt = (captions: CaptionSegment[]) => `WEBVTT\n\n${captions.map(
 
 const makeTextDownloadUrl = (text: string, type: string) => window.URL.createObjectURL(new Blob([text], { type }));
 
+const loadProjectPointer = (): ProjectSummary | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(PROJECT_POINTER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ProjectSummary;
+    if (!parsed?.id || !parsed?.name) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const rememberProjectPointer = (project: ProjectSummary) => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(PROJECT_POINTER_KEY, JSON.stringify(project));
+};
+
+const clearProjectPointer = () => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(PROJECT_POINTER_KEY);
+};
+
+const serializeAsset = (asset: MediaAsset): SerializableAsset => ({
+  id: asset.id,
+  type: asset.type,
+  mediaKind: asset.mediaKind,
+  fileName: asset.file.name,
+  fileType: asset.file.type,
+  fileSize: asset.file.size,
+});
+
+const serializeClip = (clip: TimelineClip): SerializableClip => {
+  const { file, ...clipData } = clip;
+  return {
+    ...clipData,
+    fileName: file.name,
+    fileType: file.type,
+    fileSize: file.size,
+  };
+};
+
 const isTrackLocked = (tracks: TimelineTrack[], trackId: string) => Boolean(tracks.find(track => track.id === trackId)?.locked);
 
 const hasPlayableAudioSource = (clip: TimelineClip): boolean => {
@@ -160,6 +225,24 @@ const snapTime = (state: Pick<EditorState, 'clips' | 'playheadTime' | 'snapEnabl
 };
 
 export type EditorState = {
+  // Project
+  currentProject: ProjectSummary | null;
+  projectName: string;
+  projectDirectory: string;
+  availableProjects: ProjectSummary[];
+  projectStatus: string | null;
+  isSavingProject: boolean;
+  isLoadingProjects: boolean;
+  setProjectName: (name: string) => void;
+  setProjectDirectory: (directory: string) => void;
+  chooseProjectFolder: () => Promise<void>;
+  createProject: () => Promise<ProjectSummary | null>;
+  refreshProjects: () => Promise<void>;
+  loadProject: (projectId: string) => Promise<void>;
+  loadProjectFromPath: (path: string) => Promise<void>;
+  newProject: () => void;
+  saveProject: () => Promise<ProjectSummary | null>;
+
   // Media Pool
   assets: MediaAsset[];
   addAssets: (files: File[]) => Promise<void>;
@@ -250,6 +333,48 @@ export type EditorState = {
   importCompletedGenerationMedia: () => Promise<void>;
 };
 
+const buildProjectSnapshot = (state: EditorState): Record<string, unknown> => ({
+  version: 1,
+  savedAt: new Date().toISOString(),
+  project: state.currentProject,
+  assets: state.assets.map(serializeAsset),
+  tracks: state.tracks,
+  clips: state.clips.map(serializeClip),
+  captions: state.captions,
+  exportSettings: state.exportSettings,
+  storyboardSettings: state.storyboardSettings,
+  storyboardScenes: state.storyboardScenes,
+  currentGenerationBatchId: state.currentGenerationBatchId,
+  generationJobs: state.generationJobs,
+  generatedMediaAssets: state.generatedMediaAssets,
+});
+
+const persistProjectSnapshot = async (state: EditorState): Promise<ProjectSummary> => {
+  const name = state.projectName.trim() || DEFAULT_PROJECT_NAME;
+  const project = state.currentProject;
+  if (!project) {
+    throw new Error('Create or load a project before saving.');
+  }
+  let savedProject: ProjectSummary;
+  try {
+    savedProject = await saveProjectRecord(project.id, name, buildProjectSnapshot({
+      ...state,
+      currentProject: project,
+      projectName: name,
+    }));
+  } catch (error) {
+    if (!state.currentProject) throw error;
+    const replacementProject = await createProjectRecord(name);
+    savedProject = await saveProjectRecord(replacementProject.id, name, buildProjectSnapshot({
+      ...state,
+      currentProject: replacementProject,
+      projectName: name,
+    }));
+  }
+  rememberProjectPointer(savedProject);
+  return savedProject;
+};
+
 const getTranscriptSourceClip = (state: Pick<EditorState, 'clips' | 'selectedClipId'>): TimelineClip | null => {
   const selectedClip = state.clips.find(clip => clip.id === state.selectedClipId);
   if (selectedClip && hasPlayableAudioSource(selectedClip)) return selectedClip;
@@ -328,6 +453,11 @@ const makeTrack = (tracks: TimelineTrack[], type: MediaType): TimelineTrack => {
   };
 };
 
+const makeDefaultTracks = (): TimelineTrack[] => [
+  { id: 'v1', name: 'V1', type: 'visual', order: 0, muted: false, solo: false, locked: false },
+  { id: 'a1', name: 'A1', type: 'audio', order: 1, muted: false, solo: false, locked: false },
+];
+
 const getGeneratedFileName = (asset: GeneratedMediaAsset, resultUrl: string): string => {
   const fallbackExtension = asset.mediaType === 'video' ? 'mp4' : 'png';
   try {
@@ -353,6 +483,12 @@ const getAssetVariantUrls = (asset: GeneratedMediaAsset): string[] => {
   return [...new Set(urls)];
 };
 
+const makeGenerationSceneKey = (
+  projectId: string | null | undefined,
+  batchId: string,
+  sceneId: string,
+): string => `${projectId ?? 'legacy'}:${batchId}:${sceneId}`;
+
 const fetchGeneratedMediaFile = async (asset: GeneratedMediaAsset): Promise<File> => {
   if (!asset.resultUrl) {
     throw new Error('Generated media has no result URL.');
@@ -369,12 +505,87 @@ const fetchGeneratedMediaFile = async (asset: GeneratedMediaAsset): Promise<File
 const generatedMetadata = (asset: GeneratedMediaAsset): NonNullable<TimelineClip['generation']> => ({
   jobId: asset.jobId,
   batchId: asset.batchId,
+  projectId: asset.projectId,
   sceneId: asset.sceneId,
   provider: asset.provider,
   status: asset.status,
   prompt: asset.prompt,
   transcript: asset.transcript,
 });
+
+const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<EditorState>> => {
+  const saved = project.state as any;
+  const tracks = Array.isArray(saved?.tracks) ? saved.tracks as TimelineTrack[] : makeDefaultTracks();
+  const captions = Array.isArray(saved?.captions) ? saved.captions as CaptionSegment[] : [];
+  const storyboardScenes = Array.isArray(saved?.storyboardScenes) ? saved.storyboardScenes as StoryboardScene[] : [];
+  const generationJobs = Array.isArray(saved?.generationJobs) ? saved.generationJobs as GenerationJob[] : [];
+  const generatedMediaAssets = Array.isArray(saved?.generatedMediaAssets) ? saved.generatedMediaAssets as GeneratedMediaAsset[] : [];
+  const generatedAssetsByJob = new Map(generatedMediaAssets.map(asset => [asset.jobId, asset]));
+  const restoredAssets: MediaAsset[] = [];
+  const restoredClips: TimelineClip[] = [];
+
+  for (const savedClip of Array.isArray(saved?.clips) ? saved.clips : []) {
+    if (!savedClip || typeof savedClip !== 'object') continue;
+    if (savedClip.type === 'text') {
+      restoredClips.push({
+        ...savedClip,
+        file: new File([], savedClip.fileName || 'text-overlay.txt', { type: savedClip.fileType || 'text/plain' }),
+      } as TimelineClip);
+      continue;
+    }
+
+    const generated = savedClip.generation?.jobId
+      ? generatedAssetsByJob.get(savedClip.generation.jobId)
+      : null;
+    if (!generated?.resultUrl) continue;
+
+    try {
+      const file = await fetchGeneratedMediaFile(generated);
+      const mediaKind = generated.mediaType === 'video' ? 'video' : 'image';
+      const thumbnailUrl = await generateThumbnail(file, mediaKind);
+      const restoredAsset: MediaAsset = {
+        id: savedClip.assetId || `generated-${generated.jobId}`,
+        file,
+        type: 'visual',
+        mediaKind,
+        thumbnailUrl,
+      };
+      if (mediaKind === 'video') {
+        const duration = await getMediaDuration(file, 'visual');
+        const framesCount = Math.min(50, Math.max(5, Math.ceil(duration / 2)));
+        restoredAsset.filmstrip = await generateFilmstrip(file, duration, framesCount);
+      }
+      restoredAssets.push(restoredAsset);
+      restoredClips.push({ ...savedClip, file } as TimelineClip);
+    } catch (error) {
+      console.warn('Could not restore generated clip from project file.', error);
+    }
+  }
+
+  return {
+    currentProject: project,
+    projectName: project.name,
+    projectDirectory: project.folderPath,
+    projectStatus: `Loaded project: ${project.name}`,
+    assets: restoredAssets,
+    tracks,
+    clips: restoredClips,
+    selectedClipId: null,
+    historyPast: [],
+    historyFuture: [],
+    captions,
+    exportSettings: saved?.exportSettings ?? { resolution: '1080p', aspectRatio: '16:9', quality: 'standard', format: 'video' },
+    storyboardSettings: saved?.storyboardSettings ?? DEFAULT_STORYBOARD_SETTINGS,
+    storyboardScenes,
+    currentGenerationBatchId: saved?.currentGenerationBatchId ?? null,
+    generationJobs,
+    generatedMediaAssets,
+    mediaUrl: null,
+    srtContent: null,
+    srtDownloadUrl: null,
+    vttDownloadUrl: null,
+  };
+};
 
 const makeGeneratedPlaceholderClip = (asset: GeneratedMediaAsset, trackId: string): TimelineClip => {
   const label = asset.status === 'failed' ? 'Generation failed' : 'Manual action needed';
@@ -424,13 +635,16 @@ const selectGeneratedAssetsForImport = (
   );
   const importedSceneIds = new Set(
     existingClips
-      .map(clip => clip.generation ? `${clip.generation.batchId}:${clip.generation.sceneId}` : null)
+      .map(clip => clip.generation
+        ? makeGenerationSceneKey(clip.generation.projectId, clip.generation.batchId, clip.generation.sceneId)
+        : null
+      )
       .filter((sceneKey): sceneKey is string => Boolean(sceneKey))
   );
   const bestByScene = new Map<string, GeneratedMediaAsset>();
 
   for (const asset of assets) {
-    const sceneKey = `${asset.batchId}:${asset.sceneId}`;
+    const sceneKey = makeGenerationSceneKey(asset.projectId, asset.batchId, asset.sceneId);
     if (importedJobIds.has(asset.jobId) || importedSceneIds.has(sceneKey)) continue;
     const existing = bestByScene.get(asset.sceneId);
     if (!existing || getGeneratedAssetRank(asset) >= getGeneratedAssetRank(existing)) {
@@ -464,7 +678,7 @@ const mergeSceneStatuses = (
   const importedScenes = new Set(
     clips
       .filter(clip => clip.generation?.batchId === batchId)
-      .map(clip => clip.generation!.sceneId)
+      .map(clip => makeGenerationSceneKey(clip.generation?.projectId, clip.generation!.batchId, clip.generation!.sceneId))
   );
 
   return scenes.map(scene => {
@@ -472,12 +686,183 @@ const mergeSceneStatuses = (
     if (!job) return scene;
     return {
       ...scene,
-      status: importedScenes.has(scene.id) ? 'completed' : getSceneStatusFromJob(job),
+      status: importedScenes.has(makeGenerationSceneKey(job.projectId, job.batchId, scene.id)) ? 'completed' : getSceneStatusFromJob(job),
     };
   });
 };
 
+const rememberedProject = loadProjectPointer();
+
 export const useEditorStore = create<EditorState>((set, get) => ({
+  // --- Project ---
+  currentProject: null,
+  projectName: DEFAULT_PROJECT_NAME,
+  projectDirectory: '',
+  availableProjects: rememberedProject ? [rememberedProject] : [],
+  projectStatus: 'Create or load a project to start.',
+  isSavingProject: false,
+  isLoadingProjects: false,
+  setProjectName: (name) => set({ projectName: name }),
+  setProjectDirectory: (directory) => set({ projectDirectory: directory }),
+  chooseProjectFolder: async () => {
+    set({ isLoadingProjects: true, projectStatus: 'Waiting for directory selection...' } as Partial<EditorState>);
+    try {
+      const directory = await chooseProjectDirectory();
+      set({
+        projectDirectory: directory,
+        projectStatus: `Selected folder: ${directory}`,
+      });
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Directory selection failed');
+      set({ projectStatus: 'Directory selection canceled.' });
+    } finally {
+      set({ isLoadingProjects: false });
+    }
+  },
+  createProject: async () => {
+    const state = get();
+    const name = state.projectName.trim() || DEFAULT_PROJECT_NAME;
+    const parentDirectory = state.projectDirectory.trim();
+    if (!parentDirectory) {
+      alert('Choose a project directory first.');
+      return null;
+    }
+    set({ isSavingProject: true, projectStatus: 'Creating project...' } as Partial<EditorState>);
+    try {
+      const project = await createProjectRecord(name, parentDirectory);
+      rememberProjectPointer(project);
+      set({
+        currentProject: project,
+        projectName: project.name,
+        projectDirectory: project.folderPath,
+        availableProjects: [project, ...state.availableProjects.filter(existing => existing.id !== project.id)],
+        projectStatus: `Project created: ${project.folderPath}`,
+        assets: [],
+        tracks: makeDefaultTracks(),
+        clips: [],
+        selectedClipId: null,
+        historyPast: [],
+        historyFuture: [],
+        captions: [],
+        storyboardScenes: [],
+        currentGenerationBatchId: null,
+        generationJobs: [],
+        generatedMediaAssets: [],
+      } as Partial<EditorState>);
+      return project;
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Project creation failed');
+      set({ projectStatus: 'Project creation failed.' });
+      return null;
+    } finally {
+      set({ isSavingProject: false });
+    }
+  },
+  refreshProjects: async () => {
+    set({ isLoadingProjects: true });
+    try {
+      const response = await listProjectRecords();
+      set({ availableProjects: response.projects });
+    } catch (err: any) {
+      console.error(err);
+      set({ projectStatus: err.message || 'Could not load previous projects.' });
+    } finally {
+      set({ isLoadingProjects: false });
+    }
+  },
+  loadProject: async (projectId) => {
+    set({ isLoadingProjects: true, projectStatus: 'Loading project...' } as Partial<EditorState>);
+    try {
+      const project = await getProjectRecord(projectId);
+      const restored = await restoreProjectWorkspace(project);
+      rememberProjectPointer(project);
+      set(restored);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Project load failed');
+      set({ projectStatus: 'Project load failed.' });
+    } finally {
+      set({ isLoadingProjects: false });
+    }
+  },
+  loadProjectFromPath: async (path) => {
+    if (!path.trim()) {
+      alert('Enter a project folder or project.json path.');
+      return;
+    }
+    set({ isLoadingProjects: true, projectStatus: 'Loading project...' } as Partial<EditorState>);
+    try {
+      const project = await loadProjectRecordFromPath(path.trim());
+      const restored = await restoreProjectWorkspace(project);
+      rememberProjectPointer(project);
+      set(restored);
+      await get().refreshProjects();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Project load failed');
+      set({ projectStatus: 'Project load failed.' });
+    } finally {
+      set({ isLoadingProjects: false });
+    }
+  },
+  newProject: () => {
+    const confirmed = window.confirm('Start a new empty project? Save the current project first if you need to keep it.');
+    if (!confirmed) return;
+    clearProjectPointer();
+    set({
+      currentProject: null,
+      projectName: DEFAULT_PROJECT_NAME,
+      projectDirectory: '',
+      projectStatus: 'Choose a directory and create a project to start.',
+      assets: [],
+      tracks: makeDefaultTracks(),
+      clips: [],
+      selectedClipId: null,
+      zoom: 20,
+      snapEnabled: true,
+      historyPast: [],
+      historyFuture: [],
+      isPlaying: false,
+      playheadTime: 0,
+      mediaUrl: null,
+      captions: [],
+      srtContent: null,
+      srtDownloadUrl: null,
+      vttDownloadUrl: null,
+      storyboardSettings: DEFAULT_STORYBOARD_SETTINGS,
+      storyboardScenes: [],
+      currentGenerationBatchId: null,
+      generationJobs: [],
+      generatedMediaAssets: [],
+      storyboardStatus: null,
+    } as Partial<EditorState>);
+  },
+  saveProject: async () => {
+    if (!get().currentProject) {
+      alert('Create or load a project before saving.');
+      return null;
+    }
+    set({ isSavingProject: true, projectStatus: 'Saving project...' } as Partial<EditorState>);
+    try {
+      const savedProject = await persistProjectSnapshot(get());
+      set({
+        currentProject: savedProject,
+        projectName: savedProject.name,
+        projectStatus: `Project saved to ${savedProject.folderPath}`,
+      });
+      return savedProject;
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Project save failed');
+      set({ projectStatus: 'Project save failed.' });
+      return null;
+    } finally {
+      set({ isSavingProject: false });
+    }
+  },
+
   // --- Media Pool ---
   assets: [],
   addAssets: async (files: File[]) => {
@@ -539,10 +924,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   // --- Timeline Tracks ---
-  tracks: [
-    { id: 'v1', name: 'V1', type: 'visual', order: 0, muted: false, solo: false, locked: false },
-    { id: 'a1', name: 'A1', type: 'audio', order: 1, muted: false, solo: false, locked: false }
-  ],
+  tracks: makeDefaultTracks(),
   addTrack: (type: MediaType) => {
     set(state => {
       const typeTracks = state.tracks.filter(t => t.type === type);
@@ -1208,18 +1590,29 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   createJobsFromApprovedScenes: async () => {
     const state = get();
+    if (!state.currentProject) {
+      alert('Create or load a project before creating generation jobs.');
+      return;
+    }
     const approvedScenes = state.storyboardScenes.filter(scene => scene.status === 'approved');
     if (approvedScenes.length === 0) {
       alert('Approve storyboard scenes before creating generation jobs.');
       return;
     }
 
-    set({ storyboardStatus: 'Creating generation jobs...' });
+    set({ storyboardStatus: 'Saving project and creating generation jobs...' });
     try {
+      const project = await persistProjectSnapshot(get());
+      set({
+        currentProject: project,
+        projectName: project.name,
+        projectStatus: `Project folder ready: ${project.generatedMediaPath}`,
+      });
       const response = await createGenerationJobs(
         approvedScenes,
         state.storyboardSettings.provider,
         state.storyboardSettings.aspectRatio,
+        project.id,
       );
       const batchId = response.batchId ?? response.jobs[0]?.batchId ?? null;
       set({
@@ -1229,6 +1622,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         storyboardScenes: mergeSceneStatuses(state.storyboardScenes, response.jobs, state.clips, batchId),
         storyboardStatus: `Created ${response.jobs.length} generation jobs.`,
       });
+      void get().saveProject();
       void get().syncGenerationBatch(true);
     } catch (err: any) {
       console.error(err);
@@ -1245,7 +1639,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     set({ storyboardStatus: 'Refreshing generation jobs...' });
     try {
-      const response = await listGenerationJobs({ batchId });
+      const projectId = get().currentProject?.id ?? null;
+      const response = await listGenerationJobs({ batchId, projectId });
       set(state => ({
         currentGenerationBatchId: batchId,
         generationJobs: response.jobs,
@@ -1271,14 +1666,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ...(silent ? {} : { storyboardStatus: 'Checking generated scenes...' }),
     } as Partial<EditorState>);
     try {
-      const jobsResponse = await listGenerationJobs({ batchId });
+      const projectId = get().currentProject?.id ?? null;
+      const jobsResponse = await listGenerationJobs({ batchId, projectId });
       set(state => ({
         currentGenerationBatchId: batchId,
         generationJobs: jobsResponse.jobs,
         storyboardScenes: mergeSceneStatuses(state.storyboardScenes, jobsResponse.jobs, state.clips, batchId),
       }));
 
-      const mediaResponse = await listGeneratedMediaAssets(true, { batchId });
+      const mediaResponse = await listGeneratedMediaAssets(true, { batchId, projectId });
       set({ generatedMediaAssets: mediaResponse.assets });
       const generatedAssets = selectGeneratedAssetsForImport(mediaResponse.assets, get().clips)
         .filter(asset => getAssetVariantUrls(asset).length <= 1);
@@ -1383,7 +1779,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         return;
       }
 
-      const refreshedJobs = await listGenerationJobs({ batchId }).catch(() => null);
+      const refreshedJobs = await listGenerationJobs({ batchId, projectId }).catch(() => null);
       set(state => {
         const importedJobIds = new Set(
           state.clips
@@ -1392,12 +1788,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         );
         const importedSceneIds = new Set(
           state.clips
-            .map(clip => clip.generation ? `${clip.generation.batchId}:${clip.generation.sceneId}` : null)
+            .map(clip => clip.generation
+              ? makeGenerationSceneKey(clip.generation.projectId, clip.generation.batchId, clip.generation.sceneId)
+              : null
+            )
             .filter((sceneKey): sceneKey is string => Boolean(sceneKey))
         );
         const clipsToAdd = newClips.filter(clip =>
           !clip.generation ||
-          (!importedJobIds.has(clip.generation.jobId) && !importedSceneIds.has(`${clip.generation.batchId}:${clip.generation.sceneId}`))
+          (
+            !importedJobIds.has(clip.generation.jobId) &&
+            !importedSceneIds.has(makeGenerationSceneKey(clip.generation.projectId, clip.generation.batchId, clip.generation.sceneId))
+          )
         );
         const assetIdsToAdd = new Set(clipsToAdd.map(clip => clip.assetId));
         const assetsToAdd = newAssets.filter(asset => assetIdsToAdd.has(asset.id));
@@ -1435,6 +1837,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           storyboardStatus: `Imported ${statusParts.join(' and ')} to the timeline.`,
         };
       });
+      if (get().currentProject) void get().saveProject();
     } catch (err: any) {
       console.error(err);
       if (!silent) alert(err.message || 'Generated media import failed');
@@ -1456,8 +1859,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return;
     }
     const sceneAlreadyImported = state.clips.some(clip =>
-      clip.generation?.batchId === sourceAsset.batchId &&
-      clip.generation.sceneId === sourceAsset.sceneId
+      clip.generation &&
+      makeGenerationSceneKey(clip.generation.projectId, clip.generation.batchId, clip.generation.sceneId) ===
+        makeGenerationSceneKey(sourceAsset.projectId, sourceAsset.batchId, sourceAsset.sceneId)
     );
     if (sceneAlreadyImported) {
       alert('This scene is already on the timeline. Remove the existing generated clip before choosing another result.');
@@ -1546,8 +1950,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const batchId = getCurrentGenerationBatchId(get());
       if (batchId) {
         const [jobsResponse, mediaResponse] = await Promise.all([
-          listGenerationJobs({ batchId }).catch(() => null),
-          listGeneratedMediaAssets(true, { batchId }).catch(() => null),
+          listGenerationJobs({ batchId, projectId: get().currentProject?.id ?? null }).catch(() => null),
+          listGeneratedMediaAssets(true, { batchId, projectId: get().currentProject?.id ?? null }).catch(() => null),
         ]);
         set(current => ({
           generationJobs: jobsResponse?.jobs ?? current.generationJobs,
@@ -1560,6 +1964,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           ),
         }));
       }
+      if (get().currentProject) void get().saveProject();
     } catch (err: any) {
       console.error(err);
       alert(err.message || 'Could not import selected result');

@@ -8,6 +8,8 @@ import type {
   GeneratedMediaAsset,
   ProviderName,
   GenerationJob,
+  ProjectDetail,
+  ProjectSummary,
   StoryboardScene,
   TranscriptSlice,
 } from '../../types';
@@ -55,7 +57,14 @@ export type GeneratedMediaListResponse = {
 
 type GenerationListOptions = {
   batchId?: string | null;
+  projectId?: string | null;
   signal?: AbortSignal;
+};
+
+export type ProjectSaveState = Record<string, unknown>;
+
+export type ProjectListResponse = {
+  projects: ProjectSummary[];
 };
 
 export const resolveBackendMediaUrl = (url: string): string => {
@@ -315,12 +324,13 @@ export const createGenerationJobs = async (
   scenes: StoryboardScene[],
   provider: ProviderName,
   aspectRatio: GenerationAspectRatio,
+  projectId?: string | null,
   signal?: AbortSignal
 ): Promise<GenerationJobListResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/generation/jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenes, provider, aspectRatio }),
+    body: JSON.stringify({ scenes, provider, aspectRatio, projectId }),
     signal,
   });
 
@@ -337,6 +347,7 @@ export const listGenerationJobs = async (
 ): Promise<GenerationJobListResponse> => {
   const params = new URLSearchParams();
   if (options.batchId) params.set('batchId', options.batchId);
+  if (options.projectId) params.set('projectId', options.projectId);
   const suffix = params.toString() ? `?${params.toString()}` : '';
   const response = await fetch(`${API_BASE_URL}/api/generation/jobs${suffix}`, { signal: options.signal });
 
@@ -354,11 +365,116 @@ export const listGeneratedMediaAssets = async (
 ): Promise<GeneratedMediaListResponse> => {
   const params = new URLSearchParams({ include_placeholders: String(includePlaceholders) });
   if (options.batchId) params.set('batchId', options.batchId);
+  if (options.projectId) params.set('projectId', options.projectId);
   const response = await fetch(`${API_BASE_URL}/api/generation/media-assets?${params.toString()}`, { signal: options.signal });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(formatApiError(errorData.detail, 'Could not load generated media'));
+  }
+
+  return response.json();
+};
+
+export const createProjectRecord = async (
+  name: string,
+  parentDirectory?: string | null,
+  signal?: AbortSignal
+): Promise<ProjectDetail> => {
+  const response = await fetch(`${API_BASE_URL}/api/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, parentDirectory }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not create project'));
+  }
+
+  return response.json();
+};
+
+export const chooseProjectDirectory = async (
+  signal?: AbortSignal
+): Promise<string> => {
+  const response = await fetch(`${API_BASE_URL}/api/projects/select-directory`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not select a directory'));
+  }
+
+  const data = await response.json();
+  return String(data.path || '');
+};
+
+export const listProjectRecords = async (
+  signal?: AbortSignal
+): Promise<ProjectListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/projects`, { signal });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not list projects'));
+  }
+
+  return response.json();
+};
+
+export const getProjectRecord = async (
+  projectId: string,
+  signal?: AbortSignal
+): Promise<ProjectDetail> => {
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}`, { signal });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not load project'));
+  }
+
+  return response.json();
+};
+
+export const loadProjectRecordFromPath = async (
+  path: string,
+  signal?: AbortSignal
+): Promise<ProjectDetail> => {
+  const response = await fetch(`${API_BASE_URL}/api/projects/load`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not load project'));
+  }
+
+  return response.json();
+};
+
+export const saveProjectRecord = async (
+  projectId: string,
+  name: string,
+  state: ProjectSaveState,
+  signal?: AbortSignal
+): Promise<ProjectDetail> => {
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, state }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not save project'));
   }
 
   return response.json();

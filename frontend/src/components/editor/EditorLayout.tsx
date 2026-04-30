@@ -3,6 +3,7 @@ import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import type { DragEndEvent } from '@dnd-kit/core';
 import { Navbar } from './Navbar';
 import { MediaPool } from './MediaPool';
+import { ProjectGate } from './ProjectGate';
 import { PreviewWindow } from './PreviewWindow';
 import { Inspector } from './Inspector';
 import { TimelinePanel } from '../timeline/TimelinePanel';
@@ -22,6 +23,7 @@ export const EditorLayout = () => {
     undo,
     redo
   } = useEditorStore();
+  const currentProject = useEditorStore(state => state.currentProject);
   
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -110,13 +112,19 @@ export const EditorLayout = () => {
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       {showExportModal && <ExportModal />}
       <div className="editor-layout">
-        <Navbar />
-        <div className="workspace">
-          <MediaPool />
-          <PreviewWindow />
-          <Inspector />
-        </div>
-        <TimelinePanel />
+        {currentProject ? (
+          <>
+            <Navbar />
+            <div className="workspace">
+              <MediaPool />
+              <PreviewWindow />
+              <Inspector />
+            </div>
+            <TimelinePanel />
+          </>
+        ) : (
+          <ProjectGate />
+        )}
       </div>
     </DndContext>
   );

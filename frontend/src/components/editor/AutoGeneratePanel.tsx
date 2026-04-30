@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { getStoryboardSources, useEditorStore } from '../../store/editorStore';
 import { resolveBackendMediaUrl } from '../../lib/api/client';
-import type { GeneratedMediaType, GenerationAspectRatio, GenerationJobStatus, ProviderName, StoryboardScene } from '../../types';
+import type { GeneratedMediaAsset, GeneratedMediaType, GenerationAspectRatio, GenerationJobStatus, ProviderName, StoryboardScene } from '../../types';
 
 const STYLE_OPTIONS = [
   'cinematic realistic',
@@ -35,6 +35,12 @@ const terminalJobStatuses: GenerationJobStatus[] = ['completed', 'failed', 'canc
 
 type SceneField = keyof Pick<StoryboardScene, 'start' | 'end' | 'transcript' | 'prompt' | 'visualType' | 'camera'>;
 
+const getAssetVariantCount = (asset: GeneratedMediaAsset | undefined): number => {
+  if (!asset) return 0;
+  if (asset.resultVariants.length > 0) return asset.resultVariants.length;
+  return asset.resultUrl ? 1 : 0;
+};
+
 export const AutoGeneratePanel = () => {
   const state = useEditorStore();
   const {
@@ -60,6 +66,7 @@ export const AutoGeneratePanel = () => {
     generatedMediaAssets,
     isSyncingGeneration,
     clips,
+    currentProject,
   } = state;
 
   const sources = getStoryboardSources(state);
@@ -68,17 +75,29 @@ export const AutoGeneratePanel = () => {
   const hasTranscript = captions.some(caption => caption.text.trim());
   const canGenerate = hasTranscript || sources.length > 0;
   const approvedCount = storyboardScenes.filter(scene => scene.status === 'approved').length;
-  const jobCounts = generationJobs.reduce<Record<string, number>>((counts, job) => {
+  const currentProjectId = currentProject?.id ?? null;
+  const currentBatchJobs = generationJobs.filter(job =>
+    job.batchId === currentGenerationBatchId &&
+    job.projectId === currentProjectId
+  );
+  const currentBatchAssets = generatedMediaAssets.filter(asset =>
+    asset.batchId === currentGenerationBatchId &&
+    asset.projectId === currentProjectId
+  );
+  const jobCounts = currentBatchJobs.reduce<Record<string, number>>((counts, job) => {
     counts[job.status] = (counts[job.status] ?? 0) + 1;
     return counts;
   }, {});
   const generatedClipSceneIds = new Set(
     clips
-      .filter(clip => clip.generation?.batchId === currentGenerationBatchId)
+      .filter(clip =>
+        clip.generation?.batchId === currentGenerationBatchId &&
+        clip.generation?.projectId === currentProjectId
+      )
       .map(clip => clip.generation!.sceneId)
   );
-  const jobBySceneId = new Map(generationJobs.map(job => [job.sceneId, job]));
-  const assetBySceneId = new Map(generatedMediaAssets.map(asset => [asset.sceneId, asset]));
+  const jobBySceneId = new Map(currentBatchJobs.map(job => [job.sceneId, job]));
+  const assetBySceneId = new Map(currentBatchAssets.map(asset => [asset.sceneId, asset]));
   const sceneJobRows = storyboardScenes.map((scene, index) => {
     const job = jobBySceneId.get(scene.id);
     const asset = assetBySceneId.get(scene.id);
@@ -93,13 +112,23 @@ export const AutoGeneratePanel = () => {
     };
   });
   const importReadyCount = sceneJobRows.filter(row =>
-    row.job && terminalJobStatuses.includes(row.job.status) && !row.imported
+    row.job &&
+    terminalJobStatuses.includes(row.job.status) &&
+    !row.imported &&
+    row.asset &&
+    getAssetVariantCount(row.asset) <= 1
+  ).length;
+  const needsChoiceCount = sceneJobRows.filter(row =>
+    row.job?.status === 'completed' &&
+    !row.imported &&
+    row.asset &&
+    getAssetVariantCount(row.asset) > 1
   ).length;
   const shouldAutoSync = Boolean(
     currentGenerationBatchId &&
-    generationJobs.length > 0 &&
+    currentBatchJobs.length > 0 &&
     (
-      generationJobs.some(job => job.status === 'queued' || job.status === 'running') ||
+      currentBatchJobs.some(job => job.status === 'queued' || job.status === 'running') ||
       importReadyCount > 0
     )
   );
@@ -220,10 +249,10 @@ export const AutoGeneratePanel = () => {
             Create Generation Jobs
           </button>
           <div className="storyboard-count">
-            {storyboardScenes.length} scenes - {approvedCount} approved - {generationJobs.length} jobs
+            {storyboardScenes.length} scenes - {approvedCount} approved - {currentBatchJobs.length} jobs
           </div>
 
-          {generationJobs.length > 0 && (
+          {currentBatchJobs.length > 0 && (
             <div className="generation-controls">
               <div className="generation-toolbar">
                 <button className="btn-secondary" onClick={refreshGenerationJobs} disabled={isSyncingGeneration}>
@@ -238,7 +267,7 @@ export const AutoGeneratePanel = () => {
                 </button>
               </div>
               <div className="generation-summary">
-                queued {jobCounts.queued ?? 0} - running {jobCounts.running ?? 0} - completed {jobCounts.completed ?? 0} - needs action {jobCounts.manual_action_required ?? 0} - failed {jobCounts.failed ?? 0}
+                queued {jobCounts.queued ?? 0} - running {jobCounts.running ?? 0} - completed {jobCounts.completed ?? 0} - choose {needsChoiceCount} - needs action {jobCounts.manual_action_required ?? 0} - failed {jobCounts.failed ?? 0}
               </div>
               {currentGenerationBatchId && (
                 <div className="generation-batch">Batch {currentGenerationBatchId.replace(/^batch-/, '')}</div>

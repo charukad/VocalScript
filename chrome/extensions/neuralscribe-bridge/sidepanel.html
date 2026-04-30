@@ -37,6 +37,13 @@
           <input id="httpBaseUrl" type="text" spellcheck="false">
         </label>
         <label>
+          Project to execute
+          <div class="inline-field">
+            <select id="projectSelect"></select>
+            <button id="refreshProjectsBtn" class="secondary" type="button">Refresh</button>
+          </div>
+        </label>
+        <label>
           Session Token
           <input id="sessionToken" type="password" spellcheck="false">
         </label>
@@ -76,12 +83,21 @@
           <span>Current Job</span>
           <strong id="currentJobText">-</strong>
         </div>
+        <div class="status-line">
+          <span>Project</span>
+          <strong id="currentProjectText">-</strong>
+        </div>
       </section>
 
       <section class="actions">
         <button id="startJobsBtn" class="primary">Start Jobs</button>
         <button id="claimOnceBtn" class="secondary">Run Once</button>
         <button id="stopJobsBtn" class="secondary">Stop Jobs</button>
+      </section>
+
+      <section class="job-list-card">
+        <div class="log-title">Selected Project Jobs</div>
+        <div id="jobList" class="job-list"></div>
       </section>
 
       <section class="log">

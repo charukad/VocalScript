@@ -1,7 +1,20 @@
 import { useEditorStore } from '../../store/editorStore';
 
 export const Navbar = () => {
-  const { clips, isProcessing, openExportModal, mediaUrl, assets } = useEditorStore();
+  const {
+    clips,
+    isProcessing,
+    openExportModal,
+    mediaUrl,
+    assets,
+    currentProject,
+    projectName,
+    projectStatus,
+    isSavingProject,
+    setProjectName,
+    newProject,
+    saveProject,
+  } = useEditorStore();
   const visualAsset = assets.find(a => a.type === 'visual');
   const exportedAudioOnly = mediaUrl?.endsWith('.mp3');
 
@@ -19,6 +32,26 @@ export const Navbar = () => {
           <line x1="17" y1="7" x2="22" y2="7"></line>
         </svg>
         NeuralScribe Video Editor
+      </div>
+      <div className="project-bar">
+        <input
+          className="project-name-input"
+          value={projectName}
+          onChange={event => setProjectName(event.target.value)}
+          aria-label="Project name"
+        />
+        <button className="btn-secondary" onClick={() => void saveProject()} disabled={isSavingProject}>
+          {isSavingProject ? 'Saving...' : 'Save Project'}
+        </button>
+        <button className="btn-secondary" onClick={newProject}>
+          New
+        </button>
+        <span
+          className="project-folder"
+          title={currentProject?.generatedMediaPath || projectStatus || 'Save the project to create a media folder'}
+        >
+          {currentProject ? currentProject.generatedMediaPath : 'No project folder yet'}
+        </span>
       </div>
       <div className="nav-actions">
         {mediaUrl && (

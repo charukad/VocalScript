@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS = {
   httpBaseUrl: DEFAULT_BRIDGE.HTTP_BASE_URL,
   sessionToken: DEFAULT_BRIDGE.SESSION_TOKEN,
   providers: [PROVIDERS.META],
+  projectId: "",
   metaUrl: "https://www.meta.ai/create",
   claimIntervalMs: 5000,
   jobTimeoutMs: 180000,
@@ -101,6 +102,7 @@ function sanitizeSettings(settings) {
     providers: Array.isArray(settings.providers) && settings.providers.length > 0
       ? settings.providers.filter((provider) => Object.values(PROVIDERS).includes(provider))
       : DEFAULT_SETTINGS.providers,
+    projectId: String(settings.projectId || "").trim(),
     metaUrl: String(settings.metaUrl || DEFAULT_SETTINGS.metaUrl).trim(),
     claimIntervalMs: Number(settings.claimIntervalMs || DEFAULT_SETTINGS.claimIntervalMs),
     jobTimeoutMs: Number(settings.jobTimeoutMs || DEFAULT_SETTINGS.jobTimeoutMs),
@@ -287,6 +289,10 @@ async function claimAndRunNextJob() {
   }
 
   const settings = await getSettings();
+  if (!settings.projectId) {
+    updateStatus({ jobMessage: "Select a project before starting jobs" });
+    return;
+  }
   const provider = settings.providers.find((name) => PROVIDER_ADAPTERS[name]);
   if (!provider) {
     updateStatus({ jobMessage: "No supported provider is enabled" });
@@ -304,29 +310,29 @@ async function claimAndRunNextJob() {
   }
 
   if (!job) {
-    updateStatus({ jobMessage: "No queued Meta jobs" });
+    updateStatus({ jobMessage: "No queued jobs for selected project" });
     return;
   }
 
   currentJob = job;
   updateStatus({
     currentJob: job,
-    jobMessage: `Running ${job.id}`,
+    jobMessage: `Running ${formatJobLabel(job)}`,
   });
 
   try {
     const result = await adapter.run(job, settings);
     if (result.status === "manual_action_required") {
       await updateJobStatus(settings, job.id, "manual_action_required", result.message, result.metadata);
-      updateStatus({ jobMessage: `Manual action needed for ${job.id}` });
+      updateStatus({ jobMessage: `Manual action needed for ${formatJobLabel(job)}` });
       return;
     }
 
     await completeJob(settings, job.id, result.mediaUrl, result.mediaType, result.metadata, result.mediaVariants);
-    updateStatus({ jobMessage: `Completed ${job.id}` });
+    updateStatus({ jobMessage: `Completed ${formatJobLabel(job)}` });
   } catch (error) {
     await updateJobStatus(settings, job.id, "failed", error.message, { provider: "meta" });
-    updateStatus({ jobMessage: `Failed ${job.id}: ${error.message}` });
+    updateStatus({ jobMessage: `Failed ${formatJobLabel(job)}: ${error.message}` });
   } finally {
     currentJob = null;
     updateStatus({ currentJob: null });
@@ -337,11 +343,16 @@ async function claimQueuedJob(settings, provider, workerId) {
   const response = await fetch(`${settings.httpBaseUrl}/api/generation/jobs/claim`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider, workerId }),
+    body: JSON.stringify({ provider, workerId, projectId: settings.projectId }),
   });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(await responseText(response));
   return response.json();
+}
+
+function formatJobLabel(job) {
+  const project = job.projectId || job.metadata?.projectId || "no-project";
+  return `${job.id} / ${project} / ${job.sceneId || "scene"}`;
 }
 
 async function updateJobStatus(settings, jobId, status, error, metadata = {}) {
