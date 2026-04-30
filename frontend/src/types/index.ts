@@ -5,6 +5,7 @@ export type MediaAsset = {
   file: File;
   type: MediaType;
   mediaKind: 'audio' | 'video' | 'image';
+  duration?: number;
   thumbnailUrl?: string;
   waveform?: number[];
   filmstrip?: string[];
@@ -121,6 +122,7 @@ export type GenerationAspectRatio = '16:9' | '9:16' | '1:1' | '4:5';
 export type StoryboardSceneDensity = 'low' | 'medium' | 'high' | 'extra_high';
 export type StoryboardMotionIntensity = 'subtle' | 'balanced' | 'dynamic';
 export type StoryboardPromptDetail = 'simple' | 'balanced' | 'detailed';
+export type StoryboardTimeRangeMode = 'source' | 'custom';
 
 export type StoryboardSceneStatus =
   | 'draft'
@@ -160,6 +162,9 @@ export type StoryboardSettings = {
   motionIntensity: StoryboardMotionIntensity;
   promptDetail: StoryboardPromptDetail;
   style: string;
+  timeRangeMode: StoryboardTimeRangeMode;
+  rangeStart: number;
+  rangeEnd: number;
   autoRetryFailedScenes: boolean;
   autoRetryMaxAttempts: number;
   autoRetryRewriteAfter: number;

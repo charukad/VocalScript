@@ -15,7 +15,7 @@ import type {
   StoryboardScene,
   StoryboardSettings,
 } from '../types';
-import { getMediaDuration, generateThumbnail, generateWaveform, generateFilmstrip } from '../lib/utils/media';
+import { getMediaDuration, generateThumbnail, generateWaveform, generateFilmstrip, extractAudioSegment } from '../lib/utils/media';
 import {
   createGenerationJobs,
   createProjectRecord,
@@ -65,6 +65,9 @@ const DEFAULT_STORYBOARD_SETTINGS: StoryboardSettings = {
   motionIntensity: 'balanced',
   promptDetail: 'balanced',
   style: 'cinematic realistic',
+  timeRangeMode: 'source',
+  rangeStart: 0,
+  rangeEnd: 0,
   autoRetryFailedScenes: false,
   autoRetryMaxAttempts: 5,
   autoRetryRewriteAfter: 2,
@@ -77,6 +80,9 @@ type StoryboardSource = {
   id: string;
   file: File;
   name: string;
+  kind: 'clip' | 'asset';
+  clip?: TimelineClip;
+  asset?: MediaAsset;
 };
 
 type TimelineSnapshot = {
@@ -213,6 +219,7 @@ const serializeAsset = (asset: MediaAsset): SerializableAsset => ({
   id: asset.id,
   type: asset.type,
   mediaKind: asset.mediaKind,
+  duration: asset.duration,
   sourceUrl: asset.sourceUrl ?? null,
   localPath: asset.localPath ?? null,
   fileName: asset.file.name,
@@ -415,6 +422,8 @@ export const getStoryboardSources = (state: Pick<EditorState, 'assets' | 'clips'
       id: `clip:${clip.id}`,
       file: clip.file,
       name: `Timeline: ${clip.file.name}`,
+      kind: 'clip' as const,
+      clip,
     }));
   const clipAssetIds = new Set(state.clips.map(clip => clip.assetId));
   const assetSources = state.assets
@@ -423,6 +432,8 @@ export const getStoryboardSources = (state: Pick<EditorState, 'assets' | 'clips'
       id: `asset:${asset.id}`,
       file: asset.file,
       name: `Media Pool: ${asset.file.name}`,
+      kind: 'asset' as const,
+      asset,
     }));
   return [...clipSources, ...assetSources];
 };
@@ -442,18 +453,151 @@ const getConfiguredStoryboardSource = (
       id: `clip:${selectedClip.id}`,
       file: selectedClip.file,
       name: `Timeline: ${selectedClip.file.name}`,
+      kind: 'clip',
+      clip: selectedClip,
     };
   }
 
   return sources[0] ?? null;
 };
 
-const normalizeStoryboardScenes = (scenes: StoryboardScene[], fallback: StoryboardSettings): StoryboardScene[] => {
+type StoryboardTimedSegment = {
+  start: number;
+  end: number;
+  text: string;
+};
+
+type StoryboardRange = {
+  timelineStart: number;
+  timelineEnd: number;
+  mediaStart: number;
+  mediaEnd: number;
+};
+
+const isFiniteSeconds = (value: unknown): value is number => (
+  typeof value === 'number' && Number.isFinite(value)
+);
+
+const isAudioFileSource = (file: File): boolean => (
+  file.type.startsWith('audio/') || /\.(mp3|wav|m4a|flac|ogg|aac)$/i.test(file.name)
+);
+
+const getOverlapDuration = (start: number, end: number, rangeStart: number, rangeEnd: number): number => (
+  Math.max(0, Math.min(end, rangeEnd) - Math.max(start, rangeStart))
+);
+
+const getStoryboardRange = (
+  settings: StoryboardSettings,
+  source: StoryboardSource | null,
+): StoryboardRange | null => {
+  const clip = source?.clip;
+  const hasCustomRange = settings.timeRangeMode === 'custom';
+  const customStart = Math.max(0, settings.rangeStart || 0);
+  const customEnd = Math.max(0, settings.rangeEnd || 0);
+
+  if (clip) {
+    const clipTimelineStart = Math.max(0, clip.startTime);
+    const clipTimelineEnd = Math.max(clipTimelineStart, clip.startTime + clip.duration);
+    const timelineStart = hasCustomRange ? Math.max(clipTimelineStart, customStart) : clipTimelineStart;
+    const timelineEnd = hasCustomRange ? Math.min(clipTimelineEnd, customEnd) : clipTimelineEnd;
+    if (timelineEnd <= timelineStart) return null;
+    const mediaStart = Math.max(0, (clip.mediaOffset || 0) + (timelineStart - clip.startTime));
+    const mediaEnd = Math.max(mediaStart, mediaStart + (timelineEnd - timelineStart));
+    return { timelineStart, timelineEnd, mediaStart, mediaEnd };
+  }
+
+  if (hasCustomRange) {
+    if (customEnd <= customStart) return null;
+    return {
+      timelineStart: customStart,
+      timelineEnd: customEnd,
+      mediaStart: customStart,
+      mediaEnd: customEnd,
+    };
+  }
+
+  return null;
+};
+
+const getStoryboardSegments = (
+  captions: CaptionSegment[],
+  source: StoryboardSource | null,
+  range: StoryboardRange | null,
+): StoryboardTimedSegment[] => {
+  const cleanCaptions = captions.filter(caption => caption.text.trim());
+
+  if (source?.clip && range) {
+    const clip = source.clip;
+    const mediaOverlap = cleanCaptions.reduce(
+      (total, caption) => total + getOverlapDuration(caption.start, caption.end, range.mediaStart, range.mediaEnd),
+      0,
+    );
+    const timelineOverlap = cleanCaptions.reduce(
+      (total, caption) => total + getOverlapDuration(caption.start, caption.end, range.timelineStart, range.timelineEnd),
+      0,
+    );
+
+    if (mediaOverlap <= 0 && timelineOverlap > 0) {
+      return cleanCaptions
+        .map(caption => {
+          const start = Math.max(caption.start, range.timelineStart);
+          const end = Math.min(caption.end, range.timelineEnd);
+          if (end <= start) return null;
+          return {
+            start: Number(start.toFixed(3)),
+            end: Number(end.toFixed(3)),
+            text: caption.text.trim(),
+          };
+        })
+        .filter((segment): segment is StoryboardTimedSegment => Boolean(segment));
+    }
+
+    return cleanCaptions
+      .map(caption => {
+        const mediaStart = Math.max(caption.start, range.mediaStart);
+        const mediaEnd = Math.min(caption.end, range.mediaEnd);
+        if (mediaEnd <= mediaStart) return null;
+        return {
+          start: Number((clip.startTime + (mediaStart - (clip.mediaOffset || 0))).toFixed(3)),
+          end: Number((clip.startTime + (mediaEnd - (clip.mediaOffset || 0))).toFixed(3)),
+          text: caption.text.trim(),
+        };
+      })
+      .filter((segment): segment is StoryboardTimedSegment => Boolean(segment));
+  }
+
+  if (range) {
+    return cleanCaptions
+      .map(caption => {
+        const start = Math.max(caption.start, range.timelineStart);
+        const end = Math.min(caption.end, range.timelineEnd);
+        if (end <= start) return null;
+        return {
+          start: Number(start.toFixed(3)),
+          end: Number(end.toFixed(3)),
+          text: caption.text.trim(),
+        };
+      })
+      .filter((segment): segment is StoryboardTimedSegment => Boolean(segment));
+  }
+
+  return cleanCaptions.map(caption => ({
+    start: caption.start,
+    end: caption.end,
+    text: caption.text.trim(),
+  }));
+};
+
+const normalizeStoryboardScenes = (
+  scenes: StoryboardScene[],
+  fallback: StoryboardSettings,
+  timeShift: number = 0,
+): StoryboardScene[] => {
   return scenes.map((scene, index) => ({
     ...scene,
     id: scene.id || `scene-${index + 1}`,
-    start: Number(scene.start.toFixed(3)),
-    end: Number(Math.max(scene.start + 0.1, scene.end).toFixed(3)),
+    start: Number((scene.start + timeShift).toFixed(3)),
+    end: Number(Math.max(scene.start + timeShift + 0.1, scene.end + timeShift).toFixed(3)),
     visualType: scene.visualType || fallback.visualType,
     negativePrompt: scene.negativePrompt || 'low quality, blurry, distorted, watermark, readable text',
     style: scene.style || fallback.style,
@@ -658,19 +802,23 @@ const hydrateSavedAsset = async (asset: SerializableAsset): Promise<MediaAsset |
   if (!asset.sourceUrl) return null;
   try {
     const file = await fetchPersistedAssetFile(asset);
+    const restoredDuration = isFiniteSeconds(asset.duration)
+      ? asset.duration
+      : await getMediaDuration(file, asset.type).catch(() => undefined);
     const restoredAsset: MediaAsset = {
       id: asset.id,
       file,
       type: asset.type,
       mediaKind: asset.mediaKind,
+      duration: restoredDuration,
       sourceUrl: asset.sourceUrl,
       localPath: asset.localPath,
       thumbnailUrl: await generateThumbnail(file, asset.mediaKind),
     };
     if (asset.mediaKind === 'audio') {
-      restoredAsset.waveform = await generateWaveform(file, 200).catch(() => undefined);
+      restoredAsset.waveform = await generateWaveform(file, 1000).catch(() => undefined);
     } else if (asset.mediaKind === 'video') {
-      const duration = await getMediaDuration(file, 'visual');
+      const duration = restoredDuration ?? await getMediaDuration(file, 'visual');
       if (duration > 0 && duration !== Infinity) {
         const framesCount = Math.min(50, Math.max(5, Math.ceil(duration / 2)));
         restoredAsset.filmstrip = await generateFilmstrip(file, duration, framesCount).catch(() => undefined);
@@ -782,12 +930,14 @@ const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<
         file,
         type: 'visual',
         mediaKind,
+        duration: generated.duration,
         sourceUrl: generated.resultUrl,
         localPath: generated.localPath,
         thumbnailUrl,
       };
       if (mediaKind === 'video') {
         const duration = await getMediaDuration(file, 'visual');
+        restoredAsset.duration = duration;
         const framesCount = Math.min(50, Math.max(5, Math.ceil(duration / 2)));
         restoredAsset.filmstrip = await generateFilmstrip(file, duration, framesCount);
       }
@@ -1164,12 +1314,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
 
       if (mediaKind) {
+        const duration = await getMediaDuration(f, type).catch(() => mediaKind === 'image' ? 10 : undefined);
         const thumbnailUrl = await generateThumbnail(f, mediaKind);
         const newAsset: MediaAsset = {
           id: Math.random().toString(36).substring(7),
           file: f,
           type,
           mediaKind,
+          duration,
           thumbnailUrl
         };
         if (project) {
@@ -1185,22 +1337,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
         // Async background generation of rich visuals
         if (mediaKind === 'audio') {
-          generateWaveform(f, 200).then(waveform => {
+          generateWaveform(f, 1000).then(waveform => {
             set(state => ({
               assets: state.assets.map(a => a.id === newAsset.id ? { ...a, waveform } : a)
             }));
           });
         } else if (mediaKind === 'video') {
-          getMediaDuration(f, 'visual').then(duration => {
-            if (duration > 0 && duration !== Infinity) {
-              const framesCount = Math.min(50, Math.max(5, Math.ceil(duration / 2)));
-              generateFilmstrip(f, duration, framesCount).then(filmstrip => {
+          const sourceDuration = duration;
+          if (sourceDuration && sourceDuration > 0 && sourceDuration !== Infinity) {
+            const framesCount = Math.min(50, Math.max(5, Math.ceil(sourceDuration / 2)));
+            generateFilmstrip(f, sourceDuration, framesCount).then(filmstrip => {
                 set(state => ({
                   assets: state.assets.map(a => a.id === newAsset.id ? { ...a, filmstrip } : a)
                 }));
-              });
-            }
-          });
+            });
+          }
         }
       }
     }
@@ -1255,7 +1406,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   addAssetToTimeline: async (asset: MediaAsset, trackId?: string, startTimeX?: number) => {
     const state = get();
-    const duration = await getMediaDuration(asset.file, asset.type);
+    const sourceDuration = isFiniteSeconds(asset.duration)
+      ? asset.duration
+      : await getMediaDuration(asset.file, asset.type);
 
     let targetTrackId = trackId;
     if (!targetTrackId) {
@@ -1279,7 +1432,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       trackId: targetTrackId,
       file: asset.file,
       type: asset.type,
-      duration: asset.type === 'visual' && asset.file.type.startsWith('image') ? 10 : duration,
+      duration: asset.type === 'visual' && asset.file.type.startsWith('image') ? 10 : sourceDuration,
       startTime: Math.max(0, targetStartTime),
       mediaOffset: 0,
       transform: { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false },
@@ -1753,17 +1906,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const state = get();
     const settings = state.storyboardSettings;
     const source = getConfiguredStoryboardSource(state);
-    const timedSegments = state.captions
-      .filter(caption => caption.text.trim())
-      .map(caption => ({
-        start: caption.start,
-        end: caption.end,
-        text: caption.text.trim(),
-      }));
+    const range = getStoryboardRange(settings, source);
+    if (settings.timeRangeMode === 'custom' && !range) {
+      alert('Set a valid custom time range before generating scenes.');
+      return;
+    }
+
+    const timedSegments = getStoryboardSegments(state.captions, source, range);
     const transcript = timedSegments.map(segment => segment.text).join(' ').trim();
 
     if (!transcript && !source) {
       alert('Generate a transcript or select an audio/video clip first.');
+      return;
+    }
+
+    if (!transcript && range && source && !isAudioFileSource(source.file)) {
+      alert('Custom or trimmed range generation needs captions for video sources. Generate a transcript first, or use an audio file.');
       return;
     }
 
@@ -1773,34 +1931,30 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     } as Partial<EditorState>);
 
     try {
-      const response = transcript
-        ? await createStoryboardFromTranscript(
-            transcript,
-            timedSegments,
-            {
-              provider: settings.provider,
-              preferredVisualType: settings.visualType,
-              videoMixPercent: settings.videoMixPercent,
-              sceneDensity: settings.sceneDensity,
-              motionIntensity: settings.motionIntensity,
-              promptDetail: settings.promptDetail,
-              style: settings.style,
-            }
-          )
-        : await createStoryboardFromAudio(
-            source!.file,
-            {
-              provider: settings.provider,
-              preferredVisualType: settings.visualType,
-              videoMixPercent: settings.videoMixPercent,
-              sceneDensity: settings.sceneDensity,
-              motionIntensity: settings.motionIntensity,
-              promptDetail: settings.promptDetail,
-              style: settings.style,
-            }
-          );
+      const storyboardOptions = {
+        provider: settings.provider,
+        preferredVisualType: settings.visualType,
+        videoMixPercent: settings.videoMixPercent,
+        sceneDensity: settings.sceneDensity,
+        motionIntensity: settings.motionIntensity,
+        promptDetail: settings.promptDetail,
+        style: settings.style,
+      };
+      let response;
+      let responseTimeShift = 0;
 
-      const scenes = normalizeStoryboardScenes(response.scenes, settings);
+      if (transcript) {
+        response = await createStoryboardFromTranscript(transcript, timedSegments, storyboardOptions);
+      } else {
+        let audioFile = source!.file;
+        if (range && isAudioFileSource(source!.file)) {
+          audioFile = await extractAudioSegment(source!.file, range.mediaStart, range.mediaEnd - range.mediaStart);
+          responseTimeShift = range.timelineStart;
+        }
+        response = await createStoryboardFromAudio(audioFile, storyboardOptions);
+      }
+
+      const scenes = normalizeStoryboardScenes(response.scenes, settings, responseTimeShift);
       set({
         storyboardScenes: scenes,
         currentGenerationBatchId: null,
@@ -2225,18 +2379,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             const mediaKind = assetForImport.mediaType === 'video' ? 'video' : 'image';
             const thumbnailUrl = await generateThumbnail(file, mediaKind);
             const assetId = `generated-${assetForImport.jobId}`;
+            let sourceDuration = assetForImport.duration;
             const newAsset: MediaAsset = {
               id: assetId,
               file,
               type: 'visual',
               mediaKind,
+              duration: sourceDuration,
               sourceUrl: assetForImport.resultUrl,
               localPath: assetForImport.localPath,
               thumbnailUrl,
             };
 
             if (mediaKind === 'video') {
-              const sourceDuration = await getMediaDuration(file, 'visual');
+              sourceDuration = await getMediaDuration(file, 'visual');
+              newAsset.duration = sourceDuration;
               const framesCount = Math.min(50, Math.max(5, Math.ceil(sourceDuration / 2)));
               newAsset.filmstrip = await generateFilmstrip(file, sourceDuration, framesCount);
             }
@@ -2384,14 +2541,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return;
     }
     const sourceSceneKey = makeGenerationSceneKey(sourceAsset.projectId, sourceAsset.batchId, sourceAsset.sceneId);
-    const sceneAlreadyImported = state.clips.some(clip =>
-      isCompletedGeneratedVisualClip(clip) &&
-      getGenerationSceneKeyFromClip(clip) === sourceSceneKey
-    );
-    if (sceneAlreadyImported) {
-      alert('This scene is already on the timeline. Remove the existing generated clip before choosing another result.');
-      return;
-    }
 
     set({ isSyncingGeneration: true, storyboardStatus: 'Importing selected result...' } as Partial<EditorState>);
     try {
@@ -2426,23 +2575,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           metadata: storedJob.metadata,
         };
       }
+      assetForImport = {
+        ...assetForImport,
+        resultUrl: assetForImport.resultUrl ?? selectedUrl,
+        metadata: {
+          ...(assetForImport.metadata ?? {}),
+          selectedVariantUrl: selectedUrl,
+        },
+      };
 
       const file = await fetchGeneratedMediaFile(assetForImport);
       const mediaKind = assetForImport.mediaType === 'video' ? 'video' : 'image';
       const thumbnailUrl = await generateThumbnail(file, mediaKind);
       const assetId = `generated-${assetForImport.jobId}-${makeId()}`;
+      let sourceDuration = assetForImport.duration;
       const newAsset: MediaAsset = {
         id: assetId,
         file,
         type: 'visual',
         mediaKind,
+        duration: sourceDuration,
         sourceUrl: assetForImport.resultUrl,
         localPath: assetForImport.localPath,
         thumbnailUrl,
       };
 
       if (mediaKind === 'video') {
-        const sourceDuration = await getMediaDuration(file, 'visual');
+        sourceDuration = await getMediaDuration(file, 'visual');
+        newAsset.duration = sourceDuration;
         const framesCount = Math.min(50, Math.max(5, Math.ceil(sourceDuration / 2)));
         newAsset.filmstrip = await generateFilmstrip(file, sourceDuration, framesCount);
       }
@@ -2469,15 +2629,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           audio: { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 },
           generation: generatedMetadata(assetForImport),
         };
+        const replacedClips = current.clips.filter(clip =>
+          getGenerationSceneKeyFromClip(clip) === sourceSceneKey
+        );
+        const replacedAssetIds = new Set(replacedClips.map(clip => clip.assetId));
         const nextClips = compactGeneratedVisualClips([
-          ...current.clips.filter(clip =>
-            getGenerationSceneKeyFromClip(clip) !== sourceSceneKey || isCompletedGeneratedVisualClip(clip)
-          ),
+          ...current.clips.filter(clip => getGenerationSceneKeyFromClip(clip) !== sourceSceneKey),
           newClip,
         ], visualTrack.id, assetForImport.batchId, assetForImport.projectId);
         return {
           ...withHistory(current),
-          assets: [...current.assets, newAsset],
+          assets: [
+            ...current.assets.filter(asset => !replacedAssetIds.has(asset.id)),
+            newAsset,
+          ],
           tracks,
           clips: nextClips,
           selectedClipId: newClip.id,
@@ -2487,7 +2652,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             nextClips,
             assetForImport.batchId,
           ),
-          storyboardStatus: 'Selected result imported to the timeline.',
+          storyboardStatus: replacedClips.length
+            ? 'Selected result replaced on the timeline.'
+            : 'Selected result imported to the timeline.',
         };
       });
 

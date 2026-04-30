@@ -842,6 +842,12 @@
   gap: 0.45rem;
 }
 
+.auto-row-3 {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
 .auto-field {
   display: flex;
   flex-direction: column;
@@ -873,6 +879,12 @@
 .auto-field input[type="range"] {
   padding: 0;
   accent-color: var(--accent-color);
+}
+
+.auto-field input:disabled,
+.auto-field select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .auto-inline-value {
@@ -1053,6 +1065,12 @@
 .generation-variant:hover:not(:disabled) {
   border-color: var(--accent-color);
   color: var(--text-primary);
+}
+
+.generation-variant.selected {
+  border-color: #7ed37e;
+  color: #b7f4b7;
+  box-shadow: 0 0 0 1px rgba(126, 211, 126, 0.22);
 }
 
 .generation-variant img,

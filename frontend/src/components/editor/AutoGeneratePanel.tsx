@@ -10,6 +10,7 @@ import type {
   StoryboardPromptDetail,
   StoryboardScene,
   StoryboardSceneDensity,
+  StoryboardTimeRangeMode,
 } from '../../types';
 
 type AutoPanelMode = 'dock' | 'wide' | 'full';
@@ -77,6 +78,23 @@ const clampRetryNumber = (value: number, min: number, max: number): number => (
   Math.min(max, Math.max(min, Math.round(value || min)))
 );
 
+const parseTimeValue = (value: string): number => {
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  if (trimmed.includes(':')) {
+    const parts = trimmed.split(':').map(part => Number(part.trim()));
+    if (parts.some(part => !Number.isFinite(part))) return 0;
+    return parts.reduce((total, part) => total * 60 + part, 0);
+  }
+  const numeric = Number(trimmed);
+  return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+};
+
+const formatTimeValue = (seconds: number): string => {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  return Number(seconds.toFixed(2)).toString();
+};
+
 export const AutoGeneratePanel = () => {
   const [panelMode, setPanelMode] = useState<AutoPanelMode>('dock');
   const autoRetryInFlight = useRef<Set<string>>(new Set());
@@ -132,7 +150,7 @@ export const AutoGeneratePanel = () => {
     counts[job.status] = (counts[job.status] ?? 0) + 1;
     return counts;
   }, {});
-  const generatedClipSceneIds = new Set(
+  const generatedClipBySceneId = new Map(
     clips
       .filter(clip =>
         clip.generation?.batchId === currentGenerationBatchId &&
@@ -140,20 +158,24 @@ export const AutoGeneratePanel = () => {
         clip.type === 'visual' &&
         clip.generation.status === 'completed'
       )
-      .map(clip => clip.generation!.sceneId)
+      .map(clip => [clip.generation!.sceneId, clip])
   );
   const jobBySceneId = new Map(currentBatchJobs.map(job => [job.sceneId, job]));
   const assetBySceneId = new Map(currentBatchAssets.map(asset => [asset.sceneId, asset]));
   const sceneJobRows = storyboardScenes.map((scene, index) => {
     const job = jobBySceneId.get(scene.id);
     const asset = assetBySceneId.get(scene.id);
-    const imported = generatedClipSceneIds.has(scene.id);
+    const importedClip = generatedClipBySceneId.get(scene.id);
+    const imported = Boolean(importedClip);
     return {
       scene,
       index,
       job,
       asset,
       imported,
+      selectedVariantUrl: importedClip?.generation?.metadata?.selectedVariantUrl
+        ?? importedClip?.generation?.resultUrl
+        ?? null,
       status: imported ? 'imported' : job?.status ?? scene.status,
     };
   });
@@ -259,6 +281,41 @@ export const AutoGeneratePanel = () => {
             ))}
           </select>
         </label>
+
+        <div className="auto-row-3">
+          <label className="auto-field">
+            <span>Range</span>
+            <select
+              value={storyboardSettings.timeRangeMode}
+              onChange={event => setStoryboardSettings({ timeRangeMode: event.target.value as StoryboardTimeRangeMode })}
+            >
+              <option value="source">Source</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <label className="auto-field">
+            <span>Start</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={formatTimeValue(storyboardSettings.rangeStart)}
+              onChange={event => setStoryboardSettings({ rangeStart: parseTimeValue(event.target.value) })}
+              disabled={storyboardSettings.timeRangeMode !== 'custom'}
+              placeholder="0"
+            />
+          </label>
+          <label className="auto-field">
+            <span>End</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={formatTimeValue(storyboardSettings.rangeEnd)}
+              onChange={event => setStoryboardSettings({ rangeEnd: parseTimeValue(event.target.value) })}
+              disabled={storyboardSettings.timeRangeMode !== 'custom'}
+              placeholder="0"
+            />
+          </label>
+        </div>
 
         <div className="auto-row-2">
           <label className="auto-field">
@@ -502,32 +559,35 @@ export const AutoGeneratePanel = () => {
                       <span>Scene {row.index + 1}</span>
                       <span className={`generation-scene-status status-${row.status}`}>{row.status}</span>
                     </div>
-                    {variants.length > 0 && !row.imported && (
+                    {variants.length > 0 && (
                       <div className="generation-variants">
-                        {variants.map((variant, variantIndex) => (
-                          <button
-                            key={`${row.scene.id}-${variant.url}`}
-                            className="generation-variant"
-                            onClick={() => importGenerationVariant(row.asset!.jobId, variant.url)}
-                            disabled={isSyncingGeneration}
-                            title={`Use result ${variantIndex + 1}`}
-                          >
-                            {variant.mediaType === 'image' ? (
-                              <img src={resolveBackendMediaUrl(variant.url)} alt={`Scene ${row.index + 1} result ${variantIndex + 1}`} />
-                            ) : (
-                              <video
-                                src={resolveBackendMediaUrl(variant.url)}
-                                muted
-                                loop
-                                playsInline
-                                preload="metadata"
-                                onMouseEnter={event => void event.currentTarget.play().catch(() => {})}
-                                onMouseLeave={event => event.currentTarget.pause()}
-                              />
-                            )}
-                            <span>Use {variantIndex + 1}</span>
-                          </button>
-                        ))}
+                        {variants.map((variant, variantIndex) => {
+                          const isSelectedVariant = row.selectedVariantUrl === variant.url;
+                          return (
+                            <button
+                              key={`${row.scene.id}-${variant.url}`}
+                              className={`generation-variant ${isSelectedVariant ? 'selected' : ''}`}
+                              onClick={() => importGenerationVariant(row.asset!.jobId, variant.url)}
+                              disabled={isSyncingGeneration || isSelectedVariant}
+                              title={isSelectedVariant ? `Selected result ${variantIndex + 1}` : `${row.imported ? 'Replace with' : 'Use'} result ${variantIndex + 1}`}
+                            >
+                              {variant.mediaType === 'image' ? (
+                                <img src={resolveBackendMediaUrl(variant.url)} alt={`Scene ${row.index + 1} result ${variantIndex + 1}`} />
+                              ) : (
+                                <video
+                                  src={resolveBackendMediaUrl(variant.url)}
+                                  muted
+                                  loop
+                                  playsInline
+                                  preload="metadata"
+                                  onMouseEnter={event => void event.currentTarget.play().catch(() => {})}
+                                  onMouseLeave={event => event.currentTarget.pause()}
+                                />
+                              )}
+                              <span>{isSelectedVariant ? 'Selected' : row.imported ? `Replace ${variantIndex + 1}` : `Use ${variantIndex + 1}`}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                     {((row.job && ['failed', 'canceled', 'manual_action_required'].includes(row.job.status)) || row.status === 'failed') && (

@@ -113,27 +113,34 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
     if (!asset?.waveform || asset.waveform.length === 0) {
       return <div className="generating-visuals">Loading waveform...</div>;
     }
-    
-    // Total original width if mediaOffset was 0 and it played fully
-    // We assume the waveform array covers the entire source file duration.
-    // However, we didn't save original file duration. Let's approximate total width
-    // by using the waveform array length (assuming 200 samples = entire file).
-    // Actually, simple approach: SVG with preserveAspectRatio="none"
-    // We can stretch the SVG to original file duration * zoom, and offset it left.
-    // But we don't have original duration easily here.
-    // Let's just draw the subset of the waveform.
-    
-    // Assuming 200 samples per file:
-    // This is tricky if we don't know original duration. 
-    // For now, let's just stretch what we have across the clip bounds simply.
-    // In a real app, waveform is bound to time.
+    const sourceDuration = asset.duration && Number.isFinite(asset.duration) && asset.duration > 0
+      ? asset.duration
+      : Math.max(validDuration, (clip.mediaOffset || 0) + validDuration);
+    const clipStart = Math.max(0, Math.min(sourceDuration, clip.mediaOffset || 0));
+    const clipEnd = Math.max(clipStart, Math.min(sourceDuration, clipStart + validDuration));
+    const startIndex = Math.max(0, Math.floor((clipStart / sourceDuration) * asset.waveform.length));
+    const endIndex = Math.min(asset.waveform.length, Math.ceil((clipEnd / sourceDuration) * asset.waveform.length));
+    const visibleWaveform = asset.waveform.slice(startIndex, Math.max(startIndex + 1, endIndex));
+    const bars = visibleWaveform.length > 0 ? visibleWaveform : asset.waveform.slice(0, 1);
+
     return (
-      <div className="audio-waveform-container" style={{ position: 'absolute', inset: 0, opacity: 0.6 }}>
-        <svg width="100%" height="100%" preserveAspectRatio="none" viewBox={`0 0 ${asset.waveform.length} 100`}>
-          <path 
-            d={`M 0 50 ${asset.waveform.map((amp, i) => `L ${i} ${50 - amp * 40} L ${i} ${50 + amp * 40}`).join(' ')} Z`} 
-            fill="#57a1d1" 
-          />
+      <div className="audio-waveform-container" style={{ position: 'absolute', inset: 0, opacity: 0.72 }}>
+        <svg width="100%" height="100%" preserveAspectRatio="none" viewBox={`0 0 ${bars.length} 100`}>
+          {bars.map((amp, i) => {
+            const safeAmp = Math.max(0.03, Math.min(1, Number.isFinite(amp) ? amp : 0));
+            const height = Math.max(2, safeAmp * 86);
+            return (
+              <rect
+                key={i}
+                x={i + 0.15}
+                y={50 - height / 2}
+                width={0.7}
+                height={height}
+                rx={0.25}
+                fill="#65b7e8"
+              />
+            );
+          })}
         </svg>
       </div>
     );
