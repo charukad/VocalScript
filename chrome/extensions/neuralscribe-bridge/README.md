@@ -68,6 +68,18 @@ The side panel shows visible jobs for the selected project. If no project is sel
 - `Clear All` clears queued, running, completed, failed, manual-action, and canceled jobs for the selected project, or all projects when no project is selected. It also resets this local runner.
 - The app-side `Bridge Monitor` has the larger queue dashboard with filters for workflow, provider, worker, project, status, and media type.
 
+## Provider Fallback
+
+The app-side `Bridge Monitor` can retry a failed job with another provider when that provider has an active capable worker. Fallback is manual by default: the app records the fallback provider, previous provider, timestamp, and history in the job metadata, then re-queues the same job with the new provider.
+
+Grok fallback stays disabled until a runnable Grok adapter is added to the extension worker.
+
+## Meta Extend Video
+
+For completed video jobs, `Bridge Monitor` can create a child `extend_video` job. The child job keeps the source job id, source media URL, project link, prompt metadata, target duration metadata, and provider metadata.
+
+The `Extend Video` button is capability-gated. Run `Health Check` or `Test Meta` first; the button only enables when an active Meta worker reports that the account exposes Extend Video.
+
 ## Version Reload Steps
 
 When the app reports a protocol or extension version mismatch:

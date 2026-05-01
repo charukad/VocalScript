@@ -664,6 +664,25 @@
   text-decoration: none;
 }
 
+.bridge-job-extend-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+}
+
+.bridge-job-extend-prompt input {
+  min-height: 28px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0 0.45rem;
+  font: inherit;
+  font-size: 0.66rem;
+}
+
 .bridge-job-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

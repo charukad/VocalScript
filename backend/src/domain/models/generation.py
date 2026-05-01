@@ -204,6 +204,19 @@ class GenerationJobRemoteStoreRequest(ApiModel):
     metadata: Dict[str, str] = Field(default_factory=dict)
 
 
+class GenerationJobFallbackRequest(ApiModel):
+    provider: ProviderName
+    require_manual_approval: bool = Field(default=True, alias="requireManualApproval")
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
+class GenerationExtendVideoRequest(ApiModel):
+    provider: ProviderName = "meta"
+    continuation_prompt: str = Field(default="", alias="continuationPrompt")
+    media_url: Optional[str] = Field(default=None, alias="mediaUrl")
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
 class ProviderCapability(ApiModel):
     provider: ProviderName
     can_generate_image: bool = Field(default=True, alias="canGenerateImage")

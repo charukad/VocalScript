@@ -53,6 +53,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
+  if (message?.type === "provider.meta.extendVideo") {
+    runMetaExtendVideo(message.job, message.options || {})
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message?.type !== "provider.meta.runJob") return false;
   runMetaJob(message.job, message.options || {})
     .then((result) => sendResponse({ ok: true, result }))
@@ -188,6 +194,68 @@ async function runMetaJob(job, options) {
       provider: "meta",
       providerPageUrl: location.href,
       variantCount: String(result.variants.length),
+    },
+  };
+}
+
+async function runMetaExtendVideo(job, options) {
+  const timeoutMs = Number(options.timeoutMs || 240000);
+  const prompt = String(job.metadata?.continuationPrompt || job.prompt || "").trim();
+  await primeExistingMediaSnapshot();
+  const extendControl = findExtendVideoControl();
+  if (!extendControl) {
+    return manualActionResult(
+      job,
+      "Meta Extend Video control is not visible for this account or selected video result."
+    );
+  }
+
+  const mediaBefore = captureMediaBaseline();
+  const mediaObserver = createNewMediaObserver();
+  let result = null;
+  try {
+    clickElement(extendControl);
+    await sleep(1600);
+    if (prompt) {
+      const promptBox = await waitForPromptBox(8000);
+      if (promptBox) {
+        await fillPrompt(promptBox, prompt, true);
+        const generateButton = await waitForGenerateButton(promptBox, 12000);
+        if (generateButton) clickElement(generateButton);
+      }
+    }
+    result = await waitForGeneratedMedia(timeoutMs, mediaBefore, "video", prompt, mediaObserver);
+  } finally {
+    mediaObserver.disconnect();
+  }
+
+  if (!result) {
+    result = await recoverGeneratedMedia(mediaBefore, "video", prompt);
+  }
+  if (!result) {
+    if (hasManualActionElement()) {
+      return manualActionResult(job, "Meta needs manual action before the extended video is available.");
+    }
+    const diagnostics = mediaDebugSummary(mediaBefore, "video", prompt);
+    throw new Error(`Timed out waiting for extended video. ${diagnostics.message}`);
+  }
+
+  if (result.variants.some((variant) => isLocalObjectUrl(variant.url))) {
+    result = await uploadLocalObjectVariants(job, result, options.httpBaseUrl);
+  }
+
+  return {
+    status: "completed",
+    mediaUrl: result.mediaUrl,
+    mediaType: "video",
+    mediaVariants: result.variants,
+    metadata: {
+      provider: "meta",
+      providerPageUrl: location.href,
+      variantCount: String(result.variants.length),
+      jobType: "extend_video",
+      sourceJobId: job.metadata?.sourceJobId || "",
+      sourceMediaUrl: job.metadata?.sourceMediaUrl || "",
     },
   };
 }

@@ -11,9 +11,11 @@ from backend.src.domain.interfaces.transcriber import ITranscriber
 from backend.src.domain.models.generation import (
     GeneratedMediaType,
     GeneratedMediaListResponse,
+    GenerationExtendVideoRequest,
     GenerationJob,
     GenerationJobClaimRequest,
     GenerationJobCreateRequest,
+    GenerationJobFallbackRequest,
     GenerationJobHistoryClearResponse,
     GenerationJobListResponse,
     GenerationJobRemoteStoreRequest,
@@ -221,6 +223,37 @@ def build_generation_router(
     @router.post("/jobs/{job_id}/retry", response_model=GenerationJob)
     async def retry_generation_job(job_id: str):
         job = queue_service.retry_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
+
+    @router.post("/jobs/{job_id}/fallback", response_model=GenerationJob)
+    async def fallback_generation_job(job_id: str, request: GenerationJobFallbackRequest):
+        try:
+            job = queue_service.fallback_job(
+                job_id,
+                provider=request.provider,
+                require_manual_approval=request.require_manual_approval,
+                metadata=request.metadata,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
+
+    @router.post("/jobs/{job_id}/extend", response_model=GenerationJob)
+    async def create_extend_video_job(job_id: str, request: GenerationExtendVideoRequest):
+        try:
+            job = queue_service.create_extend_video_job(
+                job_id,
+                provider=request.provider,
+                continuation_prompt=request.continuation_prompt,
+                media_url=request.media_url,
+                metadata=request.metadata,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
         return job

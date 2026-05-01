@@ -4,6 +4,8 @@ import {
   clearDisconnectedBridgeWorkers,
   clearBrowserBridgeDebugScreenshots,
   clearGenerationJobHistory,
+  createExtendVideoJob,
+  fallbackGenerationJob,
   getBrowserBridgeStatus,
   listBrowserBridgeDebugEvents,
   listGenerationJobs,
@@ -49,6 +51,8 @@ const queueStatuses: GenerationJobStatus[] = [
 
 const failedQueueStatuses: GenerationJobStatus[] = ['failed', 'manual_action_required', 'canceled'];
 const finishedQueueStatuses: GenerationJobStatus[] = ['completed', 'failed', 'manual_action_required', 'canceled'];
+const bridgeProviders: ProviderName[] = ['meta', 'grok'];
+const runnableBridgeProviders: ProviderName[] = ['meta'];
 
 const statusLabel = (status: BridgeWorkerSnapshot['status']) => status.replaceAll('_', ' ');
 
@@ -127,6 +131,9 @@ const queueResultLabel = (job: GenerationJob): string => {
   return '-';
 };
 
+const jobTypeLabel = (job: GenerationJob): string =>
+  job.metadata.jobType === 'extend_video' ? 'Extend Video' : job.mediaType;
+
 export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => {
   const [workers, setWorkers] = React.useState<BridgeWorkerSnapshot[]>([]);
   const [debugEvents, setDebugEvents] = React.useState<BridgeDebugEvent[]>([]);
@@ -139,6 +146,7 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
   const [queueProjectFilter, setQueueProjectFilter] = React.useState<string>('all');
   const [queueMediaFilter, setQueueMediaFilter] = React.useState<QueueMediaFilter>('all');
   const [selectedJobId, setSelectedJobId] = React.useState<string | null>(null);
+  const [extendPrompts, setExtendPrompts] = React.useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = React.useState(false);
   const [actionId, setActionId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -303,6 +311,18 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
   const selectedWorker = selectedJob
     ? workers.find(worker => worker.workerId === queueWorkerId(selectedJob))
     : null;
+  const providerCanRunJob = (
+    provider: ProviderName,
+    mediaType: GeneratedMediaType,
+    requireExtend = false
+  ) => activeWorkers.some(worker => {
+    if (!runnableBridgeProviders.includes(provider)) return false;
+    if (!worker.providers.includes(provider)) return false;
+    const capability = worker.capabilities.find(item => item.provider === provider);
+    if (!capability) return !requireExtend;
+    if (requireExtend) return capability.canExtendVideo;
+    return mediaType === 'video' ? capability.canGenerateVideo : capability.canGenerateImage;
+  });
   const queueClearFilters = React.useMemo(() => ({
     provider: queueProviderFilter === 'all' ? null : queueProviderFilter,
     workerId: queueWorkerFilter === 'all' ? null : queueWorkerFilter,
@@ -617,7 +637,7 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                   >
                     <span className={`queue-status-pill status-${job.status}`}>{queueStatusLabel(job.status)}</span>
                     <strong>{queueSubject(job)}</strong>
-                    <small>{queueFlowLabel(job)} · {job.provider} · {job.mediaType} · {queueProjectLabel(job)}</small>
+                    <small>{queueFlowLabel(job)} · {job.provider} · {jobTypeLabel(job)} · {queueProjectLabel(job)}</small>
                     <small>{worker ? workerDisplayName(worker) : workerId || 'No worker yet'} · {queueResultLabel(job)}</small>
                     {job.error && <em>{job.error}</em>}
                   </button>
@@ -645,12 +665,63 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                   >
                     Retry Selected
                   </button>
+                  {bridgeProviders.filter(provider => provider !== selectedJob.provider).map(provider => {
+                    const canFallback = canRetryQueueJob(selectedJob) && providerCanRunJob(provider, selectedJob.mediaType);
+                    return (
+                      <button
+                        key={provider}
+                        className="btn-secondary"
+                        onClick={() => void runQueueAction(`fallback-${selectedJob.id}-${provider}`, async () => {
+                          await fallbackGenerationJob(selectedJob.id, provider);
+                          return `Queued ${selectedJob.id} with ${provider} fallback.`;
+                        })}
+                        disabled={!canFallback || actionId === `fallback-${selectedJob.id}-${provider}`}
+                        title={canFallback ? `Retry with ${provider}` : `${provider} has no active capable worker`}
+                      >
+                        Fallback {provider}
+                      </button>
+                    );
+                  })}
+                  {selectedJob.status === 'completed' && selectedJob.mediaType === 'video' && selectedJob.resultUrl && (
+                    <button
+                      className="btn-secondary"
+                      onClick={() => void runQueueAction(`extend-${selectedJob.id}`, async () => {
+                        const extendProvider = selectedJob.provider === 'meta' ? 'meta' : 'meta';
+                        await createExtendVideoJob(
+                          selectedJob.id,
+                          extendProvider,
+                          extendPrompts[selectedJob.id] || ''
+                        );
+                        return `Queued Meta Extend Video child job for ${selectedJob.id}.`;
+                      })}
+                      disabled={!providerCanRunJob('meta', 'video', true) || actionId === `extend-${selectedJob.id}`}
+                      title={providerCanRunJob('meta', 'video', true)
+                        ? 'Create an Extend Video child job'
+                        : 'No active Meta worker currently reports Extend Video support'}
+                    >
+                      Extend Video
+                    </button>
+                  )}
                   {selectedJob.resultUrl && (
                     <a href={resolveBackendMediaUrl(selectedJob.resultUrl)} target="_blank" rel="noreferrer">
                       Open Result
                     </a>
                   )}
                 </div>
+                {selectedJob.status === 'completed' && selectedJob.mediaType === 'video' && selectedJob.resultUrl && (
+                  <label className="bridge-job-extend-prompt">
+                    Continuation Prompt
+                    <input
+                      type="text"
+                      value={extendPrompts[selectedJob.id] || ''}
+                      onChange={event => setExtendPrompts(previous => ({
+                        ...previous,
+                        [selectedJob.id]: event.target.value,
+                      }))}
+                      placeholder="Optional note for Meta Extend"
+                    />
+                  </label>
+                )}
                 <div className="bridge-job-detail-grid">
                   <div><span>Workflow</span><strong>{queueFlowLabel(selectedJob)}</strong></div>
                   <div><span>Provider</span><strong>{selectedJob.provider}</strong></div>
@@ -658,6 +729,8 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                   <div><span>Worker</span><strong>{selectedWorker ? workerDisplayName(selectedWorker) : queueWorkerId(selectedJob) || '-'}</strong></div>
                   <div><span>Result</span><strong>{queueResultLabel(selectedJob)}</strong></div>
                   <div><span>Attempt</span><strong>{selectedJob.metadata.runAttempt || '-'}</strong></div>
+                  <div><span>Job Type</span><strong>{jobTypeLabel(selectedJob)}</strong></div>
+                  <div><span>Fallback</span><strong>{selectedJob.metadata.fallbackHistory || '-'}</strong></div>
                 </div>
                 {selectedJob.error && <div className="bridge-worker-error">{selectedJob.error}</div>}
                 <div className="bridge-job-prompt">

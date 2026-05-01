@@ -31,7 +31,7 @@ The goal is to make generation more reliable, observable, recoverable, and scala
 - [ ] Feature 8: Per-Provider Adapter Tests.
 - [ ] Feature 9: Variant Capture Upgrade.
 - [ ] Feature 10: Rate Limit / Cooldown Brain.
-- [ ] Feature 11: Provider Fallback.
+- [x] Feature 11: Provider Fallback.
 - [ ] Feature 12: Extension Version Handshake.
 - [ ] Feature 13: Multi-account extension workers.
 - [ ] Feature 14: Meta Extend Video for Shorts.
@@ -303,13 +303,13 @@ Manual tests after Phase 14:
 
 ## Phase 15: Provider Fallback
 
-- [ ] Add capability-aware fallback routing between providers.
-- [ ] Allow retrying a failed job with another provider when supported.
-- [ ] Preserve prompt, negative prompt, aspect ratio, style, asset metadata, and project link.
-- [ ] Add user setting for manual fallback approval.
+- [x] Add capability-aware fallback routing between providers.
+- [x] Allow retrying a failed job with another provider when supported.
+- [x] Preserve prompt, negative prompt, aspect ratio, style, asset metadata, and project link.
+- [x] Add user setting for manual fallback approval.
 - [ ] Add optional automatic fallback setting.
-- [ ] Record fallback decision in job history.
-- [ ] Keep provider-specific results clearly labeled.
+- [x] Record fallback decision in job history.
+- [x] Keep provider-specific results clearly labeled.
 
 Manual tests after Phase 15:
 
@@ -320,17 +320,17 @@ Manual tests after Phase 15:
 
 ## Phase 16: Meta Extend Video For Shorts
 
-- [ ] Add bridge job type `extend_video`.
-- [ ] Add source video reference for extension jobs.
-- [ ] Detect Meta Extend Video control on generated video cards.
-- [ ] Add optional continuation prompt field.
-- [ ] Trigger Extend only for selected video results.
-- [ ] Capture extended result as a child result of the base video.
-- [ ] Store base duration, extended duration, provider metadata, and source job ID.
-- [ ] Add `Extend Selected Video` button in app media/variant UI.
+- [x] Add bridge job type `extend_video`.
+- [x] Add source video reference for extension jobs.
+- [x] Detect Meta Extend Video control on generated video cards.
+- [x] Add optional continuation prompt field.
+- [x] Trigger Extend only for selected video results.
+- [x] Capture extended result as a child result of the base video.
+- [x] Store base duration, extended duration, provider metadata, and source job ID.
+- [x] Add `Extend Selected Video` button in app media/variant UI.
 - [ ] Add Shorts shot builder view: base shot, extended shot, status, duration, and selected final clip.
-- [ ] Show unsupported state when the account does not expose Meta Extend.
-- [ ] Prevent Extend jobs from entering image-generation or asset-generation queues.
+- [x] Show unsupported state when the account does not expose Meta Extend.
+- [x] Prevent Extend jobs from entering image-generation or asset-generation queues.
 
 Manual tests after Phase 16:
 
@@ -427,7 +427,7 @@ Manual tests after Phase 18:
 - [ ] Implement Phase 12 provider adapter tests.
 - [ ] Implement Phase 13 variant capture upgrade.
 - [ ] Implement Phase 14 rate limit and cooldown brain.
-- [ ] Implement Phase 15 provider fallback.
+- [x] Implement Phase 15 provider fallback.
 - [ ] Implement Phase 16 Meta Extend Video for Shorts.
 - [x] Implement Phase 17 reliability, privacy, and documentation.
 - [ ] Complete Phase 18 end-to-end validation.

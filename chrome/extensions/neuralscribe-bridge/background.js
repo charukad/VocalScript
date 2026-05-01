@@ -557,7 +557,7 @@ async function claimAndRunNextJob() {
     const result = await adapter.run(job, settings);
     if (runToken !== jobRunToken) {
       updateStatus({ jobMessage: `Ignored stale provider result for ${formatJobLabel(job)}` });
-      return { delayMs: Math.max(recovery.delayMs, settings.providerDelayMs, settings.claimIntervalMs) };
+      return { delayMs: Math.max(settings.providerDelayMs, settings.claimIntervalMs) };
     }
     if (result.status === "manual_action_required") {
       await updateJobStatus(settings, job.id, "manual_action_required", result.message, result.metadata);
@@ -576,7 +576,7 @@ async function claimAndRunNextJob() {
     await completeJob(settings, job.id, result.mediaUrl, result.mediaType, result.metadata, result.mediaVariants);
     await markProviderDelay(settings, { resetFailures: true });
     updateStatus({ jobMessage: `Completed ${formatJobLabel(job)}`, cooldownUntil: await getProviderCooldownUntil(), lastError: null });
-    return { delayMs: Math.max(recovery.delayMs, settings.providerDelayMs, settings.claimIntervalMs) };
+    return { delayMs: Math.max(settings.providerDelayMs, settings.claimIntervalMs) };
   } catch (error) {
     if (runToken !== jobRunToken) {
       updateStatus({ jobMessage: `Ignored stale provider error for ${formatJobLabel(job)}` });
@@ -768,6 +768,9 @@ async function responseText(response) {
 }
 
 async function runMetaJob(job, settings) {
+  if (job.metadata?.jobType === "extend_video") {
+    return runMetaExtendVideoJob(job, settings);
+  }
   await reportDebugEvent("provider_tab_opening", `Opening Meta for ${formatJobLabel(job)}`, {
     provider: "meta",
     jobId: job.id,
@@ -801,6 +804,43 @@ async function runMetaJob(job, settings) {
     provider: "meta",
     jobId: job.id,
     metadata: {
+      variantCount: String(response.result?.mediaVariants?.length || 0),
+      providerPageUrl: response.result?.metadata?.providerPageUrl || "",
+    },
+  });
+  return response.result;
+}
+
+async function runMetaExtendVideoJob(job, settings) {
+  await reportDebugEvent("extend_video_started", `Opening Meta Extend for ${formatJobLabel(job)}`, {
+    provider: "meta",
+    jobId: job.id,
+    metadata: {
+      sourceJobId: job.metadata?.sourceJobId || "",
+      sourceMediaUrl: job.metadata?.sourceMediaUrl || "",
+      continuationPromptLength: String((job.metadata?.continuationPrompt || "").length),
+    },
+  });
+  const tab = await findOrOpenProviderTab(settings.metaUrl, "*://*.meta.ai/*");
+  lastProviderTabId = tab.id || null;
+  await waitForTabReady(tab.id);
+  await ensureMetaContentScript(tab.id);
+  const response = await sendMetaRunJobMessage(tab.id, {
+    type: "provider.meta.extendVideo",
+    job,
+    options: {
+      timeoutMs: Math.max(settings.jobTimeoutMs, 240000),
+      httpBaseUrl: settings.httpBaseUrl,
+    },
+  });
+  if (!response?.ok) {
+    throw new Error(response?.error || "Meta Extend Video adapter failed");
+  }
+  await reportDebugEvent("extend_video_completed", "Meta Extend Video returned a result", {
+    provider: "meta",
+    jobId: job.id,
+    metadata: {
+      sourceJobId: job.metadata?.sourceJobId || "",
       variantCount: String(response.result?.mediaVariants?.length || 0),
       providerPageUrl: response.result?.metadata?.providerPageUrl || "",
     },

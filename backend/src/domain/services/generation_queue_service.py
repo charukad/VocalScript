@@ -338,6 +338,113 @@ class GenerationQueueService:
             metadata=metadata,
         )
 
+    def fallback_job(
+        self,
+        job_id: str,
+        provider: ProviderName,
+        require_manual_approval: bool = True,
+        metadata: Optional[Dict[str, str]] = None,
+    ) -> Optional[GenerationJob]:
+        self._refresh_from_store()
+        job = self._jobs.get(job_id)
+        if not job:
+            return None
+        if job.provider == provider:
+            return job
+        if require_manual_approval and job.status not in ("failed", "canceled", "manual_action_required"):
+            raise ValueError("Provider fallback is only available for failed, canceled, or manual-action jobs")
+
+        next_metadata = self._retry_metadata(job.metadata)
+        fallback_entry = f"{job.provider}->{provider}@{_utc_now_iso()}"
+        previous_history = next_metadata.get("fallbackHistory", "")
+        next_metadata.update(
+            {
+                "fallbackFromProvider": job.provider,
+                "fallbackProvider": provider,
+                "fallbackAt": _utc_now_iso(),
+                "fallbackRequiresManualApproval": str(bool(require_manual_approval)).lower(),
+                "fallbackHistory": " | ".join([entry for entry in (previous_history, fallback_entry) if entry]),
+                "retryMode": "provider_fallback",
+            }
+        )
+        if metadata:
+            next_metadata.update(metadata)
+        return self._replace_job(
+            job_id,
+            provider=provider,
+            status="queued",
+            error=None,
+            result_url=None,
+            result_variants=[],
+            local_path=None,
+            metadata=next_metadata,
+        )
+
+    def create_extend_video_job(
+        self,
+        source_job_id: str,
+        provider: ProviderName = "meta",
+        continuation_prompt: str = "",
+        media_url: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
+    ) -> Optional[GenerationJob]:
+        self._refresh_from_store()
+        source_job = self._jobs.get(source_job_id)
+        if not source_job:
+            return None
+
+        source_media_url = media_url or source_job.metadata.get("selectedVariantUrl") or source_job.result_url
+        if not source_media_url:
+            raise ValueError("The source job does not have a selected video result to extend")
+        if source_job.media_type != "video":
+            raise ValueError("Only video generation jobs can be extended")
+
+        job_id = f"job-{uuid.uuid4().hex[:12]}"
+        batch_id = f"extend-{uuid.uuid4().hex[:12]}"
+        scene_start = self._metadata_float(source_job.metadata.get("sceneEnd"), 0.0)
+        scene_end = scene_start + 10.0
+        prompt = continuation_prompt.strip() or source_job.prompt
+        extend_metadata = {
+            "batchId": batch_id,
+            **({"projectId": source_job.project_id} if source_job.project_id else {}),
+            "projectName": source_job.metadata.get("projectName", ""),
+            "aspectRatio": source_job.metadata.get("aspectRatio", "16:9"),
+            "sceneStart": str(scene_start),
+            "sceneEnd": str(scene_end),
+            "sceneStyle": source_job.metadata.get("sceneStyle", ""),
+            "sceneCamera": "meta extend video",
+            "sceneTranscript": source_job.metadata.get("sceneTranscript", ""),
+            "flow": source_job.metadata.get("flow", "auto_generate"),
+            "jobType": "extend_video",
+            "sourceJobId": source_job.id,
+            "sourceBatchId": source_job.batch_id,
+            "sourceSceneId": source_job.scene_id,
+            "sourceProvider": source_job.provider,
+            "sourceMediaUrl": source_media_url,
+            "baseDuration": source_job.metadata.get("duration", ""),
+            "extendedDurationTarget": "10",
+            "continuationPrompt": continuation_prompt.strip(),
+        }
+        if metadata:
+            extend_metadata.update(metadata)
+
+        job = GenerationJob(
+            id=job_id,
+            batchId=batch_id,
+            projectId=source_job.project_id,
+            sceneId=f"{source_job.scene_id}-extend",
+            provider=provider,
+            mediaType="video",
+            prompt=prompt,
+            negativePrompt=source_job.negative_prompt,
+            status="queued",
+            metadata=extend_metadata,
+        )
+        self._jobs[job_id] = job
+        self._job_order.append(job_id)
+        self._save_state()
+        return job
+
     def update_status(
         self,
         job_id: str,
@@ -646,8 +753,6 @@ class GenerationQueueService:
         if not self.store:
             return
         stored_jobs, stored_order, paused_batches = self.store.load_generation_state()
-        if not stored_jobs:
-            return
         self._jobs = {job.id: job for job in stored_jobs}
         self._job_order = [job_id for job_id in stored_order if job_id in self._jobs]
         missing_ids = [job.id for job in stored_jobs if job.id not in self._job_order]

@@ -796,6 +796,47 @@ export const retryGenerationJob = async (
   return response.json();
 };
 
+export const fallbackGenerationJob = async (
+  jobId: string,
+  provider: ProviderName,
+  signal?: AbortSignal
+): Promise<GenerationJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs/${jobId}/fallback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, requireManualApproval: true }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not retry generation job with another provider'));
+  }
+
+  return response.json();
+};
+
+export const createExtendVideoJob = async (
+  jobId: string,
+  provider: ProviderName,
+  continuationPrompt = '',
+  signal?: AbortSignal
+): Promise<GenerationJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs/${jobId}/extend`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, continuationPrompt }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not create Meta Extend Video job'));
+  }
+
+  return response.json();
+};
+
 export const autoRetryGenerationJob = async (
   jobId: string,
   maxAttempts?: number,
