@@ -1,5 +1,6 @@
 import { useEditorStore } from '../../store/editorStore';
 import type { KeyframeProperty } from '../../types';
+import { AutoAnimatePanel } from './AutoAnimatePanel';
 import { AutoGeneratePanel } from './AutoGeneratePanel';
 
 type KeyframeMeta = {
@@ -120,6 +121,7 @@ export const Inspector = () => {
         )}
 
         <AutoGeneratePanel />
+        <AutoAnimatePanel />
 
         {/* Clip Properties */}
         {selectedClip && (

@@ -98,6 +98,23 @@ export type TimelineClip = {
     error?: string | null;
     metadata?: Record<string, string>;
   };
+  animation?: {
+    planId: string;
+    sceneId: string;
+    layerId: string;
+    assetNeedId?: string | null;
+    assetType?: AnimationAssetType | null;
+    source: 'auto_animate';
+    motionPreset?: AnimationMotionPreset;
+    layoutTemplate?: AnimationLayoutTemplate;
+    captionTemplate?: AnimationCaptionTemplate;
+    characterPose?: AnimationCharacterPose;
+    expression?: AnimationExpression;
+    x?: number;
+    y?: number;
+    order?: number;
+    note?: string;
+  };
 };
 
 export type ExportSettings = {
@@ -168,6 +185,144 @@ export type StoryboardSettings = {
   autoRetryFailedScenes: boolean;
   autoRetryMaxAttempts: number;
   autoRetryRewriteAfter: number;
+};
+
+export type AnimationAssetType = 'character' | 'background' | 'prop' | 'icon' | 'overlay' | 'text';
+export type AnimationAssetStatus = 'available' | 'missing' | 'queued' | 'generated' | 'failed';
+export type AnimationReuseDecision = 'reuse' | 'generate' | 'optional';
+export type AnimationSceneStatus = 'draft' | 'approved' | 'queued' | 'completed' | 'failed';
+export type AnimationLayerType = 'background' | 'character' | 'prop' | 'icon' | 'overlay' | 'text' | 'caption' | 'placeholder';
+export type AnimationCharacterPose = 'neutral' | 'talking' | 'pointing' | 'thinking' | 'happy' | 'concerned';
+export type AnimationExpression = 'neutral' | 'smile' | 'focus' | 'surprise' | 'concern' | 'excited';
+export type AnimationMouthCue = 'closed' | 'open' | 'wide' | 'smile';
+export type AnimationLayoutTemplate = 'auto' | 'explainer_split' | 'center_focus' | 'lower_third' | 'portrait_stack' | 'square_card';
+export type AnimationCaptionTemplate = 'clean_subtitle' | 'keyword_pop' | 'karaoke_highlight' | 'headline_burst';
+export type AnimationMotionPreset = 'none' | 'fade' | 'slide' | 'pop' | 'zoom' | 'pan' | 'float' | 'bounce' | 'caption_highlight' | 'push_in' | 'pull_out' | 'parallax';
+
+export type AnimationAssetMemoryItem = {
+  id: string;
+  name: string;
+  assetType: AnimationAssetType;
+  mediaAssetId?: string | null;
+  sourceUrl?: string | null;
+  localPath?: string | null;
+  prompt: string;
+  style: string;
+  tags: string[];
+  status: AnimationAssetStatus;
+  metadata: Record<string, string>;
+};
+
+export type AnimationAssetNeed = {
+  id: string;
+  name: string;
+  assetType: AnimationAssetType;
+  description: string;
+  prompt: string;
+  negativePrompt: string;
+  style: string;
+  tags: string[];
+  reuseDecision: AnimationReuseDecision;
+  status: AnimationAssetStatus;
+  matchedAssetId?: string | null;
+  optional: boolean;
+};
+
+export type AnimationMotion = {
+  preset: AnimationMotionPreset;
+  direction: string;
+  intensity: StoryboardMotionIntensity;
+  note: string;
+};
+
+export type AnimationLayer = {
+  id: string;
+  sceneId: string;
+  layerType: AnimationLayerType;
+  assetNeedId?: string | null;
+  text: string;
+  start: number;
+  end: number;
+  order: number;
+  x: number;
+  y: number;
+  scale: number;
+  opacity: number;
+  motion: AnimationMotion;
+};
+
+export type AnimationCharacterCue = {
+  assetNeedId?: string | null;
+  poseAssetNeedId?: string | null;
+  pose: AnimationCharacterPose;
+  expression: AnimationExpression;
+  mouthCue: AnimationMouthCue;
+  note: string;
+};
+
+export type AnimationLayoutCue = {
+  template: AnimationLayoutTemplate;
+  safeArea: Record<string, number>;
+  note: string;
+};
+
+export type AnimationCaptionCue = {
+  template: AnimationCaptionTemplate;
+  keywords: string[];
+  note: string;
+};
+
+export type AnimationCameraCue = {
+  preset: AnimationMotionPreset;
+  direction: string;
+  note: string;
+};
+
+export type AnimationSceneCue = {
+  character: AnimationCharacterCue;
+  layout: AnimationLayoutCue;
+  caption: AnimationCaptionCue;
+  camera: AnimationCameraCue;
+  transcriptTriggers: string[];
+};
+
+export type AnimationScene = {
+  id: string;
+  start: number;
+  end: number;
+  transcript: string;
+  summary: string;
+  direction: string;
+  status: AnimationSceneStatus;
+  layers: AnimationLayer[];
+  cue?: AnimationSceneCue;
+};
+
+export type AnimationPlan = {
+  id: string;
+  style: string;
+  aspectRatio: GenerationAspectRatio;
+  scenes: AnimationScene[];
+  assetNeeds: AnimationAssetNeed[];
+  warnings: string[];
+  usedLlmMode: string;
+  transcript: string;
+  segments: TranscriptSlice[];
+  duration: number;
+  rendererRecommendation?: string;
+  rendererNotes?: string[];
+};
+
+export type AnimationSettings = {
+  sourceMediaId: string | null;
+  provider: ProviderName;
+  aspectRatio: GenerationAspectRatio;
+  sceneDensity: StoryboardSceneDensity;
+  motionIntensity: StoryboardMotionIntensity;
+  promptDetail: StoryboardPromptDetail;
+  style: string;
+  layoutTemplate: AnimationLayoutTemplate;
+  captionTemplate: AnimationCaptionTemplate;
 };
 
 export type GenerationMediaVariant = {

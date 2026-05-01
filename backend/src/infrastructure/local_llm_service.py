@@ -1,14 +1,17 @@
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from typing import Any, Callable, Dict, Optional
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from backend.src.config import LocalLLMSettings
+from backend.src.domain.models.animation import AnimationPlanRequest
 from backend.src.domain.models.generation import GenerationJob, StoryboardRequest
 
 logger = logging.getLogger(__name__)
+ANIMATION_LLM_TIMEOUT_SECONDS = 10
 
 
 class LocalLLMService:
@@ -29,6 +32,48 @@ class LocalLLMService:
             return self._generate_with_openai_compatible_server(request)
         logger.warning("Unknown local LLM mode '%s'. Falling back to rule-based storyboard.", mode)
         return None
+
+    def generate_animation_plan_json(self, request: AnimationPlanRequest) -> Optional[str]:
+        mode = self.settings.mode.lower().strip()
+        if mode in ("", "rule_based", "off", "none"):
+            return None
+        prompt = self._build_animation_prompt(request)
+
+        def request_llm() -> Optional[str]:
+            if mode == "ollama":
+                payload = {
+                    "model": self.settings.ollama_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                    "options": {"temperature": 0.2},
+                }
+                data = self._post_json(f"{self.settings.ollama_url.rstrip('/')}/api/generate", payload)
+                response = data.get("response")
+                return response if isinstance(response, str) else None
+            if mode == "openrouter":
+                return self._generate_animation_with_openrouter(prompt)
+            if mode == "gemini":
+                return self._generate_animation_with_gemini(prompt)
+            if mode in ("lm_studio", "openai_compatible", "local_server"):
+                payload = {
+                    "model": self.settings.openai_compatible_model,
+                    "temperature": 0.2,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {"role": "system", "content": "Return strict JSON only. No prose, no markdown."},
+                        {"role": "user", "content": prompt},
+                    ],
+                }
+                data = self._post_json(f"{self.settings.openai_compatible_url.rstrip('/')}/chat/completions", payload)
+                choices = data.get("choices")
+                if isinstance(choices, list) and choices:
+                    content = choices[0].get("message", {}).get("content")
+                    return content if isinstance(content, str) else None
+            logger.warning("Unknown local LLM mode '%s'. Falling back to rule-based animation planning.", mode)
+            return None
+
+        return self._run_animation_llm_with_timeout(mode, request_llm)
 
     def rewrite_generation_prompt(self, job: GenerationJob) -> str:
         mode = self.settings.mode.lower().strip()
@@ -172,6 +217,82 @@ class LocalLLMService:
             logger.warning("Gemini request failed: %s", exc)
             return None
 
+    def _generate_animation_with_openrouter(self, prompt: str) -> Optional[str]:
+        if not self.settings.openrouter_api_key:
+            logger.warning("OpenRouter mode is enabled but NEURALSCRIBE_OPENROUTER_API_KEY is not set.")
+            return None
+        payload: Dict[str, Any] = {
+            "model": self.settings.openrouter_model,
+            "temperature": 0.2,
+            "messages": [
+                {"role": "system", "content": "Return strict JSON only. No prose, no markdown."},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        if self.settings.openrouter_reasoning:
+            payload["reasoning"] = {"enabled": True}
+        data = self._post_json(
+            f"{self.settings.openrouter_url.rstrip('/')}/chat/completions",
+            payload,
+            api_key=self.settings.openrouter_api_key,
+            extra_headers={
+                "HTTP-Referer": self.settings.openrouter_site_url,
+                "X-Title": self.settings.openrouter_app_name,
+            },
+        )
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return None
+        content = choices[0].get("message", {}).get("content")
+        return content if isinstance(content, str) else None
+
+    def _generate_animation_with_gemini(self, prompt: str) -> Optional[str]:
+        if not self.settings.gemini_api_key:
+            logger.warning("Gemini mode is enabled but GEMINI_API_KEY is not set.")
+            return None
+        try:
+            from google import genai
+        except ImportError:
+            logger.warning("Gemini mode requires the google-genai package. Install backend requirements again.")
+            return None
+        try:
+            client = genai.Client(api_key=self.settings.gemini_api_key)
+            response = client.models.generate_content(
+                model=self.settings.gemini_model,
+                contents=prompt,
+                config={
+                    "temperature": 0.2,
+                    "response_mime_type": "application/json",
+                },
+            )
+            return response.text if isinstance(response.text, str) else None
+        except Exception as exc:
+            logger.warning("Gemini animation planning failed: %s", exc)
+            return None
+
+    def _run_animation_llm_with_timeout(
+        self,
+        mode: str,
+        request_llm: Callable[[], Optional[str]],
+    ) -> Optional[str]:
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="animation-llm")
+        future = executor.submit(request_llm)
+        try:
+            return future.result(timeout=ANIMATION_LLM_TIMEOUT_SECONDS)
+        except FutureTimeoutError:
+            future.cancel()
+            logger.warning(
+                "Animation LLM planning timed out after %ss in %s mode. Falling back to rule-based animation planning.",
+                ANIMATION_LLM_TIMEOUT_SECONDS,
+                mode,
+            )
+            return None
+        except Exception as exc:
+            logger.warning("Animation LLM planning failed in %s mode: %s", mode, exc)
+            return None
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
     def _prompt_rewrite_openrouter(self, prompt: str) -> Optional[str]:
         if not self.settings.openrouter_api_key:
             logger.warning("OpenRouter mode is enabled but NEURALSCRIBE_OPENROUTER_API_KEY is not set.")
@@ -268,6 +389,52 @@ Rules:
 - Keep scene timings inside the transcript segment timings when provided.
 - Prompts must describe visuals only. Do not ask for subtitles or readable on-screen text.
 - Style target: {request.style}
+
+Transcript:
+{transcript_context}
+""".strip()
+
+    def _build_animation_prompt(self, request: AnimationPlanRequest) -> str:
+        segments_text = "\n".join(
+            f"- {segment.start:.2f}-{segment.end:.2f}: {segment.text.strip()}"
+            for segment in request.segments
+        )
+        available_assets = "\n".join(
+            f"- {asset.id}: {asset.asset_type} / {asset.name} / tags: {', '.join(asset.tags)}"
+            for asset in request.available_assets
+        ) or "No reusable assets yet."
+        transcript_context = segments_text or request.transcript
+        return f"""
+Create an animation plan for a local timeline editor.
+
+Rules:
+- Return JSON only with top-level keys: assetNeeds, scenes, rendererRecommendation, and rendererNotes.
+- Generate as few reusable assets as possible.
+- assetNeeds must describe characters, backgrounds, props, icons, overlays, or text assets.
+- Each asset need must include id, name, assetType, description, prompt, negativePrompt, style, tags, reuseDecision, status, matchedAssetId, optional.
+- reuseDecision must be one of reuse, generate, optional.
+- status must be one of available, missing, queued, generated, failed.
+- Reuse existing assets when the available asset list is a reasonable match.
+- scenes must include id, start, end, transcript, summary, direction, layers, and cue.
+- layers must include id, sceneId, layerType, assetNeedId when visual, text when caption/text, start, end, order, x, y, scale, opacity, motion.
+- cue must include character, layout, caption, camera, and transcriptTriggers.
+- character cue: assetNeedId, poseAssetNeedId, pose, expression, mouthCue, note.
+- layout cue: template, safeArea, note. Use layout template {request.layout_template}.
+- caption cue: template, keywords, note. Use caption template {request.caption_template}.
+- camera cue: preset, direction, note.
+- motion.preset must be one of none, fade, slide, pop, zoom, pan, float, bounce, caption_highlight, push_in, pull_out, parallax.
+- Use the existing timeline/keyframe renderer; do not require generated full scene clips.
+- Do not introduce Remotion in V1; rendererNotes may describe it only as a future optional renderer candidate.
+- Aspect ratio: {request.aspect_ratio}
+- Scene density: {request.scene_density}
+- Motion intensity: {request.motion_intensity}
+- Prompt detail: {request.prompt_detail}
+- Layout template: {request.layout_template}
+- Caption template: {request.caption_template}
+- Style target: {request.style}
+
+Available reusable assets:
+{available_assets}
 
 Transcript:
 {transcript_context}

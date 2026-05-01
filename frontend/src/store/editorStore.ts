@@ -7,6 +7,13 @@ import type {
   TextData,
   ExportSettings,
   CaptionSegment,
+  AnimationAssetMemoryItem,
+  AnimationAssetNeed,
+  AnimationAssetType,
+  AnimationLayer,
+  AnimationPlan,
+  AnimationScene,
+  AnimationSettings,
   GeneratedMediaAsset,
   GenerationJob,
   KeyframeProperty,
@@ -14,10 +21,15 @@ import type {
   ProjectSummary,
   StoryboardScene,
   StoryboardSettings,
+  TranscriptSlice,
 } from '../types';
 import { getMediaDuration, generateThumbnail, generateWaveform, generateFilmstrip, extractAudioSegment } from '../lib/utils/media';
 import {
   createGenerationJobs,
+  createAnimationAssetJobs,
+  autoRetryAnimationAssetJob as autoRetryAnimationAssetJobRequest,
+  createAnimationPlanFromAudio,
+  createAnimationPlanFromTranscript,
   createProjectRecord,
   createStoryboardFromAudio,
   createStoryboardFromTranscript,
@@ -30,6 +42,7 @@ import {
   listGenerationJobs,
   loadProjectRecordFromPath,
   pauseGenerationBatch,
+  retryAnimationAssetJob as retryAnimationAssetJobRequest,
   retryGenerationJob as retryGenerationJobRequest,
   resolveBackendMediaUrl,
   resumeGenerationBatch,
@@ -71,6 +84,18 @@ const DEFAULT_STORYBOARD_SETTINGS: StoryboardSettings = {
   autoRetryFailedScenes: false,
   autoRetryMaxAttempts: 5,
   autoRetryRewriteAfter: 2,
+};
+
+const DEFAULT_ANIMATION_SETTINGS: AnimationSettings = {
+  sourceMediaId: null,
+  provider: 'meta',
+  aspectRatio: '16:9',
+  sceneDensity: 'medium',
+  motionIntensity: 'balanced',
+  promptDetail: 'balanced',
+  style: 'animated explainer',
+  layoutTemplate: 'auto',
+  captionTemplate: 'keyword_pop',
 };
 
 const DEFAULT_PROJECT_NAME = 'Untitled Project';
@@ -117,6 +142,7 @@ const cloneClips = (clips: TimelineClip[]) => clips.map(clip => ({
     resultVariants: clip.generation.resultVariants?.map(variant => ({ ...variant })),
     metadata: clip.generation.metadata ? { ...clip.generation.metadata } : undefined,
   } : undefined,
+  animation: clip.animation ? { ...clip.animation } : undefined,
 }));
 
 const cloneTracks = (tracks: TimelineTrack[]) => tracks.map(track => ({ ...track }));
@@ -373,6 +399,28 @@ export type EditorState = {
   syncGenerationBatch: (silent?: boolean) => Promise<void>;
   importGenerationVariant: (jobId: string, variantUrl?: string) => Promise<void>;
   importCompletedGenerationMedia: () => Promise<void>;
+
+  // Auto Animate Video
+  animationSettings: AnimationSettings;
+  animationPlan: AnimationPlan | null;
+  animationAssetLibrary: AnimationAssetMemoryItem[];
+  animationAssetJobs: GenerationJob[];
+  currentAnimationBatchId: string | null;
+  isGeneratingAnimationPlan: boolean;
+  isSyncingAnimationAssets: boolean;
+  animationStatus: string | null;
+  setAnimationSettings: (settings: Partial<AnimationSettings>) => void;
+  generateAnimationPlan: () => Promise<void>;
+  updateAnimationScene: (id: string, updates: Partial<AnimationScene>) => void;
+  updateAnimationAssetNeed: (id: string, updates: Partial<AnimationAssetNeed>) => void;
+  assignAnimationAssetNeed: (needId: string, memoryAssetId: string | null) => void;
+  approveAnimationPlan: () => void;
+  createAnimationMissingAssetJobs: () => Promise<void>;
+  syncAnimationAssetJobs: (silent?: boolean) => Promise<void>;
+  retryAnimationAssetJob: (jobId: string) => Promise<void>;
+  autoRetryAnimationAssetJob: (jobId: string, maxAttempts?: number) => Promise<void>;
+  selectAnimationAssetVariant: (jobId: string, variantUrl?: string) => Promise<void>;
+  buildAnimatedTimeline: () => void;
 };
 
 const buildProjectSnapshot = (state: EditorState): Record<string, unknown> => ({
@@ -390,6 +438,11 @@ const buildProjectSnapshot = (state: EditorState): Record<string, unknown> => ({
   generationJobs: state.generationJobs,
   generatedMediaAssets: collectGeneratedMediaAssetsForSnapshot(state),
   isGenerationBatchPaused: state.isGenerationBatchPaused,
+  animationSettings: state.animationSettings,
+  animationPlan: state.animationPlan,
+  animationAssetLibrary: state.animationAssetLibrary,
+  animationAssetJobs: state.animationAssetJobs,
+  currentAnimationBatchId: state.currentAnimationBatchId,
 });
 
 const persistProjectSnapshot = async (state: EditorState): Promise<ProjectSummary> => {
@@ -874,6 +927,27 @@ const generatedMetadata = (asset: GeneratedMediaAsset): NonNullable<TimelineClip
   metadata: { ...(asset.metadata ?? {}) },
 });
 
+const generatedMediaAssetFromJob = (job: GenerationJob): GeneratedMediaAsset => ({
+  jobId: job.id,
+  batchId: job.batchId,
+  projectId: job.projectId,
+  sceneId: job.sceneId,
+  provider: job.provider,
+  mediaType: job.mediaType,
+  status: job.status,
+  resultUrl: job.resultUrl,
+  resultVariants: job.resultVariants?.map(variant => ({ ...variant })) ?? [],
+  localPath: job.localPath,
+  prompt: job.prompt,
+  negativePrompt: job.negativePrompt,
+  start: 0,
+  end: 5,
+  duration: 5,
+  transcript: job.metadata.animationAssetName || job.sceneId,
+  error: job.error,
+  metadata: { ...(job.metadata ?? {}) },
+});
+
 const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<EditorState>> => {
   const saved = project.state as any;
   const tracks = Array.isArray(saved?.tracks) ? saved.tracks as TimelineTrack[] : makeDefaultTracks();
@@ -881,6 +955,9 @@ const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<
   const storyboardScenes = Array.isArray(saved?.storyboardScenes) ? saved.storyboardScenes as StoryboardScene[] : [];
   const generationJobs = Array.isArray(saved?.generationJobs) ? saved.generationJobs as GenerationJob[] : [];
   const generatedMediaAssets = Array.isArray(saved?.generatedMediaAssets) ? saved.generatedMediaAssets as GeneratedMediaAsset[] : [];
+  const animationAssetLibrary = Array.isArray(saved?.animationAssetLibrary) ? saved.animationAssetLibrary as AnimationAssetMemoryItem[] : [];
+  const animationAssetJobs = Array.isArray(saved?.animationAssetJobs) ? saved.animationAssetJobs as GenerationJob[] : [];
+  const animationPlan = saved?.animationPlan && typeof saved.animationPlan === 'object' ? saved.animationPlan as AnimationPlan : null;
   const generatedAssetsByJob = new Map(generatedMediaAssets.map(asset => [asset.jobId, asset]));
   const savedAssets = Array.isArray(saved?.assets) ? saved.assets as SerializableAsset[] : [];
   const savedClips = Array.isArray(saved?.clips) ? saved.clips as SerializableClip[] : [];
@@ -971,6 +1048,14 @@ const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<
     generationJobs,
     generatedMediaAssets,
     isGenerationBatchPaused: Boolean(saved?.isGenerationBatchPaused),
+    animationSettings: { ...DEFAULT_ANIMATION_SETTINGS, ...(saved?.animationSettings ?? {}) },
+    animationPlan,
+    animationAssetLibrary,
+    animationAssetJobs,
+    currentAnimationBatchId: saved?.currentAnimationBatchId ?? null,
+    isGeneratingAnimationPlan: false,
+    isSyncingAnimationAssets: false,
+    animationStatus: null,
     mediaUrl: null,
     srtContent: null,
     srtDownloadUrl: null,
@@ -1116,6 +1201,211 @@ const mergeSceneStatuses = (
   });
 };
 
+const animationAssetTypeFromName = (name: string): AnimationAssetType => {
+  const lower = name.toLowerCase();
+  if (/(background|backdrop|scene|room|city|landscape)/.test(lower)) return 'background';
+  if (/(character|person|avatar|host|teacher|narrator)/.test(lower)) return 'character';
+  if (/(icon|symbol|badge)/.test(lower)) return 'icon';
+  if (/(overlay|frame|texture)/.test(lower)) return 'overlay';
+  if (/(title|text|caption|label)/.test(lower)) return 'text';
+  return 'prop';
+};
+
+const animationTagsFromName = (name: string): string[] => (
+  name
+    .toLowerCase()
+    .replace(/\.[^.]+$/, '')
+    .split(/[^a-z0-9]+/)
+    .filter(token => token.length > 2)
+    .slice(0, 8)
+);
+
+const animationMemoryFromMediaAsset = (asset: MediaAsset): AnimationAssetMemoryItem | null => {
+  if (asset.type !== 'visual') return null;
+  const cleanName = asset.file.name.replace(/\.[^.]+$/, '') || asset.file.name;
+  const assetType = animationAssetTypeFromName(cleanName);
+  return {
+    id: `media:${asset.id}`,
+    name: cleanName,
+    assetType,
+    mediaAssetId: asset.id,
+    sourceUrl: asset.sourceUrl ?? null,
+    localPath: asset.localPath ?? null,
+    prompt: '',
+    style: '',
+    tags: [...new Set([assetType, asset.mediaKind, ...animationTagsFromName(cleanName)])],
+    status: 'available',
+    metadata: { source: 'media_pool' },
+  };
+};
+
+const buildAnimationAvailableAssets = (
+  state: Pick<EditorState, 'assets' | 'animationAssetLibrary'>
+): AnimationAssetMemoryItem[] => {
+  const byId = new Map<string, AnimationAssetMemoryItem>();
+  for (const item of state.animationAssetLibrary) byId.set(item.id, item);
+  for (const asset of state.assets) {
+    const memory = animationMemoryFromMediaAsset(asset);
+    if (memory && !byId.has(memory.id)) byId.set(memory.id, memory);
+  }
+  return [...byId.values()];
+};
+
+const getConfiguredAnimationSource = (
+  state: Pick<EditorState, 'assets' | 'clips' | 'selectedClipId' | 'animationSettings'>
+): StoryboardSource | null => {
+  const sources = getStoryboardSources(state);
+  const configuredSource = state.animationSettings.sourceMediaId
+    ? sources.find(source => source.id === state.animationSettings.sourceMediaId)
+    : null;
+  if (configuredSource) return configuredSource;
+  const selectedClip = getTranscriptSourceClip(state);
+  if (selectedClip) {
+    return {
+      id: `clip:${selectedClip.id}`,
+      file: selectedClip.file,
+      name: `Timeline: ${selectedClip.file.name}`,
+      kind: 'clip',
+      clip: selectedClip,
+    };
+  }
+  return sources[0] ?? null;
+};
+
+const getAnimationTimedSegments = (captions: CaptionSegment[]): TranscriptSlice[] => (
+  captions
+    .filter(caption => caption.text.trim())
+    .map(caption => ({
+      start: caption.start,
+      end: caption.end,
+      text: caption.text.trim(),
+    }))
+);
+
+const animationNeedStatusFromJob = (job: GenerationJob): AnimationAssetNeed['status'] => {
+  if (job.status === 'completed') return 'generated';
+  if (job.status === 'failed' || job.status === 'manual_action_required' || job.status === 'canceled') return 'failed';
+  return 'queued';
+};
+
+const mergeAnimationJobsIntoPlan = (
+  plan: AnimationPlan | null,
+  jobs: GenerationJob[],
+  library: AnimationAssetMemoryItem[],
+): AnimationPlan | null => {
+  if (!plan) return null;
+  const jobsByNeed = new Map(jobs.map(job => [job.metadata.animationAssetId || job.sceneId, job]));
+  const libraryByNeed = new Map(
+    library
+      .map(item => [item.metadata.animationAssetId, item] as const)
+      .filter((entry): entry is [string, AnimationAssetMemoryItem] => Boolean(entry[0]))
+  );
+  return {
+    ...plan,
+    assetNeeds: plan.assetNeeds.map(need => {
+      const job = jobsByNeed.get(need.id);
+      if (job && job.status !== 'completed') {
+        return {
+          ...need,
+          reuseDecision: 'generate',
+          status: animationNeedStatusFromJob(job),
+          matchedAssetId: null,
+        };
+      }
+      const generatedAsset = libraryByNeed.get(need.id);
+      if (generatedAsset) {
+        return {
+          ...need,
+          reuseDecision: 'reuse',
+          status: 'generated',
+          matchedAssetId: generatedAsset.id,
+        };
+      }
+      if (!job) return need;
+      return {
+        ...need,
+        status: animationNeedStatusFromJob(job),
+      };
+    }),
+  };
+};
+
+const keyframesForAnimationMotion = (
+  layer: AnimationLayer,
+  duration: number,
+): TimelineClip['keyframes'] => {
+  const safeDuration = Math.max(0.1, duration);
+  const keyframes = [];
+  if (layer.motion.preset === 'fade') {
+    keyframes.push(
+      { id: makeId(), property: 'opacity' as const, time: 0, value: 0, easing: 'linear' as const },
+      { id: makeId(), property: 'opacity' as const, time: Math.min(0.6, safeDuration), value: layer.opacity, easing: 'linear' as const },
+    );
+  }
+  if (['pop', 'bounce', 'caption_highlight'].includes(layer.motion.preset)) {
+    keyframes.push(
+      { id: makeId(), property: 'scale' as const, time: 0, value: Math.max(10, layer.scale * 0.82), easing: 'linear' as const },
+      { id: makeId(), property: 'scale' as const, time: Math.min(0.35, safeDuration), value: layer.motion.preset === 'bounce' ? layer.scale * 1.12 : layer.scale, easing: 'linear' as const },
+      { id: makeId(), property: 'scale' as const, time: Math.min(0.7, safeDuration), value: layer.scale, easing: 'linear' as const },
+    );
+  }
+  if (['zoom', 'pan', 'float', 'push_in', 'parallax'].includes(layer.motion.preset)) {
+    keyframes.push(
+      { id: makeId(), property: 'scale' as const, time: 0, value: layer.scale, easing: 'linear' as const },
+      { id: makeId(), property: 'scale' as const, time: safeDuration, value: layer.scale * (layer.motion.preset === 'parallax' ? 1.07 : 1.05), easing: 'linear' as const },
+    );
+  }
+  if (layer.motion.preset === 'pull_out') {
+    keyframes.push(
+      { id: makeId(), property: 'scale' as const, time: 0, value: layer.scale * 1.07, easing: 'linear' as const },
+      { id: makeId(), property: 'scale' as const, time: safeDuration, value: layer.scale, easing: 'linear' as const },
+    );
+  }
+  return keyframes.length > 0 ? keyframes : undefined;
+};
+
+const kineticCaptionContent = (scene: AnimationScene, fallback: string): string => {
+  const template = scene.cue?.caption.template ?? 'clean_subtitle';
+  const text = fallback || scene.summary || scene.transcript;
+  if (template === 'headline_burst') {
+    return (scene.summary || text).toUpperCase();
+  }
+  if (template !== 'keyword_pop') {
+    return text;
+  }
+  const keyword = scene.cue?.caption.keywords?.[0];
+  if (!keyword) return text;
+  const pattern = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+  return text.replace(pattern, match => match.toUpperCase());
+};
+
+const textDataForAnimationLayer = (
+  scene: AnimationScene,
+  layer: AnimationLayer,
+  content: string,
+  visualLayer: boolean,
+): TextData => {
+  const template = scene.cue?.caption.template ?? 'clean_subtitle';
+  const isCaption = layer.layerType === 'caption';
+  const baseFontSize = visualLayer ? 34 : isCaption ? 38 : 34;
+  const templateStyle: Partial<TextData> = isCaption && template === 'headline_burst'
+    ? { fontSize: 46, bold: true, y: Math.min(layer.y, 24), bgOpacity: 0.18 }
+    : isCaption && template === 'karaoke_highlight'
+      ? { fontSize: 38, bold: true, bgOpacity: 0.52 }
+      : isCaption && template === 'keyword_pop'
+        ? { fontSize: 42, bold: true, bgOpacity: 0.42 }
+        : {};
+  return {
+    ...DEFAULT_TEXT_DATA,
+    content,
+    fontSize: templateStyle.fontSize ?? baseFontSize,
+    bold: templateStyle.bold ?? false,
+    x: layer.x,
+    y: templateStyle.y ?? layer.y,
+    bgOpacity: templateStyle.bgOpacity ?? (isCaption ? 0.45 : 0.35),
+  };
+};
+
 const rememberedProject = loadProjectPointer();
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -1175,6 +1465,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         generationJobs: [],
         generatedMediaAssets: [],
         isGenerationBatchPaused: false,
+        animationSettings: DEFAULT_ANIMATION_SETTINGS,
+        animationPlan: null,
+        animationAssetLibrary: [],
+        animationAssetJobs: [],
+        currentAnimationBatchId: null,
+        animationStatus: null,
       } as Partial<EditorState>);
       return project;
     } catch (err: any) {
@@ -1264,6 +1560,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       generatedMediaAssets: [],
       isGenerationBatchPaused: false,
       storyboardStatus: null,
+      animationSettings: DEFAULT_ANIMATION_SETTINGS,
+      animationPlan: null,
+      animationAssetLibrary: [],
+      animationAssetJobs: [],
+      currentAnimationBatchId: null,
+      isGeneratingAnimationPlan: false,
+      isSyncingAnimationAssets: false,
+      animationStatus: null,
     } as Partial<EditorState>);
   },
   saveProject: async () => {
@@ -1763,6 +2067,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   isSyncingGeneration: false,
   isGenerationBatchPaused: false,
   storyboardStatus: null,
+  animationSettings: DEFAULT_ANIMATION_SETTINGS,
+  animationPlan: null,
+  animationAssetLibrary: [],
+  animationAssetJobs: [],
+  currentAnimationBatchId: null,
+  isGeneratingAnimationPlan: false,
+  isSyncingAnimationAssets: false,
+  animationStatus: null,
   exportSequence: async () => {
     const abortController = new AbortController();
     set({ isProcessing: true, exportStatus: 'Preparing export...', showExportModal: false, exportAbortController: abortController } as Partial<EditorState>);
@@ -2686,5 +2998,623 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   importCompletedGenerationMedia: async () => {
     await get().syncGenerationBatch(false);
-  }
+  },
+
+  setAnimationSettings: (settings) => {
+    set(state => ({
+      animationSettings: { ...state.animationSettings, ...settings },
+    }));
+  },
+
+  generateAnimationPlan: async () => {
+    const state = get();
+    const settings = state.animationSettings;
+    const source = getConfiguredAnimationSource(state);
+    const timedSegments = getAnimationTimedSegments(state.captions);
+    const transcript = timedSegments.map(segment => segment.text).join(' ').trim();
+
+    if (!transcript && !source) {
+      alert('Generate a transcript or select an audio/video clip before planning animation.');
+      return;
+    }
+
+    set({
+      isGeneratingAnimationPlan: true,
+      animationStatus: transcript ? 'Planning animation from captions...' : `Transcribing and planning ${source?.file.name}...`,
+    } as Partial<EditorState>);
+
+    try {
+      const availableAssets = buildAnimationAvailableAssets(state);
+      const options = {
+        provider: settings.provider,
+        aspectRatio: settings.aspectRatio,
+        sceneDensity: settings.sceneDensity,
+        motionIntensity: settings.motionIntensity,
+        promptDetail: settings.promptDetail,
+        style: settings.style,
+        layoutTemplate: settings.layoutTemplate,
+        captionTemplate: settings.captionTemplate,
+        availableAssets,
+      };
+      const plan = transcript
+        ? await createAnimationPlanFromTranscript(transcript, timedSegments, options)
+        : await createAnimationPlanFromAudio(source!.file, options);
+
+      set({
+        animationPlan: plan,
+        animationAssetLibrary: availableAssets.filter(asset => state.animationAssetLibrary.some(item => item.id === asset.id)),
+        animationAssetJobs: [],
+        currentAnimationBatchId: null,
+        animationSettings: {
+          ...settings,
+          sourceMediaId: source?.id ?? settings.sourceMediaId,
+        },
+        animationStatus: `Animation plan ready: ${plan.scenes.length} scenes, ${plan.assetNeeds.length} reusable assets (${plan.usedLlmMode}).`,
+      });
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Animation planning failed');
+      set({ animationStatus: 'Animation planning failed.' });
+    } finally {
+      set({ isGeneratingAnimationPlan: false } as Partial<EditorState>);
+    }
+  },
+
+  updateAnimationScene: (id, updates) => {
+    set(state => {
+      if (!state.animationPlan) return state;
+      return {
+        animationPlan: {
+          ...state.animationPlan,
+          scenes: state.animationPlan.scenes.map(scene => {
+            if (scene.id !== id) return scene;
+            const next = { ...scene, ...updates };
+            next.start = Math.max(0, Number(next.start) || 0);
+            next.end = Math.max(next.start + 0.1, Number(next.end) || next.start + 0.1);
+            return next;
+          }),
+        },
+        animationStatus: 'Animation scene edited.',
+      };
+    });
+  },
+
+  updateAnimationAssetNeed: (id, updates) => {
+    set(state => {
+      if (!state.animationPlan) return state;
+      return {
+        animationPlan: {
+          ...state.animationPlan,
+          assetNeeds: state.animationPlan.assetNeeds.map(need =>
+            need.id === id ? { ...need, ...updates } : need
+          ),
+        },
+        animationStatus: 'Animation asset edited.',
+      };
+    });
+  },
+
+  assignAnimationAssetNeed: (needId, memoryAssetId) => {
+    set(state => {
+      if (!state.animationPlan) return state;
+      const availableAssets = buildAnimationAvailableAssets(state);
+      const assigned = memoryAssetId ? availableAssets.find(asset => asset.id === memoryAssetId) : null;
+      const nextLibrary = assigned && !state.animationAssetLibrary.some(asset => asset.id === assigned.id)
+        ? [...state.animationAssetLibrary, assigned]
+        : state.animationAssetLibrary;
+      return {
+        animationAssetLibrary: nextLibrary,
+        animationPlan: {
+          ...state.animationPlan,
+          assetNeeds: state.animationPlan.assetNeeds.map(need => {
+            if (need.id !== needId) return need;
+            if (!assigned) {
+              return {
+                ...need,
+                reuseDecision: need.optional ? 'optional' : 'generate',
+                status: 'missing',
+                matchedAssetId: null,
+              };
+            }
+            return {
+              ...need,
+              reuseDecision: 'reuse',
+              status: assigned.status === 'generated' ? 'generated' : 'available',
+              matchedAssetId: assigned.id,
+            };
+          }),
+        },
+        animationStatus: assigned ? `Assigned ${assigned.name}.` : 'Asset assignment cleared.',
+      };
+    });
+  },
+
+  approveAnimationPlan: () => {
+    set(state => {
+      if (!state.animationPlan) return state;
+      return {
+        animationPlan: {
+          ...state.animationPlan,
+          scenes: state.animationPlan.scenes.map(scene => ({ ...scene, status: 'approved' })),
+        },
+        animationStatus: 'Animation plan approved.',
+      };
+    });
+  },
+
+  createAnimationMissingAssetJobs: async () => {
+    const state = get();
+    if (!state.currentProject) {
+      alert('Create or load a project before generating animation assets.');
+      return;
+    }
+    if (!state.animationPlan) {
+      alert('Create an animation plan first.');
+      return;
+    }
+    const missingNeeds = state.animationPlan.assetNeeds.filter(need =>
+      need.reuseDecision === 'generate' && ['missing', 'failed'].includes(need.status)
+    );
+    if (missingNeeds.length === 0) {
+      set({ animationStatus: 'No missing animation assets need generation.' });
+      return;
+    }
+
+    set({ animationStatus: 'Saving project and queuing missing animation assets...' });
+    try {
+      const persisted = await persistProjectAssets(state.currentProject.id, state.assets);
+      if (persisted.changed) set({ assets: persisted.assets });
+      const project = await persistProjectSnapshot({ ...get(), assets: persisted.assets });
+      set({
+        currentProject: project,
+        projectName: project.name,
+        projectStatus: `Project folder ready: ${project.generatedMediaPath}`,
+      });
+      const response = await createAnimationAssetJobs(
+        missingNeeds,
+        state.animationSettings.provider,
+        state.animationSettings.aspectRatio,
+        project.id,
+        project.name,
+        state.currentAnimationBatchId,
+      );
+      const batchId = response.batchId ?? response.jobs[0]?.batchId ?? null;
+      set(current => ({
+        currentAnimationBatchId: batchId,
+        animationAssetJobs: response.jobs,
+        animationPlan: mergeAnimationJobsIntoPlan(current.animationPlan, response.jobs, current.animationAssetLibrary),
+        animationStatus: `Queued ${response.jobs.length} reusable animation asset${response.jobs.length === 1 ? '' : 's'}.`,
+      }));
+      void get().saveProject();
+      void get().syncAnimationAssetJobs(true);
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Animation asset job creation failed');
+      set({ animationStatus: 'Animation asset job creation failed.' });
+    }
+  },
+
+  syncAnimationAssetJobs: async (silent = false) => {
+    const batchId = get().currentAnimationBatchId;
+    if (!batchId) {
+      if (!silent) set({ animationStatus: 'Queue missing animation assets first.' });
+      return;
+    }
+    if (get().isSyncingAnimationAssets) return;
+
+    set({
+      isSyncingAnimationAssets: true,
+      ...(silent ? {} : { animationStatus: 'Checking animation assets...' }),
+    } as Partial<EditorState>);
+
+    try {
+      const projectId = get().currentProject?.id ?? null;
+      const jobsResponse = await listGenerationJobs({ batchId, projectId });
+      const animationJobs = jobsResponse.jobs.filter(job => job.metadata.flow === 'auto_animate');
+      const mediaResponse = await listGeneratedMediaAssets(true, { batchId, projectId });
+      const completedAssets = mediaResponse.assets.filter(asset =>
+        asset.status === 'completed' &&
+        Boolean(asset.resultUrl) &&
+        animationJobs.some(job => job.id === asset.jobId) &&
+        (getAssetVariantUrls(asset).length <= 1 || Boolean(asset.metadata.selectedVariantUrl))
+      );
+
+      const newMediaAssets: MediaAsset[] = [];
+      const newMemoryItems: AnimationAssetMemoryItem[] = [];
+
+      for (const generated of completedAssets) {
+        const job = animationJobs.find(item => item.id === generated.jobId);
+        const memoryId = `animation:${generated.jobId}`;
+        let assetForImport = generated;
+        if (generated.resultUrl && isRemoteMediaUrl(generated.resultUrl) && !generated.localPath) {
+          const storedJob = await storeRemoteGenerationJob(generated.jobId).catch(() => null);
+          if (storedJob?.resultUrl) {
+            assetForImport = {
+              ...generated,
+              status: storedJob.status,
+              mediaType: storedJob.mediaType,
+              resultUrl: storedJob.resultUrl,
+              resultVariants: storedJob.resultVariants,
+              localPath: storedJob.localPath,
+              error: storedJob.error,
+              metadata: storedJob.metadata,
+            };
+          }
+        }
+        const file = await fetchGeneratedMediaFile(assetForImport);
+        const mediaKind = assetForImport.mediaType === 'video' ? 'video' : 'image';
+        const thumbnailUrl = await generateThumbnail(file, mediaKind);
+        const mediaAssetId = `animation-generated-${generated.jobId}`;
+        newMediaAssets.push({
+          id: mediaAssetId,
+          file,
+          type: 'visual',
+          mediaKind,
+          duration: assetForImport.duration || 10,
+          sourceUrl: assetForImport.resultUrl,
+          localPath: assetForImport.localPath,
+          thumbnailUrl,
+        });
+        newMemoryItems.push({
+          id: memoryId,
+          name: job?.metadata.animationAssetName || generated.sceneId,
+          assetType: (job?.metadata.animationAssetType as AnimationAssetType) || 'prop',
+          mediaAssetId,
+          sourceUrl: assetForImport.resultUrl,
+          localPath: assetForImport.localPath,
+          prompt: generated.prompt,
+          style: generated.metadata.sceneStyle || get().animationSettings.style,
+          tags: (job?.metadata.animationAssetTags || '').split(',').map(tag => tag.trim()).filter(Boolean),
+          status: 'generated',
+          metadata: {
+            source: 'auto_animate',
+            animationAssetId: job?.metadata.animationAssetId || generated.sceneId,
+            jobId: generated.jobId,
+            batchId: generated.batchId,
+          },
+        });
+      }
+
+      set(state => {
+        const replacingMemoryIds = new Set(newMemoryItems.map(item => item.id));
+        const replacingMediaIds = new Set(newMediaAssets.map(asset => asset.id));
+        const mediaById = new Map(newMediaAssets.map(asset => [asset.id, asset] as const));
+        const nextLibrary = [
+          ...state.animationAssetLibrary.filter(item => !replacingMemoryIds.has(item.id)),
+          ...newMemoryItems,
+        ];
+        const nextAssets = [
+          ...state.assets.filter(asset => !replacingMediaIds.has(asset.id)),
+          ...newMediaAssets,
+        ];
+        const nextClips = state.clips.map(clip => {
+          const replacementAsset = mediaById.get(clip.assetId);
+          if (!replacementAsset) return clip;
+          return {
+            ...clip,
+            file: replacementAsset.file,
+            type: 'visual' as const,
+            transform: clip.transform ?? { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false },
+          };
+        });
+        const nextJobs = animationJobs.length ? animationJobs : jobsResponse.jobs;
+        return {
+          assets: nextAssets,
+          clips: nextClips,
+          animationAssetLibrary: nextLibrary,
+          animationAssetJobs: nextJobs,
+          animationPlan: mergeAnimationJobsIntoPlan(state.animationPlan, nextJobs, nextLibrary),
+          animationStatus: silent
+            ? state.animationStatus
+            : newMemoryItems.length
+              ? `Imported ${newMemoryItems.length} generated animation asset${newMemoryItems.length === 1 ? '' : 's'}.`
+              : 'No new generated animation assets yet.',
+        };
+      });
+      if (get().currentProject && newMemoryItems.length > 0) void get().saveProject();
+    } catch (err) {
+      console.error(err);
+      if (!silent) alert(err instanceof Error ? err.message : 'Animation asset sync failed');
+      set({ animationStatus: silent ? 'Animation asset auto-sync paused after an error.' : 'Animation asset sync failed.' });
+    } finally {
+      set({ isSyncingAnimationAssets: false });
+    }
+  },
+
+  retryAnimationAssetJob: async (jobId) => {
+    set({ animationStatus: 'Retrying animation asset...' });
+    try {
+      const retriedJob = await retryAnimationAssetJobRequest(jobId);
+      set(state => {
+        const nextJobs = state.animationAssetJobs.map(job => job.id === jobId ? retriedJob : job);
+        return {
+          animationAssetJobs: nextJobs,
+          animationPlan: mergeAnimationJobsIntoPlan(state.animationPlan, nextJobs, state.animationAssetLibrary),
+          animationStatus: 'Animation asset queued for retry.',
+        };
+      });
+      if (get().currentProject) void get().saveProject();
+      void get().syncAnimationAssetJobs(true);
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Could not retry animation asset job');
+      set({ animationStatus: 'Animation asset retry failed.' });
+    }
+  },
+
+  autoRetryAnimationAssetJob: async (jobId, maxAttempts = 50) => {
+    set({ animationStatus: 'Rewriting prompt and regenerating animation asset...' });
+    try {
+      const retriedJob = await autoRetryAnimationAssetJobRequest(jobId, maxAttempts);
+      set(state => {
+        const nextJobs = state.animationAssetJobs.map(job => job.id === jobId ? retriedJob : job);
+        return {
+          animationAssetJobs: nextJobs,
+          animationPlan: mergeAnimationJobsIntoPlan(state.animationPlan, nextJobs, state.animationAssetLibrary),
+          animationStatus: 'Animation asset queued with rewritten prompt.',
+        };
+      });
+      if (get().currentProject) void get().saveProject();
+      void get().syncAnimationAssetJobs(true);
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Could not rewrite and regenerate animation asset');
+      set({ animationStatus: 'Animation asset rewrite/regenerate failed.' });
+    }
+  },
+
+  selectAnimationAssetVariant: async (jobId, variantUrl) => {
+    const sourceJob = get().animationAssetJobs.find(job => job.id === jobId);
+    if (!sourceJob) {
+      alert('Sync animation assets before choosing a result.');
+      return;
+    }
+    const selectedUrl = variantUrl || sourceJob.resultUrl || sourceJob.resultVariants[0]?.url;
+    if (!selectedUrl) {
+      alert('This animation asset does not have a media result yet.');
+      return;
+    }
+
+    set({ isSyncingAnimationAssets: true, animationStatus: 'Importing selected animation asset result...' } as Partial<EditorState>);
+    try {
+      let selectedJob = await selectGenerationJobVariant(jobId, selectedUrl);
+      if (selectedJob.resultUrl && isRemoteMediaUrl(selectedJob.resultUrl)) {
+        selectedJob = await storeRemoteGenerationJob(jobId, selectedJob.resultUrl);
+      }
+      const selectedStoredUrl = selectedJob.resultUrl ?? selectedUrl;
+      selectedJob = {
+        ...selectedJob,
+        metadata: {
+          ...(selectedJob.metadata ?? {}),
+          selectedVariantUrl: selectedStoredUrl,
+        },
+      };
+
+      const assetForImport = generatedMediaAssetFromJob({
+        ...selectedJob,
+        resultUrl: selectedStoredUrl,
+      });
+      const file = await fetchGeneratedMediaFile(assetForImport);
+      const mediaKind = assetForImport.mediaType === 'video' ? 'video' : 'image';
+      const thumbnailUrl = await generateThumbnail(file, mediaKind);
+      const mediaAssetId = `animation-generated-${jobId}`;
+      const needId = selectedJob.metadata.animationAssetId || selectedJob.sceneId;
+      const memoryId = `animation:${jobId}`;
+      let sourceDuration = assetForImport.duration || 5;
+      const nextMediaAsset: MediaAsset = {
+        id: mediaAssetId,
+        file,
+        type: 'visual',
+        mediaKind,
+        duration: sourceDuration,
+        sourceUrl: assetForImport.resultUrl,
+        localPath: assetForImport.localPath,
+        thumbnailUrl,
+      };
+      if (mediaKind === 'video') {
+        sourceDuration = await getMediaDuration(file, 'visual');
+        nextMediaAsset.duration = sourceDuration;
+        const framesCount = Math.min(50, Math.max(5, Math.ceil(sourceDuration / 2)));
+        nextMediaAsset.filmstrip = await generateFilmstrip(file, sourceDuration, framesCount);
+      }
+
+      const nextMemory: AnimationAssetMemoryItem = {
+        id: memoryId,
+        name: selectedJob.metadata.animationAssetName || selectedJob.sceneId,
+        assetType: (selectedJob.metadata.animationAssetType as AnimationAssetType) || 'prop',
+        mediaAssetId,
+        sourceUrl: assetForImport.resultUrl,
+        localPath: assetForImport.localPath,
+        prompt: assetForImport.prompt,
+        style: assetForImport.metadata.sceneStyle || get().animationSettings.style,
+        tags: (selectedJob.metadata.animationAssetTags || '').split(',').map(tag => tag.trim()).filter(Boolean),
+        status: 'generated',
+        metadata: {
+          source: 'auto_animate',
+          animationAssetId: needId,
+          jobId,
+          batchId: selectedJob.batchId,
+          selectedVariantUrl: selectedStoredUrl,
+        },
+      };
+
+      set(state => {
+        const nextJobs = state.animationAssetJobs.map(job => job.id === jobId ? selectedJob : job);
+        const nextLibrary = [
+          ...state.animationAssetLibrary.filter(item => item.id !== memoryId),
+          nextMemory,
+        ];
+        const nextAssets = [
+          ...state.assets.filter(asset => asset.id !== mediaAssetId),
+          nextMediaAsset,
+        ];
+        const nextClips = state.clips.map(clip => (
+          clip.assetId === mediaAssetId
+            ? {
+                ...clip,
+                file,
+                type: 'visual' as const,
+                transform: clip.transform ?? { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false },
+              }
+            : clip
+        ));
+        return {
+          ...withHistory(state),
+          assets: nextAssets,
+          clips: nextClips,
+          animationAssetLibrary: nextLibrary,
+          animationAssetJobs: nextJobs,
+          animationPlan: mergeAnimationJobsIntoPlan(state.animationPlan, nextJobs, nextLibrary),
+          animationStatus: 'Selected animation result imported.',
+        };
+      });
+      if (get().currentProject) void get().saveProject();
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Could not import selected animation result');
+      set({ animationStatus: 'Selected animation result import failed.' });
+    } finally {
+      set({ isSyncingAnimationAssets: false });
+    }
+  },
+
+  buildAnimatedTimeline: () => {
+    const state = get();
+    const plan = state.animationPlan;
+    if (!plan) {
+      alert('Create an animation plan first.');
+      return;
+    }
+    const approvedScenes = plan.scenes.filter(scene => scene.status === 'approved');
+    if (approvedScenes.length === 0) {
+      alert('Approve the animation plan before building the timeline.');
+      return;
+    }
+
+    const availableAssets = buildAnimationAvailableAssets(state);
+    const memoryById = new Map(availableAssets.map(asset => [asset.id, asset]));
+    const needsById = new Map(plan.assetNeeds.map(need => [need.id, need]));
+    let tracks = [...state.tracks];
+    const visualTracksByOrder = new Map<number, TimelineTrack>();
+
+    const ensureVisualTrack = (order: number): TimelineTrack => {
+      const bucket = Math.max(0, Math.floor(order / 10));
+      const existing = visualTracksByOrder.get(bucket);
+      if (existing) return existing;
+      const track = makeTrack(tracks, 'visual');
+      track.name = `AV${bucket + 1}`;
+      tracks = [...tracks, track];
+      visualTracksByOrder.set(bucket, track);
+      return track;
+    };
+
+    let textTrack = tracks.find(track => track.type === 'text');
+    const ensureTextTrack = (): TimelineTrack => {
+      if (!textTrack) {
+        textTrack = makeTrack(tracks, 'text');
+        tracks = [...tracks, textTrack];
+      }
+      return textTrack;
+    };
+
+    const newClips: TimelineClip[] = [];
+    const unsupportedMotion = new Set<string>();
+
+    for (const scene of approvedScenes) {
+      const layers = [...scene.layers].sort((a, b) => a.order - b.order);
+      for (const layer of layers) {
+        const duration = Math.max(0.1, layer.end - layer.start);
+        const need = layer.assetNeedId ? needsById.get(layer.assetNeedId) : null;
+        const assignedMemory = need?.matchedAssetId ? memoryById.get(need.matchedAssetId) : null;
+        const mediaAsset = assignedMemory?.mediaAssetId
+          ? state.assets.find(asset => asset.id === assignedMemory.mediaAssetId)
+          : null;
+        const visualLayer = ['background', 'character', 'prop', 'icon', 'overlay'].includes(layer.layerType);
+
+        if (visualLayer && mediaAsset) {
+          newClips.push({
+            id: makeId(),
+            assetId: mediaAsset.id,
+            trackId: ensureVisualTrack(layer.order).id,
+            file: mediaAsset.file,
+            type: 'visual',
+            duration,
+            startTime: layer.start,
+            mediaOffset: 0,
+            transform: { scale: layer.scale, rotation: 0, opacity: layer.opacity, flipX: false, flipY: false },
+            color: { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 },
+            audio: { volume: 0, mute: true, fadeIn: 0, fadeOut: 0 },
+            keyframes: keyframesForAnimationMotion(layer, duration),
+            animation: {
+              planId: plan.id,
+              sceneId: scene.id,
+              layerId: layer.id,
+              assetNeedId: need?.id ?? null,
+              assetType: need?.assetType ?? null,
+              source: 'auto_animate',
+              motionPreset: layer.motion.preset,
+              layoutTemplate: scene.cue?.layout.template,
+              captionTemplate: scene.cue?.caption.template,
+              characterPose: scene.cue?.character.pose,
+              expression: scene.cue?.character.expression,
+              x: layer.x,
+              y: layer.y,
+              order: layer.order,
+              note: layer.motion.note,
+            },
+          });
+          if (['slide', 'pan', 'float', 'parallax'].includes(layer.motion.preset)) unsupportedMotion.add(layer.motion.preset);
+          continue;
+        }
+
+        const placeholderText = visualLayer
+          ? `${need?.name || layer.layerType}\n${need?.status === 'missing' ? 'Missing reusable asset' : 'Assign or generate this asset'}`
+          : kineticCaptionContent(scene, layer.text || scene.summary || scene.transcript);
+        const textData = textDataForAnimationLayer(scene, layer, placeholderText, visualLayer);
+        const placeholderFile = new File([], `${layer.id}.txt`, { type: 'text/plain' });
+        newClips.push({
+          id: makeId(),
+          assetId: `animation-text-${makeId()}`,
+          trackId: ensureTextTrack().id,
+          file: placeholderFile,
+          type: 'text',
+          duration,
+          startTime: layer.start,
+          mediaOffset: 0,
+          audio: { volume: 0, mute: true, fadeIn: 0, fadeOut: 0 },
+          transform: { scale: layer.scale, rotation: 0, opacity: layer.opacity, flipX: false, flipY: false },
+          textData,
+          keyframes: keyframesForAnimationMotion(layer, duration),
+          animation: {
+            planId: plan.id,
+            sceneId: scene.id,
+            layerId: layer.id,
+            assetNeedId: need?.id ?? null,
+            assetType: need?.assetType ?? null,
+            source: 'auto_animate',
+            motionPreset: layer.motion.preset,
+            layoutTemplate: scene.cue?.layout.template,
+            captionTemplate: scene.cue?.caption.template,
+            characterPose: scene.cue?.character.pose,
+            expression: scene.cue?.character.expression,
+            x: layer.x,
+            y: layer.y,
+            order: layer.order,
+            note: visualLayer ? 'Placeholder for missing visual animation asset.' : layer.motion.note,
+          },
+        });
+      }
+    }
+
+    const warning = unsupportedMotion.size
+      ? ` Built timeline with V1 limits: ${[...unsupportedMotion].join(', ')} uses scale/opacity placeholders until position export exists.`
+      : '';
+    set({
+      ...withHistory(state),
+      tracks,
+      clips: [...state.clips, ...newClips],
+      selectedClipId: newClips[0]?.id ?? state.selectedClipId,
+      animationStatus: `Built ${newClips.length} editable animation clips.${warning}`,
+    });
+  },
 }));

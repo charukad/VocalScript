@@ -190,6 +190,23 @@ button:hover {
   margin-bottom: 8px;
 }
 
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.section-title-row .log-title {
+  margin-bottom: 0;
+}
+
+.compact {
+  min-height: 28px;
+  padding: 0 8px;
+}
+
 .log-entries {
   display: flex;
   flex-direction: column;
@@ -220,6 +237,21 @@ button:hover {
   border-radius: 6px;
   padding: 8px;
   background: var(--surface-2);
+}
+
+.job-running,
+.job-queued {
+  border-color: rgba(0, 122, 204, 0.7);
+}
+
+.job-completed {
+  border-color: rgba(137, 209, 133, 0.55);
+}
+
+.job-failed,
+.job-manual-action-required,
+.job-canceled {
+  border-color: rgba(244, 135, 113, 0.55);
 }
 
 .job-row strong,

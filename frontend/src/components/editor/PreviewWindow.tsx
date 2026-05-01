@@ -65,16 +65,27 @@ export const PreviewWindow = () => {
     return !hasSoloForType || Boolean(track.solo);
   };
 
-  const activeVisualClip = clips.find(c => c.type === 'visual' && isTrackActive(c.trackId) && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration);
+  const trackOrderById = new Map(tracks.map((track, index) => [track.id, track.order ?? index]));
+  const activeVisualClips = clips
+    .filter(c => c.type === 'visual' && isTrackActive(c.trackId) && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration)
+    .sort((a, b) => {
+      const trackDelta = (trackOrderById.get(a.trackId) ?? 0) - (trackOrderById.get(b.trackId) ?? 0);
+      if (trackDelta !== 0) return trackDelta;
+      return (a.animation?.order ?? 0) - (b.animation?.order ?? 0);
+    });
+  const hasActiveVisuals = activeVisualClips.length > 0;
   const getVisualStyle = (clip: TimelineClip) => {
     const scale = getKeyframedValue(clip, 'scale', playheadTime, clip.transform?.scale ?? 100);
     const rotation = getKeyframedValue(clip, 'rotation', playheadTime, clip.transform?.rotation ?? 0);
     const opacity = getKeyframedValue(clip, 'opacity', playheadTime, clip.transform?.opacity ?? 100);
     return {
-      transform: `scale(${scale / 100}) rotate(${rotation}deg) scaleX(${clip.transform?.flipX ? -1 : 1}) scaleY(${clip.transform?.flipY ? -1 : 1})`,
+      left: `${clip.animation?.x ?? 50}%`,
+      top: `${clip.animation?.y ?? 50}%`,
+      transform: `translate(-50%, -50%) scale(${scale / 100}) rotate(${rotation}deg) scaleX(${clip.transform?.flipX ? -1 : 1}) scaleY(${clip.transform?.flipY ? -1 : 1})`,
       opacity: Math.max(0, Math.min(1, opacity / 100)),
     };
   };
+  const getVisualZIndex = (clip: TimelineClip): number => Math.max(1, activeVisualClips.findIndex(item => item.id === clip.id) + 1);
 
   const maxTime = clips.reduce((max, clip) => {
     const end = clip.startTime + clip.duration;
@@ -194,46 +205,56 @@ export const PreviewWindow = () => {
         ) : (
           <>
             {/* Render all videos visibly but toggle display so they are controlled by the central sync loop */}
-            {clips.filter(c => c.type === 'visual' && isTrackActive(c.trackId) && !c.file.type.startsWith('image')).map(clip => (
+            {activeVisualClips.filter(c => !c.file.type.startsWith('image')).map(clip => (
               <video 
                 key={`video-${clip.id}`} 
                 ref={el => { if (el) videoRefs.current[clip.id] = el; }} 
                 src={getObjectURL(clip)} 
                 preload="auto"
                 style={{ 
+                  position: 'absolute',
+                  width: '100%',
+                  height: '100%',
                   maxWidth: '100%', 
                   maxHeight: '100%',
                   objectFit: 'contain',
                   borderRadius: '4px',
-                  display: activeVisualClip?.id === clip.id ? 'block' : 'none',
-                  ...(activeVisualClip?.id === clip.id ? getVisualStyle(clip) : {}),
-                  filter: activeVisualClip?.id === clip.id ? buildCssFilter(clip) : undefined,
+                  zIndex: getVisualZIndex(clip),
+                  ...getVisualStyle(clip),
+                  filter: buildCssFilter(clip),
                   transition: 'transform 0.1s ease-out, filter 0.1s ease-out, opacity 0.1s ease-out'
                 }} 
               />
             ))}
 
             {/* Images */}
-            {activeVisualClip?.file.type.startsWith('image') && (
-              <img 
-                src={getObjectURL(activeVisualClip)} 
-                style={{ 
-                  maxWidth: '100%', 
-                  maxHeight: '100%', 
-                  objectFit: 'contain', 
+            {activeVisualClips.filter(c => c.file.type.startsWith('image')).map(clip => (
+              <img
+                key={`image-${clip.id}`}
+                src={getObjectURL(clip)}
+                style={{
+                  position: 'absolute',
+                  width: '100%',
+                  height: '100%',
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  objectFit: 'contain',
                   borderRadius: '4px',
-                  ...getVisualStyle(activeVisualClip),
-                  filter: buildCssFilter(activeVisualClip),
+                  zIndex: getVisualZIndex(clip),
+                  ...getVisualStyle(clip),
+                  filter: buildCssFilter(clip),
                   transition: 'transform 0.1s ease-out, filter 0.1s ease-out, opacity 0.1s ease-out'
                 }} 
               />
-            )}
+            ))}
 
             {/* Text Overlays */}
             {clips
               .filter(c => c.type === 'text' && isTrackActive(c.trackId) && c.textData && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration)
               .map(clip => {
                 const td = clip.textData!;
+                const scale = getKeyframedValue(clip, 'scale', playheadTime, clip.transform?.scale ?? 100);
+                const rotation = getKeyframedValue(clip, 'rotation', playheadTime, clip.transform?.rotation ?? 0);
                 return (
                   <div
                     key={clip.id}
@@ -241,7 +262,7 @@ export const PreviewWindow = () => {
                       position: 'absolute',
                       left: `${td.x}%`,
                       top: `${td.y}%`,
-                      transform: 'translate(-50%, -50%)',
+                      transform: `translate(-50%, -50%) scale(${scale / 100}) rotate(${rotation}deg)`,
                       fontFamily: td.fontFamily,
                       fontSize: `${td.fontSize}px`,
                       color: td.color,
@@ -258,6 +279,7 @@ export const PreviewWindow = () => {
                       maxWidth: '90%',
                       pointerEvents: 'none',
                       textShadow: td.bgOpacity === 0 ? '0 1px 4px rgba(0,0,0,0.8)' : 'none',
+                      zIndex: 100 + (clip.animation?.order ?? 0),
                     }}
                   >
                     {td.content}
@@ -267,7 +289,7 @@ export const PreviewWindow = () => {
             }
 
             {/* If no visuals but exported media exists */}
-            {!activeVisualClip && srtContent && mediaUrl && (
+            {!hasActiveVisuals && srtContent && mediaUrl && (
               <div className="audio-player-container" style={{ display: 'flex', justifyContent: 'center' }}>
                 {mediaUrl.endsWith('.mp4') ? (
                   <video controls src={mediaUrl} style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: '4px' }} />
@@ -278,7 +300,7 @@ export const PreviewWindow = () => {
             )}
 
             {/* No Visuals Placeholder */}
-            {!activeVisualClip && !srtContent && (
+            {!hasActiveVisuals && !srtContent && (
               <div className="no-visual-placeholder">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--text-secondary)', opacity: 0.4 }}>
                   <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
@@ -291,7 +313,7 @@ export const PreviewWindow = () => {
             )}
 
             {/* Subtitles Preview */}
-            {srtContent && !activeVisualClip && (
+            {srtContent && !hasActiveVisuals && (
               <div className="srt-preview">{srtContent}</div>
             )}
           </>

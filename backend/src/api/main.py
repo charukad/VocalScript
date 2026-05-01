@@ -16,10 +16,12 @@ from backend.src.infrastructure.faster_whisper_service import FasterWhisperServi
 from backend.src.infrastructure.local_llm_service import LocalLLMService
 from backend.src.domain.services.export_orchestrator import ExportOrchestrator, generate_srt
 from backend.src.domain.services.browser_bridge_service import BrowserBridgeService
+from backend.src.domain.services.animation_planner_service import AnimationPlannerService
 from backend.src.domain.services.generation_queue_service import GenerationQueueService
 from backend.src.domain.services.project_service import ProjectService
 from backend.src.domain.services.sqlite_store import SQLiteStore
 from backend.src.domain.services.storyboard_service import StoryboardService
+from backend.src.api.animation import build_animation_router
 from backend.src.api.browser_bridge import build_browser_bridge_router
 from backend.src.api.generation import build_generation_router
 from backend.src.api.projects import build_projects_router
@@ -43,6 +45,7 @@ whisper_engine = FasterWhisperService(model_size="tiny", device="cpu", compute_t
 orchestrator = ExportOrchestrator(compiler, whisper_engine)
 local_llm_service = LocalLLMService(settings.llm)
 storyboard_service = StoryboardService(local_llm_service)
+animation_planner_service = AnimationPlannerService(local_llm_service)
 registry_database_path = settings.projects.database_path or str(Path(settings.projects.projects_dir) / "neuralscribe_registry.db")
 legacy_database_path = str(Path(settings.projects.projects_dir) / "neuralscribe.db")
 sqlite_store = SQLiteStore(registry_database_path, legacy_database_path=legacy_database_path)
@@ -54,6 +57,7 @@ generation_queue_service = GenerationQueueService(
 )
 browser_bridge_service = BrowserBridgeService()
 app.include_router(build_generation_router(storyboard_service, whisper_engine, generation_queue_service))
+app.include_router(build_animation_router(animation_planner_service, whisper_engine, generation_queue_service))
 app.include_router(build_projects_router(project_service))
 app.include_router(build_browser_bridge_router(browser_bridge_service, settings.browser_bridge.session_token))
 

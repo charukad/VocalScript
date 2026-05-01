@@ -22,6 +22,7 @@ const elements = {
   startJobsBtn: document.getElementById("startJobsBtn"),
   claimOnceBtn: document.getElementById("claimOnceBtn"),
   stopJobsBtn: document.getElementById("stopJobsBtn"),
+  clearJobHistoryBtn: document.getElementById("clearJobHistoryBtn"),
   jobList: document.getElementById("jobList"),
   logEntries: document.getElementById("logEntries"),
 };
@@ -39,6 +40,7 @@ elements.disconnectBtn.addEventListener("click", disconnectBridge);
 elements.startJobsBtn.addEventListener("click", startJobs);
 elements.claimOnceBtn.addEventListener("click", claimOnce);
 elements.stopJobsBtn.addEventListener("click", stopJobs);
+elements.clearJobHistoryBtn.addEventListener("click", clearJobHistory);
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "bridge.statusChanged") {
@@ -174,6 +176,27 @@ async function stopJobs() {
   }
 }
 
+async function clearJobHistory() {
+  const projectId = elements.projectSelect.value;
+  if (!projectId) {
+    addLog("Select a project before clearing job history");
+    return;
+  }
+  try {
+    const url = new URL(`${elements.httpBaseUrl.value.replace(/\/$/, "")}/api/generation/jobs/history`);
+    const provider = selectedProviderFilter();
+    if (provider) url.searchParams.set("provider", provider);
+    url.searchParams.set("projectId", projectId);
+    const response = await fetch(url, { method: "DELETE" });
+    if (!response.ok) throw new Error(await response.text());
+    const data = await response.json();
+    await refreshJobList();
+    addLog(`Cleared ${Number(data.cleared || 0)} finished job${Number(data.cleared || 0) === 1 ? "" : "s"}`);
+  } catch (error) {
+    addLog(`Clear history failed: ${error.message}`);
+  }
+}
+
 async function refreshProjects(selectedProjectId) {
   try {
     const response = await fetch(`${elements.httpBaseUrl.value.replace(/\/$/, "")}/api/projects`);
@@ -213,7 +236,8 @@ async function refreshJobList() {
   }
   try {
     const url = new URL(`${elements.httpBaseUrl.value.replace(/\/$/, "")}/api/generation/jobs`);
-    url.searchParams.set("provider", "meta");
+    const provider = selectedProviderFilter();
+    if (provider) url.searchParams.set("provider", provider);
     url.searchParams.set("projectId", projectId);
     const response = await fetch(url);
     if (!response.ok) throw new Error(await response.text());
@@ -226,15 +250,17 @@ async function refreshJobList() {
       renderJobListMessage("No jobs for this project.");
       return;
     }
-    jobs.forEach((job) => {
+    jobs.slice().reverse().forEach((job) => {
       const row = document.createElement("div");
-      row.className = "job-row";
+      row.className = `job-row job-${String(job.status || "unknown").replaceAll("_", "-")}`;
       const attempt = job.metadata?.runAttempt ? ` · attempt ${escapeHtml(job.metadata.runAttempt)}` : "";
       const projectLabel = job.metadata?.projectName || projectName(job.projectId) || job.projectId || "No project";
       const aspect = job.metadata?.aspectRatio ? ` · ${escapeHtml(job.metadata.aspectRatio)}` : "";
+      const flowLabel = job.metadata?.flow === "auto_animate" ? "Auto Animate" : "Auto Generate";
+      const assetLabel = job.metadata?.animationAssetName || job.sceneId || "scene";
       row.innerHTML = `
-        <strong>${escapeHtml(job.status)} · ${escapeHtml(job.sceneId || "scene")}${attempt}</strong>
-        <span>${escapeHtml(projectLabel)} · ${escapeHtml(job.mediaType || "media")}${aspect}</span>
+        <strong>${escapeHtml(job.status)} · ${escapeHtml(assetLabel)}${attempt}</strong>
+        <span>${escapeHtml(flowLabel)} · ${escapeHtml(projectLabel)} · ${escapeHtml(job.mediaType || "media")}${aspect}</span>
         <span>${escapeHtml(job.id)} · ${escapeHtml(job.batchId || "no batch")}</span>
       `;
       elements.jobList.append(row);
@@ -255,6 +281,13 @@ function projectName(projectId) {
   if (!projectId) return "";
   const project = projects.find((candidate) => candidate.id === projectId);
   return project ? project.name : projectId;
+}
+
+function selectedProviderFilter() {
+  const providers = [];
+  if (elements.providerMeta.checked) providers.push("meta");
+  if (elements.providerGrok.checked) providers.push("grok");
+  return providers.length === 1 ? providers[0] : "";
 }
 
 function formatJob(job) {

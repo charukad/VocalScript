@@ -129,6 +129,10 @@ class GenerationJobListResponse(ApiModel):
     batch_paused: bool = Field(default=False, alias="batchPaused")
 
 
+class GenerationJobHistoryClearResponse(ApiModel):
+    cleared: int
+
+
 class GeneratedMediaAsset(ApiModel):
     job_id: str = Field(alias="jobId")
     batch_id: str = Field(alias="batchId")

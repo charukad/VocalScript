@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from mimetypes import guess_extension
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import BinaryIO, Dict, List, Optional
+from typing import BinaryIO, Dict, Iterable, List, Optional
 
 from backend.src.domain.models.generation import (
     GenerationAspectRatio,
@@ -25,6 +25,12 @@ from backend.src.domain.services.sqlite_store import SQLiteStore
 
 
 RUNNING_JOB_TIMEOUT_SECONDS = 900
+HISTORY_CLEAR_STATUSES: tuple[GenerationJobStatus, ...] = (
+    "completed",
+    "failed",
+    "canceled",
+    "manual_action_required",
+)
 
 
 def _utc_now() -> datetime:
@@ -122,6 +128,41 @@ class GenerationQueueService:
         if project_id:
             jobs = [job for job in jobs if job.project_id == project_id]
         return jobs
+
+    def clear_job_history(
+        self,
+        provider: Optional[ProviderName] = None,
+        project_id: Optional[str] = None,
+        statuses: Optional[Iterable[GenerationJobStatus]] = None,
+    ) -> int:
+        self._refresh_from_store()
+        clearable_statuses = set(statuses or HISTORY_CLEAR_STATUSES)
+        if not clearable_statuses:
+            return 0
+
+        remove_ids = {
+            job_id
+            for job_id in self._job_order
+            if (job := self._jobs.get(job_id))
+            and job.status in clearable_statuses
+            and (not provider or job.provider == provider)
+            and (not project_id or job.project_id == project_id)
+        }
+        if not remove_ids:
+            return 0
+
+        if self.store:
+            self.store.clear_generation_jobs(
+                project_id=project_id,
+                provider=provider,
+                statuses=clearable_statuses,
+            )
+
+        for job_id in remove_ids:
+            self._jobs.pop(job_id, None)
+        self._job_order = [job_id for job_id in self._job_order if job_id not in remove_ids]
+        self._save_state()
+        return len(remove_ids)
 
     def list_generated_media_assets(
         self,

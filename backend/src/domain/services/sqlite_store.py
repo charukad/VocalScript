@@ -502,6 +502,38 @@ class SQLiteStore:
             self._initialize_project_database(connection)
             self._upsert_generation_job_row(connection, job, sort_order)
 
+    def clear_generation_jobs(
+        self,
+        project_id: Optional[str],
+        provider: Optional[ProviderName],
+        statuses: Iterable[GenerationJobStatus],
+    ) -> int:
+        project_ids = [project_id] if project_id else [project.id for project in self.list_projects()]
+        status_values = [str(status) for status in statuses]
+        if not status_values:
+            return 0
+
+        deleted = 0
+        with self._lock:
+            for current_project_id in [pid for pid in project_ids if pid]:
+                database_path = self._project_database_path_for_id(current_project_id)
+                if not database_path or not database_path.exists():
+                    continue
+                with self._project_connect(database_path) as connection:
+                    self._initialize_project_database(connection)
+                    placeholders = ",".join("?" for _ in status_values)
+                    params: list[Any] = [*status_values]
+                    where = [f"status IN ({placeholders})"]
+                    if provider:
+                        where.append("provider = ?")
+                        params.append(provider)
+                    result = connection.execute(
+                        f"DELETE FROM generation_jobs WHERE {' AND '.join(where)}",
+                        params,
+                    )
+                    deleted += result.rowcount if result.rowcount is not None else 0
+        return deleted
+
     def set_batch_paused(self, batch_id: str, paused: bool, project_id: Optional[str]) -> None:
         if not project_id:
             return

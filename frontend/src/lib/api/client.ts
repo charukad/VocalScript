@@ -3,6 +3,11 @@ import type {
   TimelineTrack,
   ExportSettings,
   CaptionSegment,
+  AnimationAssetMemoryItem,
+  AnimationAssetNeed,
+  AnimationCaptionTemplate,
+  AnimationLayoutTemplate,
+  AnimationPlan,
   GenerationAspectRatio,
   GeneratedMediaType,
   GeneratedMediaAsset,
@@ -50,6 +55,18 @@ export type StoryboardGenerationOptions = {
   motionIntensity: StoryboardMotionIntensity;
   promptDetail: StoryboardPromptDetail;
   style: string;
+};
+
+export type AnimationPlanOptions = {
+  provider: ProviderName;
+  aspectRatio: GenerationAspectRatio;
+  sceneDensity: StoryboardSceneDensity;
+  motionIntensity: StoryboardMotionIntensity;
+  promptDetail: StoryboardPromptDetail;
+  style: string;
+  layoutTemplate: AnimationLayoutTemplate;
+  captionTemplate: AnimationCaptionTemplate;
+  availableAssets: AnimationAssetMemoryItem[];
 };
 
 export type GenerationJobListResponse = {
@@ -338,6 +355,130 @@ export const createStoryboardFromAudio = async (
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(formatApiError(errorData.detail, 'Storyboard generation failed'));
+  }
+
+  return response.json();
+};
+
+export const createAnimationPlanFromTranscript = async (
+  transcript: string,
+  segments: TranscriptSlice[],
+  options: AnimationPlanOptions,
+  signal?: AbortSignal
+): Promise<AnimationPlan> => {
+  const response = await fetch(`${API_BASE_URL}/api/animation/plan/from-transcript`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      transcript,
+      segments,
+      availableAssets: options.availableAssets,
+      style: options.style,
+      aspectRatio: options.aspectRatio,
+      sceneDensity: options.sceneDensity,
+      motionIntensity: options.motionIntensity,
+      promptDetail: options.promptDetail,
+      layoutTemplate: options.layoutTemplate,
+      captionTemplate: options.captionTemplate,
+      provider: options.provider,
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Animation planning failed'));
+  }
+
+  return response.json();
+};
+
+export const createAnimationPlanFromAudio = async (
+  file: File,
+  options: AnimationPlanOptions,
+  signal?: AbortSignal
+): Promise<AnimationPlan> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('availableAssets', JSON.stringify(options.availableAssets));
+  formData.append('style', options.style);
+  formData.append('aspectRatio', options.aspectRatio);
+  formData.append('sceneDensity', options.sceneDensity);
+  formData.append('motionIntensity', options.motionIntensity);
+  formData.append('promptDetail', options.promptDetail);
+  formData.append('layoutTemplate', options.layoutTemplate);
+  formData.append('captionTemplate', options.captionTemplate);
+  formData.append('provider', options.provider);
+
+  const response = await fetch(`${API_BASE_URL}/api/animation/plan/from-audio`, {
+    method: 'POST',
+    body: formData,
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Animation planning failed'));
+  }
+
+  return response.json();
+};
+
+export const createAnimationAssetJobs = async (
+  assetNeeds: AnimationAssetNeed[],
+  provider: ProviderName,
+  aspectRatio: GenerationAspectRatio,
+  projectId?: string | null,
+  projectName?: string | null,
+  batchId?: string | null,
+  signal?: AbortSignal
+): Promise<GenerationJobListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/animation/assets/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetNeeds, provider, aspectRatio, projectId, projectName, batchId }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Animation asset job creation failed'));
+  }
+
+  return response.json();
+};
+
+export const retryAnimationAssetJob = async (
+  jobId: string,
+  signal?: AbortSignal
+): Promise<GenerationJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/animation/assets/jobs/${jobId}/retry`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not retry animation asset job'));
+  }
+
+  return response.json();
+};
+
+export const autoRetryAnimationAssetJob = async (
+  jobId: string,
+  maxAttempts = 50,
+  signal?: AbortSignal
+): Promise<GenerationJob> => {
+  const query = new URLSearchParams({ maxAttempts: String(maxAttempts) });
+  const response = await fetch(`${API_BASE_URL}/api/animation/assets/jobs/${jobId}/retry-auto?${query}`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not rewrite and regenerate animation asset'));
   }
 
   return response.json();

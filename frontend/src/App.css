@@ -691,7 +691,8 @@
   font-size: 0.78rem;
 }
 
-.auto-generate-panel {
+.auto-generate-panel,
+.auto-animate-panel {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
@@ -925,7 +926,8 @@
 
 .storyboard-toolbar,
 .storyboard-actions,
-.generation-toolbar {
+.generation-toolbar,
+.animation-toolbar {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.45rem;
@@ -938,7 +940,8 @@
 
 .storyboard-toolbar .btn-secondary,
 .storyboard-actions .btn-secondary,
-.generation-toolbar .btn-secondary {
+.generation-toolbar .btn-secondary,
+.animation-toolbar .btn-secondary {
   padding: 0.35rem 0.45rem;
   font-size: 0.68rem;
 }
@@ -1023,19 +1026,23 @@
 }
 
 .generation-scene-status.status-imported,
-.generation-scene-status.status-completed {
+.generation-scene-status.status-completed,
+.generation-scene-status.status-available,
+.generation-scene-status.status-generated {
   color: var(--success-color);
   border-color: rgba(137, 209, 133, 0.45);
 }
 
 .generation-scene-status.status-running,
-.generation-scene-status.status-generating {
+.generation-scene-status.status-generating,
+.generation-scene-status.status-queued {
   color: var(--accent-color);
   border-color: rgba(91, 141, 239, 0.5);
 }
 
 .generation-scene-status.status-failed,
-.generation-scene-status.status-manual_action_required {
+.generation-scene-status.status-manual_action_required,
+.generation-scene-status.status-missing {
   color: var(--error-color);
   border-color: rgba(255, 107, 107, 0.5);
 }
@@ -1161,6 +1168,120 @@
 .storyboard-status.status-approved {
   color: var(--success-color);
   border-color: rgba(137, 209, 133, 0.45);
+}
+
+.animation-section-title {
+  color: var(--text-highlight);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.animation-asset-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.auto-panel-wide .animation-asset-groups,
+.auto-panel-full .animation-asset-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  align-items: start;
+}
+
+.animation-asset-group,
+.animation-asset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.animation-asset-group {
+  background: var(--surface-3);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.55rem;
+}
+
+.animation-asset-card {
+  background: rgba(0, 0, 0, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 5px;
+  padding: 0.5rem;
+}
+
+.animation-selected-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.35rem;
+  background: var(--surface-2);
+  border: 1px solid rgba(126, 211, 126, 0.32);
+  border-radius: 5px;
+}
+
+.animation-selected-preview img,
+.animation-selected-preview video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: #000;
+  border-radius: 4px;
+}
+
+.animation-selected-preview span {
+  color: #b7f4b7;
+  font-size: 0.64rem;
+  text-align: center;
+}
+
+.animation-cue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 0.4rem;
+}
+
+.animation-cue-grid div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.16rem;
+  min-width: 0;
+  padding: 0.38rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 5px;
+}
+
+.animation-cue-grid span,
+.animation-cue-tags span {
+  color: var(--text-secondary);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.animation-cue-grid strong {
+  color: var(--text-primary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  text-transform: capitalize;
+}
+
+.animation-cue-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.animation-cue-tags span {
+  padding: 0.12rem 0.38rem;
+  background: rgba(91, 141, 239, 0.08);
+  border: 1px solid rgba(91, 141, 239, 0.2);
+  border-radius: 999px;
+  color: var(--text-primary);
 }
 
 /* ==========================================

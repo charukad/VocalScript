@@ -14,6 +14,7 @@ from backend.src.domain.models.generation import (
     GenerationJob,
     GenerationJobClaimRequest,
     GenerationJobCreateRequest,
+    GenerationJobHistoryClearResponse,
     GenerationJobListResponse,
     GenerationJobRemoteStoreRequest,
     GenerationJobResultRequest,
@@ -119,6 +120,19 @@ def build_generation_router(
             batchId=batch_id,
             batchPaused=queue_service.is_batch_paused(batch_id, project_id),
         )
+
+    @router.delete("/jobs/history", response_model=GenerationJobHistoryClearResponse)
+    async def clear_generation_job_history(
+        provider: Optional[ProviderName] = None,
+        project_id: Optional[str] = Query(None, alias="projectId"),
+        statuses: Optional[List[GenerationJobStatus]] = Query(None),
+    ):
+        cleared = queue_service.clear_job_history(
+            provider=provider,
+            project_id=project_id,
+            statuses=statuses,
+        )
+        return GenerationJobHistoryClearResponse(cleared=cleared)
 
     @router.get("/media-assets", response_model=GeneratedMediaListResponse)
     async def list_generated_media_assets(
