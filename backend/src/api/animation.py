@@ -100,11 +100,32 @@ def build_animation_router(
 
     @router.post("/assets/jobs", response_model=AnimationAssetJobListResponse)
     async def create_animation_asset_jobs(request: AnimationAssetJobCreateRequest):
+        existing_jobs = [
+            job for job in queue_service.list_jobs(
+                provider=request.provider,
+                project_id=request.project_id,
+            )
+            if job.metadata.get("flow") == "auto_animate"
+        ]
+        existing_by_need_id = {
+            job.metadata.get("animationAssetId") or job.scene_id: job
+            for job in existing_jobs
+            if job.status in ("queued", "running", "completed", "failed", "manual_action_required")
+        }
         missing_needs = [
             need for need in request.asset_needs
             if need.reuse_decision == "generate" and need.status in ("missing", "failed")
+            and need.id not in existing_by_need_id
+        ]
+        reused_jobs = [
+            existing_by_need_id[need.id]
+            for need in request.asset_needs
+            if need.id in existing_by_need_id
         ]
         if not missing_needs:
+            if reused_jobs:
+                batch_id = reused_jobs[0].batch_id if reused_jobs else request.batch_id
+                return AnimationAssetJobListResponse(jobs=reused_jobs, batchId=batch_id)
             raise HTTPException(status_code=400, detail="No missing animation assets need generation")
 
         scenes = [
@@ -143,9 +164,10 @@ def build_animation_router(
                 "animationReuseDecision": "generate",
             }
             enriched_jobs.append(queue_service.update_status(job.id, job.status, metadata=metadata) or job)
+        jobs = [*reused_jobs, *enriched_jobs]
         return AnimationAssetJobListResponse(
-            jobs=enriched_jobs,
-            batchId=enriched_jobs[0].batch_id if enriched_jobs else request.batch_id,
+            jobs=jobs,
+            batchId=enriched_jobs[0].batch_id if enriched_jobs else reused_jobs[0].batch_id if reused_jobs else request.batch_id,
         )
 
     @router.post("/assets/jobs/{job_id}/retry", response_model=GenerationJob)

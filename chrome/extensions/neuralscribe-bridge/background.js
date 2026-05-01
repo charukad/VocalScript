@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const JOB_LOOP_ALARM = "neuralscribe-job-loop";
+const IDLE_CLAIM_INTERVAL_MS = 15000;
 const STORAGE_KEYS = {
   activeJob: "activeJob",
   jobLoopActive: "jobLoopActive",
@@ -103,6 +104,9 @@ async function handleRuntimeMessage(message) {
       return { ok: true, status: currentStatus };
     case "jobs.stop":
       stopJobLoop("Job runner stopped");
+      return { ok: true, status: currentStatus };
+    case "jobs.reset":
+      await resetJobRunner();
       return { ok: true, status: currentStatus };
     case "jobs.claimOnce":
       await claimAndRunNextJob();
@@ -280,8 +284,8 @@ async function startJobLoop() {
     jobRunning: true,
     jobMessage: "Job runner started",
   });
-  await claimAndRunNextJob();
-  scheduleJobLoop();
+  const result = await claimAndRunNextJob();
+  scheduleJobLoop(result?.delayMs ?? null);
 }
 
 function stopJobLoop(message) {
@@ -291,6 +295,23 @@ function stopJobLoop(message) {
   updateStatus({
     jobRunning: false,
     jobMessage: message,
+  });
+}
+
+async function resetJobRunner() {
+  jobLoopActive = false;
+  currentJob = null;
+  currentJobInProgress = false;
+  await chrome.storage.local.remove([
+    STORAGE_KEYS.activeJob,
+    STORAGE_KEYS.jobLoopActive,
+    STORAGE_KEYS.providerAvailableAt,
+  ]);
+  await chrome.alarms.clear(JOB_LOOP_ALARM);
+  updateStatus({
+    jobRunning: false,
+    currentJob: null,
+    jobMessage: "Job runner reset",
   });
 }
 
@@ -313,8 +334,8 @@ async function handleJobLoopAlarm() {
   }
   if (!jobLoopActive) return;
   updateStatus({ jobRunning: true });
-  await claimAndRunNextJob();
-  scheduleJobLoop();
+  const result = await claimAndRunNextJob();
+  scheduleJobLoop(result?.delayMs ?? null);
 }
 
 async function restoreRuntimeState() {
@@ -341,26 +362,25 @@ async function restoreRuntimeState() {
 async function claimAndRunNextJob() {
   if (currentJobInProgress) {
     updateStatus({ jobMessage: `Already running ${currentJob.id}` });
-    return;
+    return { delayMs: 5000 };
   }
 
   const settings = await getSettings();
   if (!settings.projectId) {
     updateStatus({ jobMessage: "Select a project before starting jobs" });
-    return;
+    return { delayMs: IDLE_CLAIM_INTERVAL_MS };
   }
   const provider = settings.providers.find((name) => PROVIDER_ADAPTERS[name]);
   if (!provider) {
     updateStatus({ jobMessage: "No supported provider is enabled" });
-    return;
+    return { delayMs: IDLE_CLAIM_INTERVAL_MS };
   }
   const adapter = PROVIDER_ADAPTERS[provider];
 
   const providerWaitMs = await getProviderDelayMs(settings);
   if (providerWaitMs > 0) {
     updateStatus({ jobMessage: `Waiting ${Math.ceil(providerWaitMs / 1000)}s before next provider request` });
-    if (jobLoopActive) await scheduleJobLoop(providerWaitMs);
-    return;
+    return { delayMs: providerWaitMs };
   }
 
   const workerId = await getWorkerId();
@@ -370,13 +390,13 @@ async function claimAndRunNextJob() {
       job = await claimQueuedJob(settings, adapter.claimProvider, workerId);
     } catch (error) {
       updateStatus({ jobMessage: `Queue claim failed: ${error.message}` });
-      return;
+      return { delayMs: IDLE_CLAIM_INTERVAL_MS };
     }
   }
 
   if (!job) {
     updateStatus({ jobMessage: "No queued jobs for selected project" });
-    return;
+    return { delayMs: Math.max(IDLE_CLAIM_INTERVAL_MS, settings.claimIntervalMs) };
   }
 
   currentJob = job;
@@ -393,16 +413,18 @@ async function claimAndRunNextJob() {
       await updateJobStatus(settings, job.id, "manual_action_required", result.message, result.metadata);
       await markProviderDelay(settings);
       updateStatus({ jobMessage: `Manual action needed for ${formatJobLabel(job)}` });
-      return;
+      return { delayMs: Math.max(settings.providerDelayMs, settings.claimIntervalMs) };
     }
 
     await completeJob(settings, job.id, result.mediaUrl, result.mediaType, result.metadata, result.mediaVariants);
     await markProviderDelay(settings);
     updateStatus({ jobMessage: `Completed ${formatJobLabel(job)}` });
+    return { delayMs: Math.max(settings.providerDelayMs, settings.claimIntervalMs) };
   } catch (error) {
     await updateJobStatus(settings, job.id, "failed", error.message, { provider: "meta" });
     await markProviderDelay(settings);
     updateStatus({ jobMessage: `Failed ${formatJobLabel(job)}: ${error.message}` });
+    return { delayMs: Math.max(settings.providerDelayMs, settings.claimIntervalMs) };
   } finally {
     currentJob = null;
     currentJobInProgress = false;

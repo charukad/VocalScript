@@ -527,12 +527,64 @@ class SQLiteStore:
                     if provider:
                         where.append("provider = ?")
                         params.append(provider)
+                    rows = connection.execute(
+                        f"SELECT id FROM generation_jobs WHERE {' AND '.join(where)}",
+                        params,
+                    ).fetchall()
+                    removed_ids = {row["id"] for row in rows}
                     result = connection.execute(
                         f"DELETE FROM generation_jobs WHERE {' AND '.join(where)}",
                         params,
                     )
                     deleted += result.rowcount if result.rowcount is not None else 0
+                    if removed_ids:
+                        self._remove_generation_jobs_from_project_file(connection, removed_ids)
         return deleted
+
+    def _remove_generation_jobs_from_project_file(
+        self,
+        connection: sqlite3.Connection,
+        removed_ids: set[str],
+    ) -> None:
+        project_row = connection.execute("SELECT project_file_path FROM projects LIMIT 1").fetchone()
+        if not project_row:
+            return
+        project_file = Path(project_row["project_file_path"])
+        if not project_file.exists():
+            return
+        try:
+            raw = json.loads(project_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            return
+        state = raw.get("state")
+        if not isinstance(state, dict):
+            return
+
+        changed = False
+        for key in ("generationJobs", "animationAssetJobs"):
+            values = state.get(key)
+            if not isinstance(values, list):
+                continue
+            filtered = [item for item in values if not (isinstance(item, dict) and item.get("id") in removed_ids)]
+            if len(filtered) != len(values):
+                state[key] = filtered
+                changed = True
+
+        media_assets = state.get("generatedMediaAssets")
+        if isinstance(media_assets, list):
+            filtered_media = [
+                item for item in media_assets
+                if not (isinstance(item, dict) and item.get("jobId") in removed_ids)
+            ]
+            if len(filtered_media) != len(media_assets):
+                state["generatedMediaAssets"] = filtered_media
+                changed = True
+
+        if changed:
+            try:
+                project_file.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+            except OSError:
+                return
 
     def set_batch_paused(self, batch_id: str, paused: bool, project_id: Optional[str]) -> None:
         if not project_id:
@@ -624,6 +676,10 @@ class SQLiteStore:
                 "storyboardSettings": state.get("storyboardSettings"),
                 "currentGenerationBatchId": state.get("currentGenerationBatchId"),
                 "isGenerationBatchPaused": bool(state.get("isGenerationBatchPaused", False)),
+                "animationSettings": state.get("animationSettings"),
+                "animationPlan": state.get("animationPlan"),
+                "animationAssetLibrary": state.get("animationAssetLibrary"),
+                "currentAnimationBatchId": state.get("currentAnimationBatchId"),
             },
         )
         self._replace_media_assets(connection, state.get("assets", []))
@@ -632,15 +688,22 @@ class SQLiteStore:
         self._replace_captions(connection, state.get("captions", []))
         self._replace_storyboard_scenes(connection, state.get("storyboardScenes", []))
 
-        jobs = state.get("generationJobs", [])
-        if isinstance(jobs, list):
+        jobs = []
+        if isinstance(state.get("generationJobs"), list):
+            jobs.extend(state.get("generationJobs", []))
+        if isinstance(state.get("animationAssetJobs"), list):
+            jobs.extend(state.get("animationAssetJobs", []))
+        if jobs:
+            seen_job_ids: set[str] = set()
             for index, item in enumerate(jobs):
                 try:
                     job = GenerationJob(**item)
                 except ValueError:
                     continue
-                if not self._generation_job_exists(connection, job.id):
-                    self._upsert_generation_job_row(connection, job, index)
+                if job.id in seen_job_ids:
+                    continue
+                seen_job_ids.add(job.id)
+                self._upsert_generation_job_row(connection, job, index)
 
     def _replace_settings(self, connection: sqlite3.Connection, settings: Dict[str, Any]) -> None:
         now = _utc_now_iso()
@@ -1024,10 +1087,12 @@ class SQLiteStore:
             row["key"]: _json_loads(row["value_json"], None)
             for row in connection.execute("SELECT key, value_json FROM project_settings").fetchall()
         }
-        jobs = [job.model_dump(by_alias=True) for job in self._load_jobs_from_connection(connection)]
+        loaded_jobs = self._load_jobs_from_connection(connection)
+        jobs = [job.model_dump(by_alias=True) for job in loaded_jobs if job.metadata.get("flow") != "auto_animate"]
+        animation_jobs = [job.model_dump(by_alias=True) for job in loaded_jobs if job.metadata.get("flow") == "auto_animate"]
         generated_media_assets = [
             asset.model_dump(by_alias=True)
-            for asset in self._generated_assets_from_jobs(self._load_jobs_from_connection(connection))
+            for asset in self._generated_assets_from_jobs(loaded_jobs)
         ]
         state = {
             "version": settings.get("version") or 1,
@@ -1052,6 +1117,11 @@ class SQLiteStore:
             "generationJobs": jobs,
             "generatedMediaAssets": generated_media_assets,
             "isGenerationBatchPaused": bool(settings.get("isGenerationBatchPaused", False)),
+            "animationSettings": settings.get("animationSettings"),
+            "animationPlan": settings.get("animationPlan"),
+            "animationAssetLibrary": settings.get("animationAssetLibrary"),
+            "animationAssetJobs": animation_jobs,
+            "currentAnimationBatchId": settings.get("currentAnimationBatchId"),
         }
         return {key: value for key, value in state.items() if value is not None}
 

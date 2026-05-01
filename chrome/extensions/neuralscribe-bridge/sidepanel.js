@@ -23,6 +23,7 @@ const elements = {
   claimOnceBtn: document.getElementById("claimOnceBtn"),
   stopJobsBtn: document.getElementById("stopJobsBtn"),
   clearJobHistoryBtn: document.getElementById("clearJobHistoryBtn"),
+  clearAllJobsBtn: document.getElementById("clearAllJobsBtn"),
   jobList: document.getElementById("jobList"),
   logEntries: document.getElementById("logEntries"),
 };
@@ -40,7 +41,8 @@ elements.disconnectBtn.addEventListener("click", disconnectBridge);
 elements.startJobsBtn.addEventListener("click", startJobs);
 elements.claimOnceBtn.addEventListener("click", claimOnce);
 elements.stopJobsBtn.addEventListener("click", stopJobs);
-elements.clearJobHistoryBtn.addEventListener("click", clearJobHistory);
+elements.clearJobHistoryBtn.addEventListener("click", () => clearJobHistory(false));
+elements.clearAllJobsBtn.addEventListener("click", () => clearJobHistory(true));
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "bridge.statusChanged") {
@@ -176,22 +178,29 @@ async function stopJobs() {
   }
 }
 
-async function clearJobHistory() {
+async function clearJobHistory(includeActive) {
   const projectId = elements.projectSelect.value;
   if (!projectId) {
     addLog("Select a project before clearing job history");
     return;
   }
+  if (includeActive && !window.confirm("Clear all queued, running, completed, and failed jobs for this project? This also stops the local runner.")) {
+    return;
+  }
   try {
+    if (includeActive) {
+      await send({ type: "jobs.reset" });
+    }
     const url = new URL(`${elements.httpBaseUrl.value.replace(/\/$/, "")}/api/generation/jobs/history`);
     const provider = selectedProviderFilter();
     if (provider) url.searchParams.set("provider", provider);
     url.searchParams.set("projectId", projectId);
+    if (includeActive) url.searchParams.set("includeActive", "true");
     const response = await fetch(url, { method: "DELETE" });
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
     await refreshJobList();
-    addLog(`Cleared ${Number(data.cleared || 0)} finished job${Number(data.cleared || 0) === 1 ? "" : "s"}`);
+    addLog(`Cleared ${Number(data.cleared || 0)} ${includeActive ? "total" : "finished"} job${Number(data.cleared || 0) === 1 ? "" : "s"}`);
   } catch (error) {
     addLog(`Clear history failed: ${error.message}`);
   }

@@ -134,9 +134,12 @@ class GenerationQueueService:
         provider: Optional[ProviderName] = None,
         project_id: Optional[str] = None,
         statuses: Optional[Iterable[GenerationJobStatus]] = None,
+        include_active: bool = False,
     ) -> int:
         self._refresh_from_store()
         clearable_statuses = set(statuses or HISTORY_CLEAR_STATUSES)
+        if include_active:
+            clearable_statuses.update(("queued", "running"))
         if not clearable_statuses:
             return 0
 

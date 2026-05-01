@@ -48,7 +48,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 async function runMetaJob(job, options) {
   const timeoutMs = Number(options.timeoutMs || 180000);
   const requestedMediaType = job.mediaType || "image";
-  const promptBox = await waitForElement(META_SELECTORS.promptBox, 30000);
+  let promptBox = await waitForPromptBox(30000);
   if (!promptBox) {
     if (hasManualActionElement()) {
       return manualActionResult(job, "Meta needs login or captcha before prompt input is available.");
@@ -58,16 +58,22 @@ async function runMetaJob(job, options) {
 
   await primeExistingMediaSnapshot();
   await ensureRequestedMode(requestedMediaType);
+  promptBox = await waitForPromptBox(15000) || promptBox;
 
   const prompt = buildPrompt(job);
-  fillPrompt(promptBox, prompt);
+  await fillPrompt(promptBox, prompt);
+  const promptReady = await waitForPromptText(promptBox, prompt, 5000);
+  if (!promptReady) {
+    await fillPrompt(promptBox, prompt, true);
+    await waitForPromptText(promptBox, prompt, 3000);
+  }
 
-  const generateButton = await waitForGenerateButton(requestedMediaType === "video" ? 45000 : 25000);
+  const generateButton = await waitForGenerateButton(promptBox, requestedMediaType === "video" ? 45000 : 25000);
   if (!generateButton) {
     if (hasManualActionElement()) {
       return manualActionResult(job, "Meta needs login or captcha before generation can start.");
     }
-    return manualActionResult(job, generateButtonDisabledMessage(requestedMediaType));
+    return manualActionResult(job, generateButtonDisabledMessage(requestedMediaType, promptBox));
   }
 
   const mediaBefore = captureMediaBaseline();
@@ -141,7 +147,7 @@ function buildPrompt(job) {
   return `${mediaInstruction}\n\n${prompt}\n\n${aspectInstruction}`.trim();
 }
 
-function fillPrompt(element, prompt) {
+async function fillPrompt(element, prompt, forceTextContent = false) {
   element.focus();
   if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
@@ -153,15 +159,25 @@ function fillPrompt(element, prompt) {
     return;
   }
 
-  const selection = window.getSelection();
-  const range = document.createRange();
-  range.selectNodeContents(element);
-  selection?.removeAllRanges();
-  selection?.addRange(range);
-  document.execCommand("insertText", false, prompt);
+  element.focus();
+  document.execCommand("selectAll", false);
+  document.execCommand("delete", false);
+  await sleep(50);
+  if (forceTextContent) {
+    element.textContent = prompt;
+  } else {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    document.execCommand("insertText", false, prompt);
+  }
   element.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: prompt }));
   element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
   element.dispatchEvent(new Event("change", { bubbles: true }));
+  element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: " " }));
+  element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: " " }));
   element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: " " }));
 }
 
@@ -219,10 +235,10 @@ function isSelectedControl(element) {
   );
 }
 
-async function waitForGenerateButton(timeoutMs) {
+async function waitForGenerateButton(promptBox, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const button = findFirst(META_SELECTORS.generateButton, true);
+    const button = findGenerateButton(promptBox, true);
     if (button && !button.disabled && button.getAttribute("aria-disabled") !== "true") {
       return button;
     }
@@ -231,15 +247,14 @@ async function waitForGenerateButton(timeoutMs) {
   return null;
 }
 
-function generateButtonDisabledMessage(mediaType) {
-  const buttons = META_SELECTORS.generateButton
-    .flatMap((selector) => [...document.querySelectorAll(selector)])
-    .filter(isVisibleElement);
+function generateButtonDisabledMessage(mediaType, promptBox) {
+  const buttons = findGenerateButtonCandidates(promptBox);
   const disabledCount = buttons.filter((button) =>
     button.disabled || button.getAttribute("aria-disabled") === "true"
   ).length;
   const modeText = mediaType === "video" ? " Also check that Meta is in video mode." : "";
-  return `Meta prompt was inserted, but the generate button was not enabled. Visible generate buttons: ${buttons.length}, disabled: ${disabledCount}.${modeText}`;
+  const promptTextLength = getPromptText(promptBox).length;
+  return `Meta prompt was inserted, but the generate button was not enabled. Visible generate buttons: ${buttons.length}, disabled: ${disabledCount}, prompt text length: ${promptTextLength}.${modeText}`;
 }
 
 async function waitForGeneratedMedia(timeoutMs, baseline, requestedMediaType, prompt, mediaObserver) {
@@ -254,6 +269,7 @@ async function waitForGeneratedMedia(timeoutMs, baseline, requestedMediaType, pr
   while (Date.now() < deadline) {
     const candidates = findMediaCandidates(prompt)
       .filter((candidate) => !baseline.urls.has(candidate.url))
+      .filter((candidate) => mediaObserver.hasCandidate(candidate) || candidate.promptScore > 0)
       .filter((candidate) => requestedMediaType !== "video" || candidate.mediaType === "video");
 
     for (const candidate of candidates) {
@@ -605,6 +621,148 @@ function firstSrcSetUrl(srcset) {
   if (!srcset) return "";
   const firstCandidate = srcset.split(",").map((candidate) => candidate.trim()).find(Boolean);
   return firstCandidate ? firstCandidate.split(/\s+/)[0] : "";
+}
+
+async function waitForPromptBox(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const element = findPromptBox();
+    if (element) return element;
+    await sleep(500);
+  }
+  return null;
+}
+
+function findPromptBox() {
+  const candidates = uniqueElements(
+    META_SELECTORS.promptBox.flatMap((selector) => [...document.querySelectorAll(selector)])
+  )
+    .filter(isEditablePromptElement)
+    .map((element) => ({ element, score: promptBoxScore(element) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return candidates[0]?.element || null;
+}
+
+function isEditablePromptElement(element) {
+  if (!isVisibleElement(element)) return false;
+  if (element.disabled || element.getAttribute("aria-disabled") === "true") return false;
+  if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) return true;
+  return element.getAttribute("contenteditable") === "true";
+}
+
+function promptBoxScore(element) {
+  const rect = element.getBoundingClientRect();
+  if (rect.width < 120 || rect.height < 16) return 0;
+  const label = normalizeText([
+    element.getAttribute("aria-label"),
+    element.getAttribute("placeholder"),
+    element.getAttribute("role"),
+    element.getAttribute("data-testid"),
+    element.getAttribute("title"),
+  ].filter(Boolean).join(" "));
+  let score = 10;
+  if (/\b(textbox|searchbox)\b/.test(label)) score += 12;
+  if (/\b(prompt|describe|imagine|create|message)\b/.test(label)) score += 24;
+  if (element instanceof HTMLTextAreaElement) score += 12;
+  if (element.getAttribute("contenteditable") === "true") score += 10;
+  score += Math.min(20, rect.width / 40);
+  score += Math.min(10, rect.height / 12);
+  score += Math.min(14, Math.max(0, rect.top + window.scrollY) / 240);
+  return score;
+}
+
+async function waitForPromptText(element, prompt, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (promptTextMatches(getPromptText(element), prompt)) return true;
+    await sleep(250);
+  }
+  return promptTextMatches(getPromptText(element), prompt);
+}
+
+function getPromptText(element) {
+  if (!element) return "";
+  if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+    return String(element.value || "");
+  }
+  return String(element.innerText || element.textContent || "");
+}
+
+function promptTextMatches(value, prompt) {
+  const text = normalizeText(value);
+  const expected = normalizeText(prompt);
+  if (!expected) return text.length > 0;
+  if (text.includes(expected.slice(0, Math.min(60, expected.length)))) return true;
+  const keywords = expected.split(" ").filter((word) => word.length > 4).slice(0, 8);
+  if (keywords.length === 0) return false;
+  const matches = keywords.filter((word) => text.includes(word)).length;
+  return matches >= Math.min(4, keywords.length);
+}
+
+function findGenerateButton(promptBox, enabledOnly = false) {
+  const candidates = findGenerateButtonCandidates(promptBox)
+    .filter((button) => !enabledOnly || (!button.disabled && button.getAttribute("aria-disabled") !== "true"))
+    .map((button) => ({ button, score: generateButtonScore(button, promptBox) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return candidates[0]?.button || null;
+}
+
+function findGenerateButtonCandidates(promptBox) {
+  const selectorMatches = META_SELECTORS.generateButton
+    .flatMap((selector) => [...document.querySelectorAll(selector)]);
+  const scoredButtons = [...document.querySelectorAll("button")]
+    .filter((button) => generateButtonScore(button, promptBox) > 0);
+  return uniqueElements([...selectorMatches, ...scoredButtons]).filter(isVisibleElement);
+}
+
+function generateButtonScore(button, promptBox) {
+  if (!isVisibleElement(button)) return 0;
+  const text = normalizeText([
+    button.getAttribute("aria-label"),
+    button.getAttribute("title"),
+    button.getAttribute("type"),
+    button.getAttribute("data-testid"),
+    button.textContent,
+  ].filter(Boolean).join(" "));
+  if (/\b(download|share|copy|close|cancel|delete|remove|like|dislike|menu|settings|profile|login|log in|sign in)\b/.test(text)) {
+    return 0;
+  }
+
+  let score = 0;
+  if (/\b(generate|create|submit|send|imagine)\b/.test(text)) score += 55;
+  if (button.getAttribute("type") === "submit") score += 24;
+  if (button.matches(META_SELECTORS.generateButton.join(","))) score += 20;
+  if (button.querySelector("svg")) score += 8;
+  if (String(button.className || "").includes("bg-linear-to-r")) score += 12;
+
+  if (promptBox) {
+    const promptRect = promptBox.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    const sharedDepth = sharedAncestorDepth(promptBox, button, 7);
+    if (sharedDepth >= 0) score += Math.max(0, 42 - sharedDepth * 5);
+    const verticalDistance = Math.abs((buttonRect.top + buttonRect.bottom) / 2 - (promptRect.top + promptRect.bottom) / 2);
+    const horizontalDistance = Math.abs((buttonRect.left + buttonRect.right) / 2 - promptRect.right);
+    if (verticalDistance < Math.max(120, promptRect.height * 2.5)) score += 20;
+    if (horizontalDistance < Math.max(220, promptRect.width * 0.35)) score += 12;
+    if (buttonRect.left >= promptRect.left - 16 && buttonRect.top >= promptRect.top - 80) score += 8;
+  }
+
+  return score;
+}
+
+function sharedAncestorDepth(first, second, maxDepth) {
+  let current = first;
+  for (let depth = 0; current && depth <= maxDepth; depth++) {
+    if (current.contains(second)) return depth;
+    current = current.parentElement;
+  }
+  return -1;
+}
+
+function uniqueElements(elements) {
+  return [...new Set(elements.filter(Boolean))];
 }
 
 async function waitForElement(selectors, timeoutMs) {

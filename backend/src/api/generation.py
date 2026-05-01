@@ -126,11 +126,13 @@ def build_generation_router(
         provider: Optional[ProviderName] = None,
         project_id: Optional[str] = Query(None, alias="projectId"),
         statuses: Optional[List[GenerationJobStatus]] = Query(None),
+        include_active: bool = Query(False, alias="includeActive"),
     ):
         cleared = queue_service.clear_job_history(
             provider=provider,
             project_id=project_id,
             statuses=statuses,
+            include_active=include_active,
         )
         return GenerationJobHistoryClearResponse(cleared=cleared)
 

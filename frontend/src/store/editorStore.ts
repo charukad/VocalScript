@@ -460,6 +460,20 @@ const persistProjectSnapshot = async (state: EditorState): Promise<ProjectSummar
   return savedProject;
 };
 
+let projectAutosaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+const scheduleProjectAutosave = (get: () => EditorState, delayMs = 800) => {
+  const state = get();
+  if (!state.currentProject) return;
+  if (projectAutosaveTimer) clearTimeout(projectAutosaveTimer);
+  projectAutosaveTimer = setTimeout(() => {
+    projectAutosaveTimer = null;
+    const latest = get();
+    if (!latest.currentProject || latest.isSavingProject) return;
+    void latest.saveProject();
+  }, delayMs);
+};
+
 const getTranscriptSourceClip = (state: Pick<EditorState, 'clips' | 'selectedClipId'>): TimelineClip | null => {
   const selectedClip = state.clips.find(clip => clip.id === state.selectedClipId);
   if (selectedClip && hasPlayableAudioSource(selectedClip)) return selectedClip;
@@ -3004,6 +3018,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set(state => ({
       animationSettings: { ...state.animationSettings, ...settings },
     }));
+    scheduleProjectAutosave(get);
   },
 
   generateAnimationPlan: async () => {
@@ -3051,6 +3066,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         },
         animationStatus: `Animation plan ready: ${plan.scenes.length} scenes, ${plan.assetNeeds.length} reusable assets (${plan.usedLlmMode}).`,
       });
+      scheduleProjectAutosave(get, 200);
     } catch (err) {
       console.error(err);
       alert(err instanceof Error ? err.message : 'Animation planning failed');
@@ -3077,6 +3093,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         animationStatus: 'Animation scene edited.',
       };
     });
+    scheduleProjectAutosave(get);
   },
 
   updateAnimationAssetNeed: (id, updates) => {
@@ -3092,6 +3109,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         animationStatus: 'Animation asset edited.',
       };
     });
+    scheduleProjectAutosave(get);
   },
 
   assignAnimationAssetNeed: (needId, memoryAssetId) => {
@@ -3127,6 +3145,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         animationStatus: assigned ? `Assigned ${assigned.name}.` : 'Asset assignment cleared.',
       };
     });
+    scheduleProjectAutosave(get, 200);
   },
 
   approveAnimationPlan: () => {
@@ -3140,6 +3159,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         animationStatus: 'Animation plan approved.',
       };
     });
+    scheduleProjectAutosave(get, 200);
   },
 
   createAnimationMissingAssetJobs: async () => {
@@ -3311,7 +3331,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
               : 'No new generated animation assets yet.',
         };
       });
-      if (get().currentProject && newMemoryItems.length > 0) void get().saveProject();
+      if (get().currentProject) scheduleProjectAutosave(get, newMemoryItems.length > 0 ? 100 : 600);
     } catch (err) {
       console.error(err);
       if (!silent) alert(err instanceof Error ? err.message : 'Animation asset sync failed');
@@ -3616,5 +3636,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       selectedClipId: newClips[0]?.id ?? state.selectedClipId,
       animationStatus: `Built ${newClips.length} editable animation clips.${warning}`,
     });
+    scheduleProjectAutosave(get, 100);
   },
 }));

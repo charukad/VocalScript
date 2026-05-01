@@ -57,7 +57,7 @@ class ProjectService:
         if self.store:
             project = self.store.get_project(project_id)
             if project:
-                return project
+                return self._merge_legacy_project_file_state(project)
         project_file = self._find_project_file(project_id)
         if not project_file:
             return None
@@ -188,6 +188,34 @@ class ProjectService:
             return ProjectDetail(**raw)
         except (OSError, json.JSONDecodeError, ValueError):
             return None
+
+    def _merge_legacy_project_file_state(self, project: ProjectDetail) -> ProjectDetail:
+        if not self.store or not project.project_file_path:
+            return project
+        project_file = Path(project.project_file_path)
+        file_project = self._read_project_file(project_file)
+        if not file_project or file_project.id != project.id:
+            return project
+        file_state = file_project.state if isinstance(file_project.state, dict) else {}
+        database_state = project.state if isinstance(project.state, dict) else {}
+        animation_keys = (
+            "animationSettings",
+            "animationPlan",
+            "animationAssetLibrary",
+            "animationAssetJobs",
+            "currentAnimationBatchId",
+        )
+        merged_state = dict(database_state)
+        changed = False
+        for key in animation_keys:
+            if file_state.get(key) and not database_state.get(key):
+                merged_state[key] = file_state[key]
+                changed = True
+        if changed:
+            merged_project = project.model_copy(update={"state": merged_state})
+            self.store.upsert_project(merged_project)
+            return merged_project
+        return project
 
     def _summary(self, project: ProjectDetail) -> ProjectSummary:
         return ProjectSummary(
