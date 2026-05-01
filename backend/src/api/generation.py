@@ -29,6 +29,7 @@ from backend.src.domain.models.generation import (
     TranscriptSlice,
 )
 from backend.src.domain.services.generation_queue_service import GenerationQueueService
+from backend.src.domain.services.browser_bridge_service import BrowserBridgeService
 from backend.src.domain.services.storyboard_service import StoryboardService
 
 
@@ -36,6 +37,7 @@ def build_generation_router(
     storyboard_service: StoryboardService,
     transcriber: ITranscriber,
     queue_service: GenerationQueueService,
+    bridge_service: Optional[BrowserBridgeService] = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/generation", tags=["generation"])
 
@@ -184,6 +186,10 @@ def build_generation_router(
 
     @router.post("/jobs/claim", response_model=GenerationJob)
     async def claim_generation_job(request: GenerationJobClaimRequest):
+        if bridge_service and request.worker_id:
+            can_claim, reason = bridge_service.can_worker_claim(request.worker_id)
+            if not can_claim:
+                raise HTTPException(status_code=409, detail=reason)
         job = queue_service.claim_next_job(
             provider=request.provider,
             worker_id=request.worker_id,

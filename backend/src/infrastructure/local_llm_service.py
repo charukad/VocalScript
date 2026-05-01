@@ -411,6 +411,7 @@ Rules:
 - Return JSON only with top-level keys: assetNeeds, scenes, rendererRecommendation, and rendererNotes.
 - Generate as few reusable assets as possible.
 - assetNeeds must describe characters, backgrounds, props, icons, overlays, or text assets.
+- For character motion, prefer reusable transparent character/hand/arm pose layers plus motion keyframes; never ask for generated full video clips.
 - Each asset need must include id, name, assetType, description, prompt, negativePrompt, style, tags, reuseDecision, status, matchedAssetId, optional.
 - reuseDecision must be one of reuse, generate, optional.
 - status must be one of available, missing, queued, generated, failed.
@@ -422,7 +423,7 @@ Rules:
 - layout cue: template, safeArea, note. Use layout template {request.layout_template}.
 - caption cue: template, keywords, note. Use caption template {request.caption_template}.
 - camera cue: preset, direction, note.
-- motion.preset must be one of none, fade, slide, pop, zoom, pan, float, bounce, caption_highlight, push_in, pull_out, parallax.
+- motion.preset must be one of none, fade, slide, pop, zoom, pan, float, bounce, caption_highlight, push_in, pull_out, parallax, talking_bob, hand_wave, point, walk_cycle.
 - Use the existing timeline/keyframe renderer; do not require generated full scene clips.
 - Do not introduce Remotion in V1; rendererNotes may describe it only as a future optional renderer candidate.
 - Aspect ratio: {request.aspect_ratio}

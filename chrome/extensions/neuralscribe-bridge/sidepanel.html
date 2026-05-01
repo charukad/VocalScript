@@ -25,9 +25,29 @@
           <span>Last update</span>
           <strong id="updatedAt">-</strong>
         </div>
+        <div class="status-line">
+          <span>Extension</span>
+          <strong id="extensionVersion">-</strong>
+        </div>
+        <div class="status-line">
+          <span>Detected profile</span>
+          <strong id="profileEmail">-</strong>
+        </div>
+        <div class="status-line">
+          <span>Cooldown</span>
+          <strong id="cooldownText">-</strong>
+        </div>
       </section>
 
       <section class="settings">
+        <label>
+          Account Label
+          <input id="accountLabel" type="text" spellcheck="false" placeholder="Meta account 1">
+        </label>
+        <label>
+          Chrome Profile Label
+          <input id="chromeProfileLabel" type="text" spellcheck="false" placeholder="Chrome Profile A">
+        </label>
         <label>
           Backend WebSocket
           <input id="wsUrl" type="text" spellcheck="false">

@@ -147,6 +147,21 @@ Manual tests after Phase 8:
 
 - [x] Auto Animate V1 uses the existing timeline and export path.
 - [x] Scale, opacity, and text overlay keyframes are represented on timeline clips.
-- [x] Position-style motions such as slide, pan, float, and parallax currently create editable timeline clips and warnings, but full positional export support remains a future renderer/export enhancement.
+- [x] Position-style motions such as slide, pan, float, and parallax now create editable x/y keyframes for preview.
 - [x] Remotion is intentionally not part of V1.
 - [x] Phase 8 adds advanced cue metadata while keeping the V1 timeline/export workflow as the active renderer.
+
+## Stabilization Pass: 2026-05-01
+
+- [x] Sync Auto Animate jobs and generated media across the whole project, not only the current batch.
+- [x] Add a generated-media shelf so already imported Auto Animate assets are visible in the panel.
+- [x] Keep Generate Asset and Find Media controls visible when a job record is missing or stale.
+- [x] Make failed animation asset jobs retry from the missing-assets workflow instead of silently reusing stale failures.
+- [x] Reset stale `queued` asset needs back to `missing` when backend jobs no longer exist.
+- [x] Add x/y keyframe support to preview and Inspector controls.
+- [x] Add procedural character gesture presets: talking bob, hand wave, point, and walk cycle.
+- [x] Add a reusable narrator gesture hand layer to animation plans so hand movement can be built from still assets instead of generated video clips.
+- [x] Harden the bridge Clear All flow so stale provider results are ignored after jobs are cleared.
+- [x] Stop the extension from force-reloading the Meta tab for every job.
+- [x] Retry Meta content-script messages when Chrome closes the message channel during page navigation.
+- [x] Add richer Meta prompt-input diagnostics to failed jobs in the extension panel.

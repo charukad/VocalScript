@@ -3,6 +3,11 @@ const elements = {
   statusDot: document.getElementById("statusDot"),
   statusText: document.getElementById("statusText"),
   updatedAt: document.getElementById("updatedAt"),
+  extensionVersion: document.getElementById("extensionVersion"),
+  profileEmail: document.getElementById("profileEmail"),
+  cooldownText: document.getElementById("cooldownText"),
+  accountLabel: document.getElementById("accountLabel"),
+  chromeProfileLabel: document.getElementById("chromeProfileLabel"),
   wsUrl: document.getElementById("wsUrl"),
   httpBaseUrl: document.getElementById("httpBaseUrl"),
   projectSelect: document.getElementById("projectSelect"),
@@ -108,6 +113,8 @@ function readSettings() {
   return {
     wsUrl: elements.wsUrl.value,
     httpBaseUrl: elements.httpBaseUrl.value,
+    accountLabel: elements.accountLabel.value,
+    chromeProfileLabel: elements.chromeProfileLabel.value,
     projectId: elements.projectSelect.value,
     sessionToken: elements.sessionToken.value,
     metaUrl: elements.metaUrl.value,
@@ -120,6 +127,8 @@ function readSettings() {
 function renderSettings(settings) {
   elements.wsUrl.value = settings.wsUrl || "";
   elements.httpBaseUrl.value = settings.httpBaseUrl || "";
+  elements.accountLabel.value = settings.accountLabel || "";
+  elements.chromeProfileLabel.value = settings.chromeProfileLabel || "";
   if (settings.projectId && elements.projectSelect.value !== settings.projectId) {
     elements.projectSelect.value = settings.projectId;
   }
@@ -137,10 +146,20 @@ function renderStatus(status) {
   if (status.status === "connecting") elements.statusDot.classList.add("connecting");
   elements.statusText.textContent = status.message || status.status || "Disconnected";
   elements.workerId.textContent = status.workerId || "Worker pending";
+  elements.extensionVersion.textContent = status.extensionVersion || "-";
+  elements.profileEmail.textContent = status.profileEmail || status.accountLabel || status.chromeProfileLabel || "-";
+  elements.cooldownText.textContent = formatCooldown(status.cooldownUntil);
   elements.updatedAt.textContent = status.updatedAt ? new Date(status.updatedAt).toLocaleTimeString() : "-";
   elements.jobRunnerText.textContent = status.jobMessage || (status.jobRunning ? "Running" : "Stopped");
   elements.currentJobText.textContent = status.currentJob ? formatJob(status.currentJob) : "-";
   elements.currentProjectText.textContent = projectName(status.currentJob?.projectId || elements.projectSelect.value) || "-";
+}
+
+function formatCooldown(cooldownUntil) {
+  if (!cooldownUntil) return "-";
+  const remainingMs = new Date(cooldownUntil).getTime() - Date.now();
+  if (remainingMs <= 0) return "-";
+  return `${Math.ceil(remainingMs / 1000)}s`;
 }
 
 async function startJobs() {
@@ -189,7 +208,12 @@ async function clearJobHistory(includeActive) {
   }
   try {
     if (includeActive) {
-      await send({ type: "jobs.reset" });
+      const resetResponse = await send({ type: "jobs.reset" });
+      if (resetResponse.ok) {
+        renderStatus(resetResponse.status);
+      } else {
+        addLog(resetResponse.error || "Runner reset failed before clearing jobs");
+      }
     }
     const url = new URL(`${elements.httpBaseUrl.value.replace(/\/$/, "")}/api/generation/jobs/history`);
     const provider = selectedProviderFilter();
@@ -271,6 +295,7 @@ async function refreshJobList() {
         <strong>${escapeHtml(job.status)} · ${escapeHtml(assetLabel)}${attempt}</strong>
         <span>${escapeHtml(flowLabel)} · ${escapeHtml(projectLabel)} · ${escapeHtml(job.mediaType || "media")}${aspect}</span>
         <span>${escapeHtml(job.id)} · ${escapeHtml(job.batchId || "no batch")}</span>
+        ${job.error ? `<span class="job-error">${escapeHtml(job.error)}</span>` : ""}
       `;
       elements.jobList.append(row);
     });

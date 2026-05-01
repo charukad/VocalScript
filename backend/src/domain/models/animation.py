@@ -35,6 +35,10 @@ AnimationMotionPreset = Literal[
     "push_in",
     "pull_out",
     "parallax",
+    "talking_bob",
+    "hand_wave",
+    "point",
+    "walk_cycle",
 ]
 
 

@@ -35,7 +35,27 @@ ProviderRuntimeStatus = Literal[
     "failed",
     "manual_action_required",
 ]
-BridgeConnectionStatus = Literal["connected", "disconnected"]
+BridgeConnectionStatus = Literal[
+    "connected",
+    "connecting",
+    "disconnected",
+    "stale",
+    "working",
+    "paused",
+    "cooldown",
+    "failed",
+    "error",
+    "version_mismatch",
+]
+BridgeProviderHealthStatus = Literal[
+    "unknown",
+    "ready",
+    "needs_login",
+    "manual_action_required",
+    "blocked",
+    "error",
+]
+BridgeDebugEventLevel = Literal["debug", "info", "warning", "error"]
 
 
 class ApiModel(BaseModel):
@@ -184,23 +204,137 @@ class GenerationJobRemoteStoreRequest(ApiModel):
     metadata: Dict[str, str] = Field(default_factory=dict)
 
 
+class ProviderCapability(ApiModel):
+    provider: ProviderName
+    can_generate_image: bool = Field(default=True, alias="canGenerateImage")
+    can_generate_video: bool = Field(default=True, alias="canGenerateVideo")
+    can_extend_video: bool = Field(default=False, alias="canExtendVideo")
+    supports_variants: bool = Field(default=True, alias="supportsVariants")
+    supports_upload: bool = Field(default=True, alias="supportsUpload")
+    supports_download: bool = Field(default=True, alias="supportsDownload")
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
+class ProviderHealthSnapshot(ApiModel):
+    provider: ProviderName
+    status: BridgeProviderHealthStatus = "unknown"
+    checked_at: Optional[str] = Field(default=None, alias="checkedAt")
+    page_url: Optional[str] = Field(default=None, alias="pageUrl")
+    page_title: Optional[str] = Field(default=None, alias="pageTitle")
+    message: Optional[str] = None
+    manual_action_required: bool = Field(default=False, alias="manualActionRequired")
+    can_find_prompt: bool = Field(default=False, alias="canFindPrompt")
+    can_find_generate_button: bool = Field(default=False, alias="canFindGenerateButton")
+    can_detect_media: bool = Field(default=False, alias="canDetectMedia")
+    can_extend_video: bool = Field(default=False, alias="canExtendVideo")
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
+class BridgeDebugEvent(ApiModel):
+    id: str
+    worker_id: str = Field(alias="workerId")
+    job_id: Optional[str] = Field(default=None, alias="jobId")
+    provider: Optional[ProviderName] = None
+    level: BridgeDebugEventLevel = "info"
+    step: str
+    message: str
+    created_at: str = Field(alias="createdAt")
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
+class BridgeDebugEventListResponse(ApiModel):
+    events: List[BridgeDebugEvent]
+
+
+class BridgeWorkerCommandResponse(ApiModel):
+    ok: bool
+    message: str
+    workers: List["BridgeWorkerSnapshot"] = Field(default_factory=list)
+
+
+class BridgeScreenshotUploadResponse(ApiModel):
+    ok: bool = True
+    event: BridgeDebugEvent
+    screenshot_url: str = Field(alias="screenshotUrl")
+    local_path: str = Field(alias="localPath")
+
+
 class BridgeWorkerRegistration(ApiModel):
     type: Literal["worker.ready"] = "worker.ready"
     worker_id: str = Field(alias="workerId")
     version: str
     providers: List[ProviderName]
+    extension_version: Optional[str] = Field(default=None, alias="extensionVersion")
+    account_label: Optional[str] = Field(default=None, alias="accountLabel")
+    chrome_profile_label: Optional[str] = Field(default=None, alias="chromeProfileLabel")
+    profile_email: Optional[str] = Field(default=None, alias="profileEmail")
+    capabilities: List[ProviderCapability] = Field(default_factory=list)
+    health: List[ProviderHealthSnapshot] = Field(default_factory=list)
+    current_job_id: Optional[str] = Field(default=None, alias="currentJobId")
+    current_project_id: Optional[str] = Field(default=None, alias="currentProjectId")
+    cooldown_until: Optional[str] = Field(default=None, alias="cooldownUntil")
+    last_error: Optional[str] = Field(default=None, alias="lastError")
+
+
+class BridgeWorkerHeartbeat(ApiModel):
+    type: Literal["worker.heartbeat"] = "worker.heartbeat"
+    worker_id: str = Field(alias="workerId")
+    sent_at: Optional[str] = Field(default=None, alias="sentAt")
+    providers: List[ProviderName] = Field(default_factory=list)
+    status: Optional[BridgeConnectionStatus] = None
+    job_running: bool = Field(default=False, alias="jobRunning")
+    current_job_id: Optional[str] = Field(default=None, alias="currentJobId")
+    current_project_id: Optional[str] = Field(default=None, alias="currentProjectId")
+    job_message: Optional[str] = Field(default=None, alias="jobMessage")
+    cooldown_until: Optional[str] = Field(default=None, alias="cooldownUntil")
+    last_error: Optional[str] = Field(default=None, alias="lastError")
+    account_label: Optional[str] = Field(default=None, alias="accountLabel")
+    chrome_profile_label: Optional[str] = Field(default=None, alias="chromeProfileLabel")
+    profile_email: Optional[str] = Field(default=None, alias="profileEmail")
+    capabilities: List[ProviderCapability] = Field(default_factory=list)
+    health: List[ProviderHealthSnapshot] = Field(default_factory=list)
+
+
+class BridgeWorkerHealthResult(ApiModel):
+    type: Literal["worker.health_result"] = "worker.health_result"
+    worker_id: str = Field(alias="workerId")
+    health: List[ProviderHealthSnapshot] = Field(default_factory=list)
+    capabilities: List[ProviderCapability] = Field(default_factory=list)
+
+
+class BridgeWorkerDebugEventMessage(BridgeDebugEvent):
+    type: Literal["worker.debug_event"] = "worker.debug_event"
 
 
 class BridgeWorkerSnapshot(ApiModel):
     worker_id: str = Field(alias="workerId")
     version: str
+    extension_version: str = Field(default="", alias="extensionVersion")
     providers: List[ProviderName]
     status: BridgeConnectionStatus
+    paused: bool = False
+    account_label: str = Field(default="", alias="accountLabel")
+    chrome_profile_label: str = Field(default="", alias="chromeProfileLabel")
+    profile_email: str = Field(default="", alias="profileEmail")
+    current_job_id: Optional[str] = Field(default=None, alias="currentJobId")
+    current_project_id: Optional[str] = Field(default=None, alias="currentProjectId")
+    job_message: str = Field(default="", alias="jobMessage")
+    cooldown_until: Optional[str] = Field(default=None, alias="cooldownUntil")
+    last_error: Optional[str] = Field(default=None, alias="lastError")
+    capabilities: List[ProviderCapability] = Field(default_factory=list)
+    health: List[ProviderHealthSnapshot] = Field(default_factory=list)
     connected_at: str = Field(alias="connectedAt")
     last_seen_at: str = Field(alias="lastSeenAt")
+    disconnected_at: Optional[str] = Field(default=None, alias="disconnectedAt")
+    compatibility: Dict[str, str] = Field(default_factory=dict)
 
 
 class BridgeStatusResponse(ApiModel):
+    workers: List[BridgeWorkerSnapshot]
+
+
+class BridgeWorkerCleanupResponse(ApiModel):
+    cleared: int
     workers: List[BridgeWorkerSnapshot]
 
 

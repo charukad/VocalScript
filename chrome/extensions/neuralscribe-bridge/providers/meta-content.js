@@ -2,6 +2,15 @@ const META_SELECTORS = {
   promptBox: [
     "div[contenteditable='true'][role='textbox']",
     "div[contenteditable='true'][role='searchbox']",
+    "div[contenteditable='true']",
+    "[contenteditable='true']",
+    "[contenteditable='plaintext-only']",
+    "[data-lexical-editor='true']",
+    "[role='textbox'][aria-multiline='true']",
+    "[aria-label*='prompt' i]",
+    "[aria-label*='describe' i]",
+    "[placeholder*='prompt' i]",
+    "[placeholder*='describe' i]",
     "textarea",
   ],
   generateButton: [
@@ -38,12 +47,71 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: true });
     return false;
   }
+  if (message?.type === "provider.meta.healthCheck") {
+    runMetaHealthCheck(message.options || {})
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message?.type !== "provider.meta.runJob") return false;
   runMetaJob(message.job, message.options || {})
     .then((result) => sendResponse({ ok: true, result }))
     .catch((error) => sendResponse({ ok: false, error: error.message }));
   return true;
 });
+
+async function runMetaHealthCheck(options = {}) {
+  const promptBox = await waitForPromptBox(options.includeAdapterTest ? 10000 : 2500);
+  const generateButton = promptBox ? findGenerateButton(promptBox, true) : null;
+  const mediaCandidates = findMediaCandidates();
+  const manualActionRequired = hasManualActionElement();
+  const canExtendVideo = findExtendVideoControl();
+  const healthStatus = manualActionRequired
+    ? "manual_action_required"
+    : promptBox
+      ? "ready"
+      : "needs_login";
+  const message = manualActionRequired
+    ? "Meta needs login, captcha, or another manual action."
+    : promptBox
+      ? `Meta is reachable. Prompt input ${generateButton ? "and generate controls were detected" : "was detected, generate button not yet enabled"}.`
+      : "Meta prompt input was not detected. Check that this account can access Meta create.";
+
+  const health = {
+    provider: "meta",
+    status: healthStatus,
+    checkedAt: new Date().toISOString(),
+    pageUrl: location.href,
+    pageTitle: document.title,
+    message,
+    manualActionRequired,
+    canFindPrompt: Boolean(promptBox),
+    canFindGenerateButton: Boolean(generateButton),
+    canDetectMedia: mediaCandidates.length > 0,
+    canExtendVideo: Boolean(canExtendVideo),
+    metadata: {
+      mediaCandidateCount: String(mediaCandidates.length),
+      includeAdapterTest: String(Boolean(options.includeAdapterTest)),
+      promptDebug: promptInputDebugSummary(),
+    },
+  };
+  return {
+    health,
+    capability: {
+      provider: "meta",
+      canGenerateImage: Boolean(promptBox) && !manualActionRequired,
+      canGenerateVideo: Boolean(promptBox) && !manualActionRequired,
+      canExtendVideo: Boolean(canExtendVideo),
+      supportsVariants: true,
+      supportsUpload: true,
+      supportsDownload: true,
+      metadata: {
+        pageUrl: location.href,
+        mediaCandidateCount: String(mediaCandidates.length),
+      },
+    },
+  };
+}
 
 async function runMetaJob(job, options) {
   const timeoutMs = Number(options.timeoutMs || 180000);
@@ -53,7 +121,7 @@ async function runMetaJob(job, options) {
     if (hasManualActionElement()) {
       return manualActionResult(job, "Meta needs login or captcha before prompt input is available.");
     }
-    throw new Error("Could not find Meta prompt input.");
+    throw new Error(`Could not find Meta prompt input. ${promptInputDebugSummary()}`);
   }
 
   await primeExistingMediaSnapshot();
@@ -208,6 +276,16 @@ function findModeControl(labelPatterns) {
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
   return scored[0]?.element || null;
+}
+
+function findExtendVideoControl() {
+  return findModeControl([
+    /\bextend\b/i,
+    /\bextend video\b/i,
+    /\bcontinue\b/i,
+    /\b10\s*second/i,
+    /\b10s\b/i,
+  ]);
 }
 
 function modeControlScore(element, labelPatterns) {
@@ -648,7 +726,8 @@ function isEditablePromptElement(element) {
   if (!isVisibleElement(element)) return false;
   if (element.disabled || element.getAttribute("aria-disabled") === "true") return false;
   if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) return true;
-  return element.getAttribute("contenteditable") === "true";
+  const editable = String(element.getAttribute("contenteditable") || "").toLowerCase();
+  return editable && editable !== "false";
 }
 
 function promptBoxScore(element) {
@@ -656,20 +735,68 @@ function promptBoxScore(element) {
   if (rect.width < 120 || rect.height < 16) return 0;
   const label = normalizeText([
     element.getAttribute("aria-label"),
+    element.getAttribute("aria-placeholder"),
     element.getAttribute("placeholder"),
     element.getAttribute("role"),
     element.getAttribute("data-testid"),
     element.getAttribute("title"),
+    element.dataset?.lexicalEditor ? "lexical editor" : "",
+    nearbyPromptText(element),
   ].filter(Boolean).join(" "));
   let score = 10;
   if (/\b(textbox|searchbox)\b/.test(label)) score += 12;
   if (/\b(prompt|describe|imagine|create|message)\b/.test(label)) score += 24;
   if (element instanceof HTMLTextAreaElement) score += 12;
-  if (element.getAttribute("contenteditable") === "true") score += 10;
+  if (String(element.getAttribute("contenteditable") || "").toLowerCase() !== "false") score += 10;
+  if (element.dataset?.lexicalEditor === "true") score += 14;
   score += Math.min(20, rect.width / 40);
   score += Math.min(10, rect.height / 12);
-  score += Math.min(14, Math.max(0, rect.top + window.scrollY) / 240);
+  const viewportCenter = window.innerHeight / 2;
+  score += Math.max(0, 18 - Math.abs(rect.top - viewportCenter) / 40);
   return score;
+}
+
+function nearbyPromptText(element) {
+  const parts = [];
+  let current = element;
+  for (let depth = 0; current && depth < 4; depth += 1) {
+    parts.push(current.textContent || "");
+    current = current.parentElement;
+  }
+  return parts.join(" ").slice(0, 300);
+}
+
+function promptInputDebugSummary() {
+  const editors = uniqueElements(
+    [
+      ...document.querySelectorAll("[contenteditable], textarea, input, [role='textbox'], [data-lexical-editor='true']"),
+    ]
+  )
+    .filter(isVisibleElement)
+    .slice(0, 8)
+    .map((element) => {
+      const rect = element.getBoundingClientRect();
+      const label = normalizeText([
+        element.tagName,
+        element.getAttribute("role"),
+        element.getAttribute("aria-label"),
+        element.getAttribute("placeholder"),
+        element.getAttribute("contenteditable"),
+        element.textContent,
+      ].filter(Boolean).join(" "));
+      return `${label.slice(0, 90)} @ ${Math.round(rect.width)}x${Math.round(rect.height)}`;
+    });
+  const buttons = [...document.querySelectorAll("button")]
+    .filter(isVisibleElement)
+    .slice(0, 10)
+    .map((button) => normalizeText([
+      button.getAttribute("aria-label"),
+      button.getAttribute("title"),
+      button.textContent,
+    ].filter(Boolean).join(" ")).slice(0, 50))
+    .filter(Boolean);
+  const bodyHint = normalizeText(document.body?.innerText || "").slice(0, 240);
+  return `URL: ${location.href}. Title: ${document.title || "untitled"}. Visible editors: ${editors.join(" | ") || "none"}. Buttons: ${buttons.join(" | ") || "none"}. Page text: ${bodyHint}`;
 }
 
 async function waitForPromptText(element, prompt, timeoutMs) {

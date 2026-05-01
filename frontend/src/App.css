@@ -67,6 +67,350 @@
   flex: 0 0 auto;
 }
 
+.bridge-monitor-shell {
+  position: fixed;
+  inset: 46px 0 0;
+  z-index: 1200;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.bridge-monitor {
+  width: min(920px, 100%);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border-color);
+  box-shadow: -18px 0 32px rgba(0, 0, 0, 0.36);
+}
+
+.bridge-monitor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.bridge-monitor-header h2,
+.bridge-worker-card h3 {
+  margin: 0;
+  color: var(--text-highlight);
+  font-size: 0.95rem;
+}
+
+.bridge-monitor-header p,
+.bridge-worker-card p {
+  margin: 0.25rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.bridge-monitor-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+
+.bridge-monitor-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.bridge-connected-strip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(91, 141, 239, 0.06);
+}
+
+.bridge-connected-strip span {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.bridge-connected-strip strong {
+  color: var(--text-highlight);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bridge-monitor-tabs {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 0;
+}
+
+.bridge-monitor-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 32px;
+  padding: 0 0.7rem;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.bridge-monitor-tabs button.active {
+  background: rgba(91, 141, 239, 0.16);
+  color: var(--text-highlight);
+  border-color: rgba(91, 141, 239, 0.55);
+}
+
+.bridge-monitor-tabs button span {
+  min-width: 20px;
+  padding: 0.1rem 0.3rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  text-align: center;
+  font-size: 0.65rem;
+}
+
+.bridge-monitor-summary div,
+.bridge-worker-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.bridge-monitor-summary div {
+  padding: 0.65rem;
+}
+
+.bridge-monitor-summary span,
+.bridge-worker-grid span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.bridge-monitor-summary strong,
+.bridge-worker-grid strong {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--text-highlight);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.bridge-worker-list {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  align-content: start;
+  gap: 0.75rem;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.bridge-worker-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.85rem;
+}
+
+.bridge-worker-card.status-working,
+.bridge-worker-card.status-connected {
+  border-color: rgba(91, 141, 239, 0.55);
+}
+
+.bridge-worker-card.status-failed,
+.bridge-worker-card.status-stale,
+.bridge-worker-card.status-version_mismatch,
+.bridge-worker-card.status-disconnected {
+  border-color: rgba(244, 135, 113, 0.55);
+}
+
+.bridge-worker-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.bridge-worker-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+.bridge-status-pill {
+  align-self: flex-start;
+  padding: 0.2rem 0.45rem;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+  text-transform: capitalize;
+}
+
+.bridge-status-pill.connected-now {
+  background: rgba(137, 209, 133, 0.15);
+  color: #89d185;
+}
+
+.bridge-status-pill.disconnected-now {
+  background: rgba(244, 135, 113, 0.14);
+  color: #f48771;
+}
+
+.bridge-status-pill.status-working,
+.bridge-status-pill.status-connected {
+  background: rgba(91, 141, 239, 0.16);
+  color: var(--text-highlight);
+}
+
+.bridge-status-pill.status-failed,
+.bridge-status-pill.status-stale,
+.bridge-status-pill.status-version_mismatch,
+.bridge-status-pill.status-disconnected {
+  background: rgba(244, 135, 113, 0.14);
+  color: #f48771;
+}
+
+.bridge-worker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.bridge-capability-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.bridge-capability-list span {
+  padding: 0.25rem 0.4rem;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 0.66rem;
+}
+
+.bridge-health-list,
+.bridge-debug-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.bridge-health-item,
+.bridge-debug-event {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.55rem;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.bridge-health-item.status-ready {
+  border-color: rgba(137, 209, 133, 0.45);
+}
+
+.bridge-health-item.status-error,
+.bridge-health-item.status-blocked,
+.bridge-health-item.status-needs_login,
+.bridge-health-item.status-manual_action_required,
+.bridge-debug-event.level-error {
+  border-color: rgba(244, 135, 113, 0.55);
+}
+
+.bridge-health-item strong,
+.bridge-debug-event strong,
+.bridge-debug-title {
+  color: var(--text-highlight);
+  font-size: 0.7rem;
+  text-transform: capitalize;
+}
+
+.bridge-health-item span,
+.bridge-debug-event span,
+.bridge-health-item small,
+.bridge-debug-event small {
+  color: var(--text-secondary);
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
+.bridge-debug-event a {
+  color: var(--accent-color);
+  font-size: 0.66rem;
+  text-decoration: none;
+}
+
+.bridge-worker-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.bridge-worker-actions .btn-secondary {
+  width: 100%;
+  min-height: 30px;
+  font-size: 0.72rem;
+}
+
+.bridge-worker-note,
+.bridge-worker-error,
+.bridge-monitor-error,
+.bridge-worker-empty {
+  padding: 0.65rem;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.bridge-worker-note {
+  background: rgba(91, 141, 239, 0.08);
+  color: var(--text-secondary);
+}
+
+.bridge-worker-error,
+.bridge-monitor-error {
+  background: rgba(244, 135, 113, 0.12);
+  color: #f48771;
+}
+
+.bridge-monitor-error {
+  margin: 1rem 1rem 0;
+}
+
+.bridge-worker-empty {
+  grid-column: 1 / -1;
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border-color);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
 .project-gate {
   min-height: 100vh;
   width: 100vw;
@@ -1235,6 +1579,50 @@
   color: #b7f4b7;
   font-size: 0.64rem;
   text-align: center;
+}
+
+.animation-generated-library {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 0.45rem;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.animation-generated-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+  padding: 0.35rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+}
+
+.animation-generated-item img,
+.animation-generated-placeholder {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: #000;
+  border-radius: 4px;
+}
+
+.animation-generated-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 0.65rem;
+}
+
+.animation-generated-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 0.65rem;
 }
 
 .animation-cue-grid {

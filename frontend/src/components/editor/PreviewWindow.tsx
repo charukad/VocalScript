@@ -78,9 +78,11 @@ export const PreviewWindow = () => {
     const scale = getKeyframedValue(clip, 'scale', playheadTime, clip.transform?.scale ?? 100);
     const rotation = getKeyframedValue(clip, 'rotation', playheadTime, clip.transform?.rotation ?? 0);
     const opacity = getKeyframedValue(clip, 'opacity', playheadTime, clip.transform?.opacity ?? 100);
+    const x = getKeyframedValue(clip, 'x', playheadTime, clip.animation?.x ?? 50);
+    const y = getKeyframedValue(clip, 'y', playheadTime, clip.animation?.y ?? 50);
     return {
-      left: `${clip.animation?.x ?? 50}%`,
-      top: `${clip.animation?.y ?? 50}%`,
+      left: `${x}%`,
+      top: `${y}%`,
       transform: `translate(-50%, -50%) scale(${scale / 100}) rotate(${rotation}deg) scaleX(${clip.transform?.flipX ? -1 : 1}) scaleY(${clip.transform?.flipY ? -1 : 1})`,
       opacity: Math.max(0, Math.min(1, opacity / 100)),
     };
@@ -255,13 +257,15 @@ export const PreviewWindow = () => {
                 const td = clip.textData!;
                 const scale = getKeyframedValue(clip, 'scale', playheadTime, clip.transform?.scale ?? 100);
                 const rotation = getKeyframedValue(clip, 'rotation', playheadTime, clip.transform?.rotation ?? 0);
+                const x = getKeyframedValue(clip, 'x', playheadTime, td.x);
+                const y = getKeyframedValue(clip, 'y', playheadTime, td.y);
                 return (
                   <div
                     key={clip.id}
                     style={{
                       position: 'absolute',
-                      left: `${td.x}%`,
-                      top: `${td.y}%`,
+                      left: `${x}%`,
+                      top: `${y}%`,
                       transform: `translate(-50%, -50%) scale(${scale / 100}) rotate(${rotation}deg)`,
                       fontFamily: td.fontFamily,
                       fontSize: `${td.fontSize}px`,

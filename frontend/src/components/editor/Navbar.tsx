@@ -1,6 +1,10 @@
 import { useEditorStore } from '../../store/editorStore';
 
-export const Navbar = () => {
+type NavbarProps = {
+  onOpenBridgeMonitor?: () => void;
+};
+
+export const Navbar = ({ onOpenBridgeMonitor }: NavbarProps) => {
   const {
     clips,
     isProcessing,
@@ -54,6 +58,9 @@ export const Navbar = () => {
         </span>
       </div>
       <div className="nav-actions">
+        <button className="btn-secondary" onClick={onOpenBridgeMonitor}>
+          Bridge Monitor
+        </button>
         {mediaUrl && (
           <a href={mediaUrl} download={exportedAudioOnly || !visualAsset ? "export.mp3" : "export.mp4"} className="btn-secondary" style={{textDecoration: 'none'}}>
             Download {exportedAudioOnly || !visualAsset ? "Audio" : "Video"}

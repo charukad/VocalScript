@@ -4,6 +4,8 @@ export const getClipPropertyValue = (clip: TimelineClip, property: KeyframePrope
   if (property === 'scale') return clip.transform?.scale ?? 100;
   if (property === 'rotation') return clip.transform?.rotation ?? 0;
   if (property === 'opacity') return clip.transform?.opacity ?? 100;
+  if (property === 'x') return clip.type === 'text' ? clip.textData?.x ?? clip.animation?.x ?? 50 : clip.animation?.x ?? 50;
+  if (property === 'y') return clip.type === 'text' ? clip.textData?.y ?? clip.animation?.y ?? 50 : clip.animation?.y ?? 50;
   return clip.audio?.volume ?? 100;
 };
 

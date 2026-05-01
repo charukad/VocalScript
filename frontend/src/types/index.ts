@@ -37,7 +37,7 @@ export type TextData = {
   bgOpacity: number;    // 0–1
 };
 
-export type KeyframeProperty = 'scale' | 'rotation' | 'opacity' | 'volume';
+export type KeyframeProperty = 'scale' | 'rotation' | 'opacity' | 'x' | 'y' | 'volume';
 
 export type Keyframe = {
   id: string;
@@ -197,7 +197,7 @@ export type AnimationExpression = 'neutral' | 'smile' | 'focus' | 'surprise' | '
 export type AnimationMouthCue = 'closed' | 'open' | 'wide' | 'smile';
 export type AnimationLayoutTemplate = 'auto' | 'explainer_split' | 'center_focus' | 'lower_third' | 'portrait_stack' | 'square_card';
 export type AnimationCaptionTemplate = 'clean_subtitle' | 'keyword_pop' | 'karaoke_highlight' | 'headline_burst';
-export type AnimationMotionPreset = 'none' | 'fade' | 'slide' | 'pop' | 'zoom' | 'pan' | 'float' | 'bounce' | 'caption_highlight' | 'push_in' | 'pull_out' | 'parallax';
+export type AnimationMotionPreset = 'none' | 'fade' | 'slide' | 'pop' | 'zoom' | 'pan' | 'float' | 'bounce' | 'caption_highlight' | 'push_in' | 'pull_out' | 'parallax' | 'talking_bob' | 'hand_wave' | 'point' | 'walk_cycle';
 
 export type AnimationAssetMemoryItem = {
   id: string;
@@ -379,6 +379,89 @@ export type GeneratedMediaAsset = {
   transcript: string;
   error: string | null;
   metadata: Record<string, string>;
+};
+
+export type BridgeConnectionStatus =
+  | 'connected'
+  | 'connecting'
+  | 'disconnected'
+  | 'stale'
+  | 'working'
+  | 'paused'
+  | 'cooldown'
+  | 'failed'
+  | 'error'
+  | 'version_mismatch';
+
+export type BridgeProviderHealthStatus =
+  | 'unknown'
+  | 'ready'
+  | 'needs_login'
+  | 'manual_action_required'
+  | 'blocked'
+  | 'error';
+
+export type ProviderCapability = {
+  provider: ProviderName;
+  canGenerateImage: boolean;
+  canGenerateVideo: boolean;
+  canExtendVideo: boolean;
+  supportsVariants: boolean;
+  supportsUpload: boolean;
+  supportsDownload: boolean;
+  metadata: Record<string, string>;
+};
+
+export type ProviderHealthSnapshot = {
+  provider: ProviderName;
+  status: BridgeProviderHealthStatus;
+  checkedAt: string | null;
+  pageUrl: string | null;
+  pageTitle: string | null;
+  message: string | null;
+  manualActionRequired: boolean;
+  canFindPrompt: boolean;
+  canFindGenerateButton: boolean;
+  canDetectMedia: boolean;
+  canExtendVideo: boolean;
+  metadata: Record<string, string>;
+};
+
+export type BridgeDebugEventLevel = 'debug' | 'info' | 'warning' | 'error';
+
+export type BridgeDebugEvent = {
+  id: string;
+  workerId: string;
+  jobId: string | null;
+  provider: ProviderName | null;
+  level: BridgeDebugEventLevel;
+  step: string;
+  message: string;
+  createdAt: string;
+  metadata: Record<string, string>;
+};
+
+export type BridgeWorkerSnapshot = {
+  workerId: string;
+  version: string;
+  extensionVersion: string;
+  providers: ProviderName[];
+  status: BridgeConnectionStatus;
+  paused: boolean;
+  accountLabel: string;
+  chromeProfileLabel: string;
+  profileEmail: string;
+  currentJobId: string | null;
+  currentProjectId: string | null;
+  jobMessage: string;
+  cooldownUntil: string | null;
+  lastError: string | null;
+  capabilities: ProviderCapability[];
+  health: ProviderHealthSnapshot[];
+  connectedAt: string;
+  lastSeenAt: string;
+  disconnectedAt: string | null;
+  compatibility: Record<string, string>;
 };
 
 export type ProjectSummary = {

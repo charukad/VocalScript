@@ -58,6 +58,10 @@ VALID_MOTION_PRESETS = {
     "push_in",
     "pull_out",
     "parallax",
+    "talking_bob",
+    "hand_wave",
+    "point",
+    "walk_cycle",
 }
 VALID_POSES = {"neutral", "talking", "pointing", "thinking", "happy", "concerned"}
 VALID_EXPRESSIONS = {"neutral", "smile", "focus", "surprise", "concern", "excited"}
@@ -76,8 +80,8 @@ class AnimationPlannerService:
         if llm_payload:
             plan = self._parse_llm_plan(llm_payload, normalized)
             if plan:
-                return plan
-        return self._create_rule_based_plan(normalized)
+                return self._ensure_character_gesture_layers(plan, normalized)
+        return self._ensure_character_gesture_layers(self._create_rule_based_plan(normalized), normalized)
 
     def _normalize_request(self, request: AnimationPlanRequest) -> AnimationPlanRequest:
         segments = [
@@ -187,10 +191,24 @@ class AnimationPlannerService:
             ),
             request.available_assets,
         )
+        gesture_arm = self._apply_reuse_decision(
+            self._make_asset_need(
+                "main narrator gesture hand layer",
+                "character",
+                (
+                    f"Reusable transparent cutout matching the narrator: right arm and hand only, "
+                    f"posed for waving and pointing in {request.style}"
+                ),
+                request,
+                ["character", "narrator", "rig", "arm", "hand", "gesture", "wave", "point", "transparent"],
+            ),
+            request.available_assets,
+        )
 
         needs_by_key: Dict[str, AnimationAssetNeed] = {
             self._need_key(background): background,
             self._need_key(character): character,
+            self._need_key(gesture_arm): gesture_arm,
         }
         scenes: List[AnimationScene] = []
 
@@ -257,10 +275,29 @@ class AnimationPlannerService:
                     scale=layout_positions["character_scale"],
                     opacity=100,
                     motion=AnimationMotion(
-                        preset="float" if index > 1 else "slide",
+                        preset="talking_bob" if index > 1 else "slide",
                         direction="left",
                         intensity=request.motion_intensity,
                         note=f"Reuse the base character; pose cue is {character_cue.pose} with {character_cue.expression} expression.",
+                    ),
+                ),
+                AnimationLayer(
+                    id=f"{scene_id}-gesture-hand",
+                    sceneId=scene_id,
+                    layerType="character",
+                    assetNeedId=gesture_arm.id,
+                    start=start,
+                    end=end,
+                    order=12,
+                    x=min(92.0, layout_positions["character_x"] + 8.0),
+                    y=max(12.0, layout_positions["character_y"] - 7.0),
+                    scale=max(18.0, layout_positions["character_scale"] * 0.38),
+                    opacity=100,
+                    motion=AnimationMotion(
+                        preset="point" if character_cue.pose == "pointing" else "hand_wave",
+                        direction="right",
+                        intensity=request.motion_intensity,
+                        note="Procedural character-rig gesture: animate the reusable hand layer with keyframes instead of generating video.",
                     ),
                 ),
                 AnimationLayer(
@@ -345,6 +382,100 @@ class AnimationPlannerService:
             duration=self._duration(scenes),
             rendererRecommendation="existing_timeline_v1_remotion_candidate",
             rendererNotes=self._renderer_notes(None),
+        )
+
+    def _ensure_character_gesture_layers(
+        self,
+        plan: AnimationPlan,
+        request: AnimationPlanRequest,
+    ) -> AnimationPlan:
+        has_character_layer = any(
+            layer.layer_type == "character"
+            for scene in plan.scenes
+            for layer in scene.layers
+        )
+        if not has_character_layer:
+            return plan
+
+        gesture_need = next(
+            (
+                need for need in plan.asset_needs
+                if need.asset_type == "character"
+                and (
+                    {"rig", "hand", "arm", "gesture"} & set(need.tags)
+                    or "gesture hand" in need.name.lower()
+                    or "hand layer" in need.name.lower()
+                )
+            ),
+            None,
+        )
+        needs = list(plan.asset_needs)
+        if not gesture_need:
+            gesture_need = self._apply_reuse_decision(
+                self._make_asset_need(
+                    "main narrator gesture hand layer",
+                    "character",
+                    (
+                        f"Reusable transparent cutout matching the narrator: right arm and hand only, "
+                        f"posed for waving and pointing in {request.style}"
+                    ),
+                    request,
+                    ["character", "narrator", "rig", "arm", "hand", "gesture", "wave", "point", "transparent"],
+                ),
+                request.available_assets,
+            )
+            needs.append(gesture_need)
+
+        repaired_scenes: List[AnimationScene] = []
+        for scene in plan.scenes:
+            if any(layer.asset_need_id == gesture_need.id or layer.id.endswith("gesture-hand") for layer in scene.layers):
+                repaired_scenes.append(scene)
+                continue
+            character_layer = next(
+                (
+                    layer for layer in scene.layers
+                    if layer.layer_type == "character" and layer.asset_need_id != gesture_need.id
+                ),
+                None,
+            )
+            if not character_layer:
+                repaired_scenes.append(scene)
+                continue
+
+            pose = scene.cue.character.pose if scene.cue else "talking"
+            gesture_layer = AnimationLayer(
+                id=f"{scene.id}-gesture-hand",
+                sceneId=scene.id,
+                layerType="character",
+                assetNeedId=gesture_need.id,
+                start=character_layer.start,
+                end=character_layer.end,
+                order=character_layer.order + 2,
+                x=min(92.0, character_layer.x + 8.0),
+                y=max(12.0, character_layer.y - 7.0),
+                scale=max(18.0, character_layer.scale * 0.38),
+                opacity=character_layer.opacity,
+                motion=AnimationMotion(
+                    preset="point" if pose == "pointing" else "hand_wave",
+                    direction="right",
+                    intensity=request.motion_intensity,
+                    note="Procedural character-rig gesture: animate the reusable hand layer with keyframes instead of generating video.",
+                ),
+            )
+            repaired_scenes.append(
+                scene.model_copy(
+                    update={
+                        "layers": sorted([*scene.layers, gesture_layer], key=lambda layer: layer.order),
+                    }
+                )
+            )
+
+        return plan.model_copy(
+            update={
+                "asset_needs": needs,
+                "scenes": repaired_scenes,
+                "warnings": self._warnings_for_plan(needs),
+            }
         )
 
     def _make_asset_need(

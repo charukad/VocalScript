@@ -14,8 +14,11 @@
     "sidePanel",
     "storage",
     "tabs",
+    "activeTab",
     "scripting",
-    "alarms"
+    "alarms",
+    "identity",
+    "identity.email"
   ],
   "content_scripts": [
     {

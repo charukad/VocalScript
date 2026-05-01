@@ -6,6 +6,7 @@ import { MediaPool } from './MediaPool';
 import { ProjectGate } from './ProjectGate';
 import { PreviewWindow } from './PreviewWindow';
 import { Inspector } from './Inspector';
+import { BrowserBridgeMonitor } from './BrowserBridgeMonitor';
 import { TimelinePanel } from '../timeline/TimelinePanel';
 import { ExportModal } from './ExportModal';
 import { useEditorStore } from '../../store/editorStore';
@@ -24,6 +25,7 @@ export const EditorLayout = () => {
     redo
   } = useEditorStore();
   const currentProject = useEditorStore(state => state.currentProject);
+  const [showBridgeMonitor, setShowBridgeMonitor] = React.useState(false);
   
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -112,9 +114,10 @@ export const EditorLayout = () => {
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       {showExportModal && <ExportModal />}
       <div className="editor-layout">
+        {showBridgeMonitor && <BrowserBridgeMonitor onClose={() => setShowBridgeMonitor(false)} />}
         {currentProject ? (
           <>
-            <Navbar />
+            <Navbar onOpenBridgeMonitor={() => setShowBridgeMonitor(true)} />
             <div className="workspace">
               <MediaPool />
               <PreviewWindow />

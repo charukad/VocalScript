@@ -16,6 +16,9 @@ import type {
   StoryboardSceneDensity,
   ProviderName,
   GenerationJob,
+  GenerationJobStatus,
+  BridgeDebugEvent,
+  BridgeWorkerSnapshot,
   ProjectDetail,
   ProjectSummary,
   StoryboardScene,
@@ -80,9 +83,32 @@ export type GeneratedMediaListResponse = {
   batchId?: string | null;
 };
 
+export type BridgeStatusResponse = {
+  workers: BridgeWorkerSnapshot[];
+};
+
+export type BridgeWorkerCleanupResponse = {
+  cleared: number;
+  workers: BridgeWorkerSnapshot[];
+};
+
+export type BridgeDebugEventListResponse = {
+  events: BridgeDebugEvent[];
+};
+
 type GenerationListOptions = {
   batchId?: string | null;
   projectId?: string | null;
+  status?: GenerationJobStatus | null;
+  provider?: ProviderName | null;
+  signal?: AbortSignal;
+};
+
+type ClearGenerationHistoryOptions = {
+  projectId?: string | null;
+  provider?: ProviderName | null;
+  statuses?: GenerationJobStatus[];
+  includeActive?: boolean;
   signal?: AbortSignal;
 };
 
@@ -102,6 +128,136 @@ export type ProjectAssetResponse = {
 export const resolveBackendMediaUrl = (url: string): string => {
   if (url.startsWith('/')) return `${API_BASE_URL}${url}`;
   return url;
+};
+
+export const getBrowserBridgeStatus = async (signal?: AbortSignal): Promise<BridgeStatusResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/browser-bridge/workers`, { signal });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not load browser bridge workers'));
+  }
+
+  return response.json();
+};
+
+export const pauseBrowserBridgeWorker = async (
+  workerId: string,
+  signal?: AbortSignal
+): Promise<BridgeStatusResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/browser-bridge/workers/${encodeURIComponent(workerId)}/pause`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not pause bridge worker'));
+  }
+
+  return response.json();
+};
+
+export const resumeBrowserBridgeWorker = async (
+  workerId: string,
+  signal?: AbortSignal
+): Promise<BridgeStatusResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/browser-bridge/workers/${encodeURIComponent(workerId)}/resume`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not resume bridge worker'));
+  }
+
+  return response.json();
+};
+
+export const clearBrowserBridgeWorkerError = async (
+  workerId: string,
+  signal?: AbortSignal
+): Promise<BridgeStatusResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/browser-bridge/workers/${encodeURIComponent(workerId)}/clear-error`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not clear bridge worker error'));
+  }
+
+  return response.json();
+};
+
+export const clearDisconnectedBridgeWorkers = async (
+  signal?: AbortSignal
+): Promise<BridgeWorkerCleanupResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/browser-bridge/workers/disconnected`, {
+    method: 'DELETE',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not clear disconnected bridge workers'));
+  }
+
+  return response.json();
+};
+
+export const runBrowserBridgeHealthCheck = async (
+  workerId: string,
+  signal?: AbortSignal
+): Promise<BridgeStatusResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/browser-bridge/workers/${encodeURIComponent(workerId)}/health-check`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not run bridge health check'));
+  }
+
+  return response.json();
+};
+
+export const runBrowserBridgeAdapterTest = async (
+  workerId: string,
+  signal?: AbortSignal
+): Promise<BridgeStatusResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/browser-bridge/workers/${encodeURIComponent(workerId)}/adapter-test`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not run bridge adapter test'));
+  }
+
+  return response.json();
+};
+
+export const listBrowserBridgeDebugEvents = async (
+  options: { workerId?: string; jobId?: string; limit?: number; signal?: AbortSignal } = {}
+): Promise<BridgeDebugEventListResponse> => {
+  const params = new URLSearchParams();
+  if (options.workerId) params.set('workerId', options.workerId);
+  if (options.jobId) params.set('jobId', options.jobId);
+  if (options.limit) params.set('limit', String(options.limit));
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const response = await fetch(`${API_BASE_URL}/api/browser-bridge/debug/events${suffix}`, { signal: options.signal });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not load bridge debug events'));
+  }
+
+  return response.json();
 };
 
 const formatExportError = (detail: unknown): string => {
@@ -514,12 +670,36 @@ export const listGenerationJobs = async (
   const params = new URLSearchParams();
   if (options.batchId) params.set('batchId', options.batchId);
   if (options.projectId) params.set('projectId', options.projectId);
+  if (options.status) params.set('status', options.status);
+  if (options.provider) params.set('provider', options.provider);
   const suffix = params.toString() ? `?${params.toString()}` : '';
   const response = await fetch(`${API_BASE_URL}/api/generation/jobs${suffix}`, { signal: options.signal });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(formatApiError(errorData.detail, 'Could not refresh generation jobs'));
+  }
+
+  return response.json();
+};
+
+export const clearGenerationJobHistory = async (
+  options: ClearGenerationHistoryOptions = {}
+): Promise<{ cleared: number }> => {
+  const params = new URLSearchParams();
+  if (options.projectId) params.set('projectId', options.projectId);
+  if (options.provider) params.set('provider', options.provider);
+  if (options.includeActive) params.set('includeActive', 'true');
+  options.statuses?.forEach(status => params.append('statuses', status));
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs/history${suffix}`, {
+    method: 'DELETE',
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not clear generation job history'));
   }
 
   return response.json();

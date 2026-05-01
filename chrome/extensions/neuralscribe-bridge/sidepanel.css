@@ -280,3 +280,7 @@ button:hover {
   color: var(--muted);
   font-size: 11px;
 }
+
+.job-row .job-error {
+  color: var(--bad);
+}

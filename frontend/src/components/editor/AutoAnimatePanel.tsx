@@ -128,7 +128,6 @@ export const AutoAnimatePanel = () => {
   const hasTranscript = captions.some(caption => caption.text.trim());
   const canPlan = hasTranscript || sources.length > 0;
   const approvedCount = animationPlan?.scenes.filter(scene => scene.status === 'approved').length ?? 0;
-  const missingCount = animationPlan?.assetNeeds.filter(need => need.reuseDecision === 'generate' && ['missing', 'failed'].includes(need.status)).length ?? 0;
   const jobCounts = animationAssetJobs.reduce<Record<string, number>>((counts, job) => {
     counts[job.status] = (counts[job.status] ?? 0) + 1;
     return counts;
@@ -139,10 +138,20 @@ export const AutoAnimatePanel = () => {
   const animationJobByNeedId = new Map(
     animationAssetJobs.map(job => [job.metadata.animationAssetId || job.sceneId, job])
   );
-  const shouldAutoSync = Boolean(
-    currentAnimationBatchId &&
-    animationAssetJobs.some(job => job.status === 'queued' || job.status === 'running')
-  );
+  const missingCount = animationPlan?.assetNeeds.filter(need =>
+    need.reuseDecision === 'generate' &&
+    (
+      ['missing', 'failed'].includes(need.status) ||
+      (need.status === 'queued' && !animationJobByNeedId.has(need.id))
+    )
+  ).length ?? 0;
+  const generatedLibraryItems = animationAssetLibrary
+    .filter(item => item.status === 'generated')
+    .map(item => ({
+      item,
+      media: item.mediaAssetId ? assets.find(asset => asset.id === item.mediaAssetId) : undefined,
+    }));
+  const shouldAutoSync = animationAssetJobs.some(job => job.status === 'queued' || job.status === 'running');
 
   useEffect(() => {
     if (!shouldAutoSync || isSyncingAnimationAssets) return;
@@ -189,6 +198,15 @@ export const AutoAnimatePanel = () => {
       return;
     }
     updateAnimationAssetNeed(id, { [field]: value } as Partial<AnimationAssetNeed>);
+  };
+
+  const generateNeed = async (need: AnimationAssetNeed) => {
+    updateAnimationAssetNeed(need.id, {
+      reuseDecision: 'generate',
+      status: 'missing',
+      matchedAssetId: null,
+    });
+    await createAnimationMissingAssetJobs();
   };
 
   const groupedNeeds = assetTypeOrder.map(assetType => ({
@@ -345,7 +363,7 @@ export const AutoAnimatePanel = () => {
             <>
               <div className="animation-toolbar">
                 <button className="btn-secondary" onClick={approveAnimationPlan}>Approve Plan</button>
-                <button className="btn-secondary" onClick={() => syncAnimationAssetJobs(false)} disabled={!currentAnimationBatchId || isSyncingAnimationAssets}>
+                <button className="btn-secondary" onClick={() => syncAnimationAssetJobs(false)} disabled={(!currentAnimationBatchId && !state.currentProject) || isSyncingAnimationAssets}>
                   {isSyncingAnimationAssets ? 'Syncing...' : 'Sync Assets'}
                 </button>
               </div>
@@ -373,6 +391,26 @@ export const AutoAnimatePanel = () => {
                 <div className="generation-summary">
                   assets queued {jobCounts.queued ?? 0} - running {jobCounts.running ?? 0} - completed {jobCounts.completed ?? 0} - failed {(jobCounts.failed ?? 0) + (jobCounts.manual_action_required ?? 0)}
                 </div>
+              )}
+              {generatedLibraryItems.length > 0 && (
+                <>
+                  <div className="animation-section-title">Generated Media</div>
+                  <div className="animation-generated-library">
+                    {generatedLibraryItems.map(({ item, media }) => {
+                      const previewUrl = media?.thumbnailUrl || item.sourceUrl || '';
+                      return (
+                        <div key={item.id} className="animation-generated-item">
+                          {previewUrl ? (
+                            <img src={resolveBackendMediaUrl(previewUrl)} alt={item.name} />
+                          ) : (
+                            <div className="animation-generated-placeholder">No preview</div>
+                          )}
+                          <span>{item.name}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
               )}
               {failedAssetJobs.length > 0 && (
                 <div className="generation-status-list">
@@ -421,13 +459,21 @@ export const AutoAnimatePanel = () => {
                     {group.needs.map(need => {
                       const job = animationJobByNeedId.get(need.id);
                       const variants = getJobVariants(job);
+                      const assignedMemory = need.matchedAssetId
+                        ? animationAssetLibrary.find(asset => asset.id === need.matchedAssetId)
+                        : undefined;
+                      const assignedMedia = assignedMemory?.mediaAssetId
+                        ? assets.find(asset => asset.id === assignedMemory.mediaAssetId)
+                        : undefined;
                       const savedSelectedVariantUrl = job?.metadata.selectedVariantUrl;
                       const selectedVariantUrl = savedSelectedVariantUrl && variants.some(variant => variant.url === savedSelectedVariantUrl)
                         ? savedSelectedVariantUrl
                         : variants.length <= 1 ? job?.resultUrl ?? variants[0]?.url ?? null : null;
                       const selectedVariant = variants.find(variant => variant.url === selectedVariantUrl);
                       const needsVariantChoice = Boolean(job && job.status === 'completed' && variants.length > 1 && !job.metadata.selectedVariantUrl);
-                      const canRegenerate = Boolean(job && !['queued', 'running'].includes(job.status));
+                      const jobBusy = Boolean(job && ['queued', 'running'].includes(job.status));
+                      const canRegenerate = Boolean(job && !jobBusy);
+                      const assignedPreviewUrl = assignedMedia?.thumbnailUrl || assignedMedia?.sourceUrl || assignedMemory?.sourceUrl || '';
                       return (
                       <div key={need.id} className="animation-asset-card">
                         <div className="generation-scene-row">
@@ -476,6 +522,23 @@ export const AutoAnimatePanel = () => {
                             onChange={event => updateNeed(need.id, 'prompt', event.target.value)}
                           />
                         </label>
+                        {!selectedVariant && assignedPreviewUrl && (
+                          <div className="animation-selected-preview">
+                            {assignedMedia?.mediaKind === 'video' ? (
+                              <video
+                                src={resolveBackendMediaUrl(assignedPreviewUrl)}
+                                muted
+                                loop
+                                playsInline
+                                controls
+                                preload="metadata"
+                              />
+                            ) : (
+                              <img src={resolveBackendMediaUrl(assignedPreviewUrl)} alt={`Assigned ${need.name}`} />
+                            )}
+                            <span>Assigned media</span>
+                          </div>
+                        )}
                         {job && (
                           <>
                             <div className="generation-summary">
@@ -534,6 +597,7 @@ export const AutoAnimatePanel = () => {
                                 className="btn-secondary"
                                 onClick={() => retryAnimationAssetJob(job.id)}
                                 disabled={!canRegenerate || isSyncingAnimationAssets}
+                                title={jobBusy ? 'This asset is already queued or running. Sync assets or clear active jobs in the bridge first.' : 'Regenerate this reusable asset'}
                               >
                                 Regenerate
                               </button>
@@ -541,11 +605,30 @@ export const AutoAnimatePanel = () => {
                                 className="btn-secondary"
                                 onClick={() => autoRetryAnimationAssetJob(job.id)}
                                 disabled={!canRegenerate || isSyncingAnimationAssets}
+                                title={jobBusy ? 'This asset is already queued or running. Sync assets or clear active jobs in the bridge first.' : 'Rewrite the prompt and regenerate this reusable asset'}
                               >
                                 Rewrite + Regenerate
                               </button>
                             </div>
                           </>
+                        )}
+                        {!job && (
+                          <div className="generation-retry-actions">
+                            <button
+                              className="btn-secondary"
+                              onClick={() => generateNeed(need)}
+                              disabled={isSyncingAnimationAssets}
+                            >
+                              Generate Asset
+                            </button>
+                            <button
+                              className="btn-secondary"
+                              onClick={() => syncAnimationAssetJobs(false)}
+                              disabled={isSyncingAnimationAssets || (!currentAnimationBatchId && !state.currentProject)}
+                            >
+                              Find Media
+                            </button>
+                          </div>
                         )}
                       </div>
                       );

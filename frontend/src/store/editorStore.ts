@@ -823,6 +823,22 @@ const getAssetVariantUrls = (asset: GeneratedMediaAsset): string[] => {
   return [...new Set(urls)];
 };
 
+const isAutoAnimateJob = (job: GenerationJob): boolean => job.metadata.flow === 'auto_animate';
+
+const getAnimationNeedIdFromJob = (job: GenerationJob): string => job.metadata.animationAssetId || job.sceneId;
+
+const uniqueGenerationJobsById = (jobs: GenerationJob[]): GenerationJob[] => {
+  const byId = new Map<string, GenerationJob>();
+  for (const job of jobs) byId.set(job.id, job);
+  return [...byId.values()];
+};
+
+const uniqueGeneratedAssetsByJobId = (assets: GeneratedMediaAsset[]): GeneratedMediaAsset[] => {
+  const byJobId = new Map<string, GeneratedMediaAsset>();
+  for (const asset of assets) byJobId.set(asset.jobId, asset);
+  return [...byJobId.values()];
+};
+
 const makeGenerationSceneKey = (
   projectId: string | null | undefined,
   batchId: string,
@@ -1335,7 +1351,16 @@ const mergeAnimationJobsIntoPlan = (
           matchedAssetId: generatedAsset.id,
         };
       }
-      if (!job) return need;
+      if (!job) {
+        if (need.reuseDecision === 'generate' && need.status === 'queued') {
+          return {
+            ...need,
+            status: 'missing',
+            matchedAssetId: null,
+          };
+        }
+        return need;
+      }
       return {
         ...need,
         status: animationNeedStatusFromJob(job),
@@ -1349,11 +1374,28 @@ const keyframesForAnimationMotion = (
   duration: number,
 ): TimelineClip['keyframes'] => {
   const safeDuration = Math.max(0.1, duration);
-  const keyframes = [];
+  const keyframes: NonNullable<TimelineClip['keyframes']> = [];
+  const mid = Number((safeDuration / 2).toFixed(3));
+  const quarter = Number((safeDuration / 4).toFixed(3));
+  const threeQuarter = Number((safeDuration * 0.75).toFixed(3));
+  const positionDrift = layer.motion.intensity === 'dynamic' ? 8 : layer.motion.intensity === 'subtle' ? 2.5 : 5;
   if (layer.motion.preset === 'fade') {
     keyframes.push(
       { id: makeId(), property: 'opacity' as const, time: 0, value: 0, easing: 'linear' as const },
       { id: makeId(), property: 'opacity' as const, time: Math.min(0.6, safeDuration), value: layer.opacity, easing: 'linear' as const },
+    );
+  }
+  if (layer.motion.preset === 'slide') {
+    const direction = layer.motion.direction || 'left';
+    const startX = direction === 'right' ? layer.x + positionDrift : direction === 'left' ? layer.x - positionDrift : layer.x;
+    const startY = direction === 'up' ? layer.y - positionDrift : direction === 'down' ? layer.y + positionDrift : layer.y;
+    keyframes.push(
+      { id: makeId(), property: 'x' as const, time: 0, value: startX, easing: 'linear' as const },
+      { id: makeId(), property: 'x' as const, time: Math.min(0.55, safeDuration), value: layer.x, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: 0, value: startY, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: Math.min(0.55, safeDuration), value: layer.y, easing: 'linear' as const },
+      { id: makeId(), property: 'opacity' as const, time: 0, value: Math.min(layer.opacity, 15), easing: 'linear' as const },
+      { id: makeId(), property: 'opacity' as const, time: Math.min(0.4, safeDuration), value: layer.opacity, easing: 'linear' as const },
     );
   }
   if (['pop', 'bounce', 'caption_highlight'].includes(layer.motion.preset)) {
@@ -1369,10 +1411,76 @@ const keyframesForAnimationMotion = (
       { id: makeId(), property: 'scale' as const, time: safeDuration, value: layer.scale * (layer.motion.preset === 'parallax' ? 1.07 : 1.05), easing: 'linear' as const },
     );
   }
+  if (['pan', 'float', 'parallax'].includes(layer.motion.preset)) {
+    const drift = layer.motion.preset === 'parallax' ? positionDrift * 0.7 : positionDrift * 0.45;
+    keyframes.push(
+      { id: makeId(), property: 'x' as const, time: 0, value: layer.x - drift, easing: 'linear' as const },
+      { id: makeId(), property: 'x' as const, time: safeDuration, value: layer.x + drift, easing: 'linear' as const },
+    );
+    if (layer.motion.preset === 'float') {
+      keyframes.push(
+        { id: makeId(), property: 'y' as const, time: 0, value: layer.y, easing: 'linear' as const },
+        { id: makeId(), property: 'y' as const, time: mid, value: layer.y - Math.max(1.5, drift), easing: 'linear' as const },
+        { id: makeId(), property: 'y' as const, time: safeDuration, value: layer.y, easing: 'linear' as const },
+      );
+    }
+  }
   if (layer.motion.preset === 'pull_out') {
     keyframes.push(
       { id: makeId(), property: 'scale' as const, time: 0, value: layer.scale * 1.07, easing: 'linear' as const },
       { id: makeId(), property: 'scale' as const, time: safeDuration, value: layer.scale, easing: 'linear' as const },
+    );
+  }
+  if (layer.motion.preset === 'talking_bob') {
+    const bob = layer.motion.intensity === 'dynamic' ? 2.6 : layer.motion.intensity === 'subtle' ? 0.9 : 1.6;
+    keyframes.push(
+      { id: makeId(), property: 'y' as const, time: 0, value: layer.y, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: quarter, value: layer.y - bob, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: mid, value: layer.y, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: threeQuarter, value: layer.y - bob * 0.7, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: safeDuration, value: layer.y, easing: 'linear' as const },
+      { id: makeId(), property: 'scale' as const, time: 0, value: layer.scale, easing: 'linear' as const },
+      { id: makeId(), property: 'scale' as const, time: mid, value: layer.scale * 1.015, easing: 'linear' as const },
+      { id: makeId(), property: 'scale' as const, time: safeDuration, value: layer.scale, easing: 'linear' as const },
+    );
+  }
+  if (layer.motion.preset === 'hand_wave') {
+    const rotation = layer.motion.intensity === 'dynamic' ? 24 : layer.motion.intensity === 'subtle' ? 10 : 17;
+    keyframes.push(
+      { id: makeId(), property: 'rotation' as const, time: 0, value: -rotation * 0.45, easing: 'linear' as const },
+      { id: makeId(), property: 'rotation' as const, time: quarter, value: rotation, easing: 'linear' as const },
+      { id: makeId(), property: 'rotation' as const, time: mid, value: -rotation * 0.65, easing: 'linear' as const },
+      { id: makeId(), property: 'rotation' as const, time: threeQuarter, value: rotation * 0.75, easing: 'linear' as const },
+      { id: makeId(), property: 'rotation' as const, time: safeDuration, value: 0, easing: 'linear' as const },
+      { id: makeId(), property: 'x' as const, time: 0, value: layer.x - 1.4, easing: 'linear' as const },
+      { id: makeId(), property: 'x' as const, time: mid, value: layer.x + 1.8, easing: 'linear' as const },
+      { id: makeId(), property: 'x' as const, time: safeDuration, value: layer.x, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: 0, value: layer.y, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: mid, value: layer.y - 2.2, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: safeDuration, value: layer.y, easing: 'linear' as const },
+    );
+  }
+  if (layer.motion.preset === 'point') {
+    const reach = layer.motion.intensity === 'dynamic' ? 8 : layer.motion.intensity === 'subtle' ? 3 : 5.5;
+    keyframes.push(
+      { id: makeId(), property: 'x' as const, time: 0, value: layer.x - reach * 0.4, easing: 'linear' as const },
+      { id: makeId(), property: 'x' as const, time: Math.min(0.45, safeDuration), value: layer.x + reach, easing: 'linear' as const },
+      { id: makeId(), property: 'x' as const, time: safeDuration, value: layer.x + reach * 0.65, easing: 'linear' as const },
+      { id: makeId(), property: 'rotation' as const, time: 0, value: -8, easing: 'linear' as const },
+      { id: makeId(), property: 'rotation' as const, time: Math.min(0.45, safeDuration), value: 8, easing: 'linear' as const },
+      { id: makeId(), property: 'rotation' as const, time: safeDuration, value: 3, easing: 'linear' as const },
+    );
+  }
+  if (layer.motion.preset === 'walk_cycle') {
+    const stride = layer.motion.intensity === 'dynamic' ? 12 : layer.motion.intensity === 'subtle' ? 4 : 8;
+    keyframes.push(
+      { id: makeId(), property: 'x' as const, time: 0, value: layer.x - stride, easing: 'linear' as const },
+      { id: makeId(), property: 'x' as const, time: safeDuration, value: layer.x + stride, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: 0, value: layer.y, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: quarter, value: layer.y - 1.4, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: mid, value: layer.y, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: threeQuarter, value: layer.y - 1.4, easing: 'linear' as const },
+      { id: makeId(), property: 'y' as const, time: safeDuration, value: layer.y, easing: 'linear' as const },
     );
   }
   return keyframes.length > 0 ? keyframes : undefined;
@@ -3163,26 +3271,58 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   createAnimationMissingAssetJobs: async () => {
-    const state = get();
-    if (!state.currentProject) {
+    if (!get().currentProject) {
       alert('Create or load a project before generating animation assets.');
       return;
     }
-    if (!state.animationPlan) {
+    if (!get().animationPlan) {
       alert('Create an animation plan first.');
       return;
     }
-    const missingNeeds = state.animationPlan.assetNeeds.filter(need =>
-      need.reuseDecision === 'generate' && ['missing', 'failed'].includes(need.status)
+
+    if (!get().isSyncingAnimationAssets) {
+      await get().syncAnimationAssetJobs(true);
+    }
+
+    const state = get();
+    const currentProject = state.currentProject;
+    if (!currentProject) {
+      alert('Create or load a project before generating animation assets.');
+      return;
+    }
+    const existingJobsByNeedId = new Map(
+      state.animationAssetJobs
+        .filter(isAutoAnimateJob)
+        .map(job => [getAnimationNeedIdFromJob(job), job] as const)
     );
-    if (missingNeeds.length === 0) {
-      set({ animationStatus: 'No missing animation assets need generation.' });
+    const candidateNeeds = state.animationPlan!.assetNeeds.filter(need =>
+      need.reuseDecision === 'generate' &&
+      (
+        ['missing', 'failed'].includes(need.status) ||
+        (need.status === 'queued' && !existingJobsByNeedId.has(need.id))
+      )
+    );
+    const retryableJobs = candidateNeeds
+      .map(need => existingJobsByNeedId.get(need.id))
+      .filter((job): job is GenerationJob => Boolean(job && ['failed', 'canceled', 'manual_action_required'].includes(job.status)));
+    const missingNeeds = candidateNeeds.filter(need => !existingJobsByNeedId.has(need.id));
+
+    if (missingNeeds.length === 0 && retryableJobs.length === 0) {
+      const activeCount = candidateNeeds.filter(need => {
+        const job = existingJobsByNeedId.get(need.id);
+        return job && ['queued', 'running'].includes(job.status);
+      }).length;
+      set({
+        animationStatus: activeCount > 0
+          ? `${activeCount} animation asset job${activeCount === 1 ? ' is' : 's are'} already queued or running.`
+          : 'No missing animation assets need generation.',
+      });
       return;
     }
 
     set({ animationStatus: 'Saving project and queuing missing animation assets...' });
     try {
-      const persisted = await persistProjectAssets(state.currentProject.id, state.assets);
+      const persisted = await persistProjectAssets(currentProject.id, state.assets);
       if (persisted.changed) set({ assets: persisted.assets });
       const project = await persistProjectSnapshot({ ...get(), assets: persisted.assets });
       set({
@@ -3190,20 +3330,31 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         projectName: project.name,
         projectStatus: `Project folder ready: ${project.generatedMediaPath}`,
       });
-      const response = await createAnimationAssetJobs(
-        missingNeeds,
-        state.animationSettings.provider,
-        state.animationSettings.aspectRatio,
-        project.id,
-        project.name,
-        state.currentAnimationBatchId,
-      );
-      const batchId = response.batchId ?? response.jobs[0]?.batchId ?? null;
+      const retriedJobs: GenerationJob[] = [];
+      for (const job of retryableJobs) {
+        retriedJobs.push(await retryAnimationAssetJobRequest(job.id));
+      }
+      const response = missingNeeds.length > 0
+        ? await createAnimationAssetJobs(
+            missingNeeds,
+            state.animationSettings.provider,
+            state.animationSettings.aspectRatio,
+            project.id,
+            project.name,
+            state.currentAnimationBatchId,
+          )
+        : { jobs: [] as GenerationJob[], batchId: null };
+      const queuedJobs = uniqueGenerationJobsById([...retriedJobs, ...response.jobs]);
+      const batchId = response.batchId ?? queuedJobs[0]?.batchId ?? state.currentAnimationBatchId ?? null;
       set(current => ({
         currentAnimationBatchId: batchId,
-        animationAssetJobs: response.jobs,
-        animationPlan: mergeAnimationJobsIntoPlan(current.animationPlan, response.jobs, current.animationAssetLibrary),
-        animationStatus: `Queued ${response.jobs.length} reusable animation asset${response.jobs.length === 1 ? '' : 's'}.`,
+        animationAssetJobs: uniqueGenerationJobsById([...current.animationAssetJobs, ...queuedJobs]),
+        animationPlan: mergeAnimationJobsIntoPlan(
+          current.animationPlan,
+          uniqueGenerationJobsById([...current.animationAssetJobs, ...queuedJobs]),
+          current.animationAssetLibrary
+        ),
+        animationStatus: `Queued ${queuedJobs.length} reusable animation asset${queuedJobs.length === 1 ? '' : 's'}.`,
       }));
       void get().saveProject();
       void get().syncAnimationAssetJobs(true);
@@ -3216,8 +3367,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   syncAnimationAssetJobs: async (silent = false) => {
     const batchId = get().currentAnimationBatchId;
-    if (!batchId) {
-      if (!silent) set({ animationStatus: 'Queue missing animation assets first.' });
+    const projectId = get().currentProject?.id ?? null;
+    if (!batchId && !projectId) {
+      if (!silent) set({ animationStatus: 'Open a project or queue animation assets first.' });
       return;
     }
     if (get().isSyncingAnimationAssets) return;
@@ -3228,11 +3380,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     } as Partial<EditorState>);
 
     try {
-      const projectId = get().currentProject?.id ?? null;
-      const jobsResponse = await listGenerationJobs({ batchId, projectId });
-      const animationJobs = jobsResponse.jobs.filter(job => job.metadata.flow === 'auto_animate');
-      const mediaResponse = await listGeneratedMediaAssets(true, { batchId, projectId });
-      const completedAssets = mediaResponse.assets.filter(asset =>
+      const [batchJobsResponse, projectJobsResponse] = await Promise.all([
+        batchId ? listGenerationJobs({ batchId, projectId }) : Promise.resolve({ jobs: [] as GenerationJob[], batchId: null }),
+        projectId ? listGenerationJobs({ projectId }) : Promise.resolve({ jobs: [] as GenerationJob[], batchId: null }),
+      ]);
+      const animationJobs = uniqueGenerationJobsById([
+        ...batchJobsResponse.jobs,
+        ...projectJobsResponse.jobs,
+      ]).filter(isAutoAnimateJob);
+      const [batchMediaResponse, projectMediaResponse] = await Promise.all([
+        batchId ? listGeneratedMediaAssets(true, { batchId, projectId }) : Promise.resolve({ assets: [] as GeneratedMediaAsset[] }),
+        projectId ? listGeneratedMediaAssets(true, { projectId }) : Promise.resolve({ assets: [] as GeneratedMediaAsset[] }),
+      ]);
+      const mediaAssets = uniqueGeneratedAssetsByJobId([
+        ...batchMediaResponse.assets,
+        ...projectMediaResponse.assets,
+      ]);
+      const completedAssets = mediaAssets.filter(asset =>
         asset.status === 'completed' &&
         Boolean(asset.resultUrl) &&
         animationJobs.some(job => job.id === asset.jobId) &&
@@ -3246,53 +3410,57 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const job = animationJobs.find(item => item.id === generated.jobId);
         const memoryId = `animation:${generated.jobId}`;
         let assetForImport = generated;
-        if (generated.resultUrl && isRemoteMediaUrl(generated.resultUrl) && !generated.localPath) {
-          const storedJob = await storeRemoteGenerationJob(generated.jobId).catch(() => null);
-          if (storedJob?.resultUrl) {
-            assetForImport = {
-              ...generated,
-              status: storedJob.status,
-              mediaType: storedJob.mediaType,
-              resultUrl: storedJob.resultUrl,
-              resultVariants: storedJob.resultVariants,
-              localPath: storedJob.localPath,
-              error: storedJob.error,
-              metadata: storedJob.metadata,
-            };
+        try {
+          if (generated.resultUrl && isRemoteMediaUrl(generated.resultUrl) && !generated.localPath) {
+            const storedJob = await storeRemoteGenerationJob(generated.jobId).catch(() => null);
+            if (storedJob?.resultUrl) {
+              assetForImport = {
+                ...generated,
+                status: storedJob.status,
+                mediaType: storedJob.mediaType,
+                resultUrl: storedJob.resultUrl,
+                resultVariants: storedJob.resultVariants,
+                localPath: storedJob.localPath,
+                error: storedJob.error,
+                metadata: storedJob.metadata,
+              };
+            }
           }
+          const file = await fetchGeneratedMediaFile(assetForImport);
+          const mediaKind = assetForImport.mediaType === 'video' ? 'video' : 'image';
+          const thumbnailUrl = await generateThumbnail(file, mediaKind);
+          const mediaAssetId = `animation-generated-${generated.jobId}`;
+          newMediaAssets.push({
+            id: mediaAssetId,
+            file,
+            type: 'visual',
+            mediaKind,
+            duration: assetForImport.duration || 10,
+            sourceUrl: assetForImport.resultUrl,
+            localPath: assetForImport.localPath,
+            thumbnailUrl,
+          });
+          newMemoryItems.push({
+            id: memoryId,
+            name: job?.metadata.animationAssetName || generated.sceneId,
+            assetType: (job?.metadata.animationAssetType as AnimationAssetType) || 'prop',
+            mediaAssetId,
+            sourceUrl: assetForImport.resultUrl,
+            localPath: assetForImport.localPath,
+            prompt: generated.prompt,
+            style: generated.metadata.sceneStyle || get().animationSettings.style,
+            tags: (job?.metadata.animationAssetTags || '').split(',').map(tag => tag.trim()).filter(Boolean),
+            status: 'generated',
+            metadata: {
+              source: 'auto_animate',
+              animationAssetId: job?.metadata.animationAssetId || generated.sceneId,
+              jobId: generated.jobId,
+              batchId: generated.batchId,
+            },
+          });
+        } catch (error) {
+          console.warn('Could not import generated animation asset.', generated.jobId, error);
         }
-        const file = await fetchGeneratedMediaFile(assetForImport);
-        const mediaKind = assetForImport.mediaType === 'video' ? 'video' : 'image';
-        const thumbnailUrl = await generateThumbnail(file, mediaKind);
-        const mediaAssetId = `animation-generated-${generated.jobId}`;
-        newMediaAssets.push({
-          id: mediaAssetId,
-          file,
-          type: 'visual',
-          mediaKind,
-          duration: assetForImport.duration || 10,
-          sourceUrl: assetForImport.resultUrl,
-          localPath: assetForImport.localPath,
-          thumbnailUrl,
-        });
-        newMemoryItems.push({
-          id: memoryId,
-          name: job?.metadata.animationAssetName || generated.sceneId,
-          assetType: (job?.metadata.animationAssetType as AnimationAssetType) || 'prop',
-          mediaAssetId,
-          sourceUrl: assetForImport.resultUrl,
-          localPath: assetForImport.localPath,
-          prompt: generated.prompt,
-          style: generated.metadata.sceneStyle || get().animationSettings.style,
-          tags: (job?.metadata.animationAssetTags || '').split(',').map(tag => tag.trim()).filter(Boolean),
-          status: 'generated',
-          metadata: {
-            source: 'auto_animate',
-            animationAssetId: job?.metadata.animationAssetId || generated.sceneId,
-            jobId: generated.jobId,
-            batchId: generated.batchId,
-          },
-        });
       }
 
       set(state => {
@@ -3317,12 +3485,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             transform: clip.transform ?? { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false },
           };
         });
-        const nextJobs = animationJobs.length ? animationJobs : jobsResponse.jobs;
+        const nextJobs = animationJobs.length ? animationJobs : state.animationAssetJobs;
+        const latestBatchJob = nextJobs[nextJobs.length - 1];
         return {
           assets: nextAssets,
           clips: nextClips,
           animationAssetLibrary: nextLibrary,
           animationAssetJobs: nextJobs,
+          currentAnimationBatchId: state.currentAnimationBatchId ?? latestBatchJob?.batchId ?? batchId ?? null,
           animationPlan: mergeAnimationJobsIntoPlan(state.animationPlan, nextJobs, nextLibrary),
           animationStatus: silent
             ? state.animationStatus
@@ -3346,7 +3516,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       const retriedJob = await retryAnimationAssetJobRequest(jobId);
       set(state => {
-        const nextJobs = state.animationAssetJobs.map(job => job.id === jobId ? retriedJob : job);
+        const hasJob = state.animationAssetJobs.some(job => job.id === jobId);
+        const nextJobs = hasJob
+          ? state.animationAssetJobs.map(job => job.id === jobId ? retriedJob : job)
+          : [...state.animationAssetJobs, retriedJob];
         return {
           animationAssetJobs: nextJobs,
           animationPlan: mergeAnimationJobsIntoPlan(state.animationPlan, nextJobs, state.animationAssetLibrary),
@@ -3367,7 +3540,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       const retriedJob = await autoRetryAnimationAssetJobRequest(jobId, maxAttempts);
       set(state => {
-        const nextJobs = state.animationAssetJobs.map(job => job.id === jobId ? retriedJob : job);
+        const hasJob = state.animationAssetJobs.some(job => job.id === jobId);
+        const nextJobs = hasJob
+          ? state.animationAssetJobs.map(job => job.id === jobId ? retriedJob : job)
+          : [...state.animationAssetJobs, retriedJob];
         return {
           animationAssetJobs: nextJobs,
           animationPlan: mergeAnimationJobsIntoPlan(state.animationPlan, nextJobs, state.animationAssetLibrary),
@@ -3459,7 +3635,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       };
 
       set(state => {
-        const nextJobs = state.animationAssetJobs.map(job => job.id === jobId ? selectedJob : job);
+        const hasJob = state.animationAssetJobs.some(job => job.id === jobId);
+        const nextJobs = hasJob
+          ? state.animationAssetJobs.map(job => job.id === jobId ? selectedJob : job)
+          : [...state.animationAssetJobs, selectedJob];
         const nextLibrary = [
           ...state.animationAssetLibrary.filter(item => item.id !== memoryId),
           nextMemory,
@@ -3538,7 +3717,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
 
     const newClips: TimelineClip[] = [];
-    const unsupportedMotion = new Set<string>();
+    const advancedMotion = new Set<string>();
 
     for (const scene of approvedScenes) {
       const layers = [...scene.layers].sort((a, b) => a.order - b.order);
@@ -3583,7 +3762,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
               note: layer.motion.note,
             },
           });
-          if (['slide', 'pan', 'float', 'parallax'].includes(layer.motion.preset)) unsupportedMotion.add(layer.motion.preset);
+          if (['slide', 'pan', 'float', 'parallax', 'talking_bob', 'hand_wave', 'point', 'walk_cycle'].includes(layer.motion.preset)) {
+            advancedMotion.add(layer.motion.preset);
+          }
           continue;
         }
 
@@ -3626,8 +3807,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }
 
-    const warning = unsupportedMotion.size
-      ? ` Built timeline with V1 limits: ${[...unsupportedMotion].join(', ')} uses scale/opacity placeholders until position export exists.`
+    const warning = advancedMotion.size
+      ? ` Motion brain added ${[...advancedMotion].join(', ')} keyframes; preview shows x/y/rotation movement while export keeps the existing renderer path.`
       : '';
     set({
       ...withHistory(state),

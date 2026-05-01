@@ -15,6 +15,8 @@ const KEYFRAME_META: Record<KeyframeProperty, KeyframeMeta> = {
   scale: { label: 'Scale', min: 10, max: 300, step: 1, unit: '%' },
   rotation: { label: 'Rotation', min: -180, max: 180, step: 1, unit: 'deg' },
   opacity: { label: 'Opacity', min: 0, max: 100, step: 1, unit: '%' },
+  x: { label: 'X Position', min: -50, max: 150, step: 1, unit: '%' },
+  y: { label: 'Y Position', min: -50, max: 150, step: 1, unit: '%' },
   volume: { label: 'Volume', min: 0, max: 200, step: 1, unit: '%' },
 };
 
@@ -74,6 +76,7 @@ export const Inspector = () => {
     ? [
         ...(selectedClip.type === 'visual' ? (['scale', 'rotation'] as KeyframeProperty[]) : []),
         ...(selectedClip.type === 'visual' || selectedClip.type === 'text' ? (['opacity'] as KeyframeProperty[]) : []),
+        ...(selectedClip.type === 'visual' || selectedClip.type === 'text' ? (['x', 'y'] as KeyframeProperty[]) : []),
         ...(hasPlayableAudio ? (['volume'] as KeyframeProperty[]) : []),
       ]
     : [];
