@@ -111,6 +111,9 @@ def build_generation_router(
         provider: Optional[ProviderName] = None,
         batch_id: Optional[str] = Query(None, alias="batchId"),
         project_id: Optional[str] = Query(None, alias="projectId"),
+        worker_id: Optional[str] = Query(None, alias="workerId"),
+        flow: Optional[str] = None,
+        media_type: Optional[GeneratedMediaType] = Query(None, alias="mediaType"),
     ):
         return GenerationJobListResponse(
             jobs=queue_service.list_jobs(
@@ -118,6 +121,9 @@ def build_generation_router(
                 provider=provider,
                 batch_id=batch_id,
                 project_id=project_id,
+                worker_id=worker_id,
+                flow=flow,
+                media_type=media_type,
             ),
             batchId=batch_id,
             batchPaused=queue_service.is_batch_paused(batch_id, project_id),
@@ -127,12 +133,18 @@ def build_generation_router(
     async def clear_generation_job_history(
         provider: Optional[ProviderName] = None,
         project_id: Optional[str] = Query(None, alias="projectId"),
+        worker_id: Optional[str] = Query(None, alias="workerId"),
+        flow: Optional[str] = None,
+        media_type: Optional[GeneratedMediaType] = Query(None, alias="mediaType"),
         statuses: Optional[List[GenerationJobStatus]] = Query(None),
         include_active: bool = Query(False, alias="includeActive"),
     ):
         cleared = queue_service.clear_job_history(
             provider=provider,
             project_id=project_id,
+            worker_id=worker_id,
+            flow=flow,
+            media_type=media_type,
             statuses=statuses,
             include_active=include_active,
         )

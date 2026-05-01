@@ -24,10 +24,10 @@ The goal is to make generation more reliable, observable, recoverable, and scala
 - [ ] Feature 1: Provider Health Check.
 - [ ] Feature 2: Live Provider Debug Panel.
 - [ ] Feature 3: Job Flight Recorder.
-- [ ] Feature 4: Screenshot On Failure.
+- [x] Feature 4: Screenshot On Failure.
 - [ ] Feature 5: Auto Recovery Modes.
 - [ ] Feature 6: Provider Session Lock.
-- [ ] Feature 7: Queue Dashboard.
+- [x] Feature 7: Queue Dashboard.
 - [ ] Feature 8: Per-Provider Adapter Tests.
 - [ ] Feature 9: Variant Capture Upgrade.
 - [ ] Feature 10: Rate Limit / Cooldown Brain.
@@ -182,8 +182,8 @@ Manual tests after Phase 7:
 - [x] Store prompt length, provider URL, selected worker, selector scores, media counts, retries, and final result.
 - [x] Link flight record to generation job.
 - [ ] Add export/debug download option for a single job.
-- [ ] Add retention limit to avoid unbounded debug storage.
-- [ ] Add privacy controls for prompt and screenshot storage.
+- [x] Add retention limit to avoid unbounded debug storage.
+- [x] Add privacy controls for prompt and screenshot storage.
 
 Manual tests after Phase 8:
 
@@ -199,8 +199,8 @@ Manual tests after Phase 8:
 - [x] Link screenshot from job detail drawer and flight recorder.
 - [x] Skip or restrict screenshot capture on sensitive pages such as login, password, payment, or captcha screens.
 - [x] Add screenshot capture reason and timestamp.
-- [ ] Add setting to disable screenshots.
-- [ ] Add clear screenshots action in debug storage.
+- [x] Add setting to disable screenshots.
+- [x] Add clear screenshots action in debug storage.
 
 Manual tests after Phase 9:
 
@@ -211,12 +211,12 @@ Manual tests after Phase 9:
 
 ## Phase 10: Auto Recovery Modes
 
-- [ ] Add recovery for content-script channel closed: retry injection and message send.
+- [x] Add recovery for content-script channel closed: retry injection and message send.
 - [ ] Add recovery for prompt input missing: wait, reopen provider target URL, reinject, and rescan.
-- [ ] Add recovery for disabled generate button: refocus, clear, refill, dispatch input events, and retry.
-- [ ] Add recovery for no media found: wait longer, scroll results, rescan, and capture diagnostics.
-- [ ] Add recovery for stale provider result: ignore old media and wait for new result group.
-- [ ] Add retry limits per failure type.
+- [x] Add recovery for disabled generate button: refocus, clear, refill, dispatch input events, and retry.
+- [x] Add recovery for no media found: wait longer, scroll results, rescan, and capture diagnostics.
+- [x] Add recovery for stale provider result: ignore old media and wait for new result group.
+- [x] Add retry limits per failure type.
 - [ ] Add clear final error when recovery fails.
 - [ ] Record every recovery attempt in the flight recorder.
 
@@ -229,16 +229,16 @@ Manual tests after Phase 10:
 
 ## Phase 11: Queue Dashboard
 
-- [ ] Add queue dashboard for browser-bridge jobs.
-- [ ] Filter by Auto Generate, Auto Animate, provider, worker/account, project, status, and job type.
-- [ ] Show queued, active, completed, failed, stale, cooldown, and canceled jobs.
-- [ ] Add retry failed selected.
-- [ ] Add clear completed.
-- [ ] Add clear failed.
-- [ ] Add clear current project jobs.
-- [ ] Add clear worker/account jobs.
-- [ ] Add pause/resume batch controls.
-- [ ] Add job detail drawer with prompt, error, flight record, screenshot, and result media.
+- [x] Add queue dashboard for browser-bridge jobs.
+- [x] Filter by Auto Generate, Auto Animate, provider, worker/account, project, status, and job type.
+- [x] Show queued, active, completed, failed, stale, cooldown, and canceled jobs.
+- [x] Add retry failed selected.
+- [x] Add clear completed.
+- [x] Add clear failed.
+- [x] Add clear current project jobs.
+- [x] Add clear worker/account jobs.
+- [x] Add pause/resume batch controls.
+- [x] Add job detail drawer with prompt, error, flight record, screenshot, and result media.
 
 Manual tests after Phase 11:
 
@@ -266,13 +266,13 @@ Manual tests after Phase 12:
 
 ## Phase 13: Variant Capture Upgrade
 
-- [ ] Detect provider result groups instead of relying only on latest media.
-- [ ] Separate stale media from new job media.
-- [ ] Capture up to 4 variants per image/video job when provider exposes them.
-- [ ] Add variant labels and provider metadata.
-- [ ] Add media preview grid for variant selection.
-- [ ] Attach selected variant to the correct scene or animation asset.
-- [ ] Prevent wrong-scene media assignment.
+- [x] Detect provider result groups instead of relying only on latest media.
+- [x] Separate stale media from new job media.
+- [x] Capture up to 4 variants per image/video job when provider exposes them.
+- [x] Add variant labels and provider metadata.
+- [x] Add media preview grid for variant selection.
+- [x] Attach selected variant to the correct scene or animation asset.
+- [x] Prevent wrong-scene media assignment.
 - [ ] Add manual variant import fallback.
 - [ ] Add regenerate one variant without replacing approved variants.
 
@@ -286,11 +286,11 @@ Manual tests after Phase 13:
 ## Phase 14: Rate Limit And Cooldown Brain
 
 - [ ] Detect provider rate-limit, slow queue, temporary block, and manual-action errors.
-- [ ] Add per-worker cooldown state.
+- [x] Add per-worker cooldown state.
 - [ ] Add per-provider cooldown policy.
-- [ ] Add adaptive delay after repeated failures.
-- [ ] Pause a worker automatically after repeated provider failures.
-- [ ] Show cooldown countdown in monitor and queue dashboard.
+- [x] Add adaptive delay after repeated failures.
+- [x] Pause a worker automatically after repeated provider failures.
+- [x] Show cooldown countdown in monitor and queue dashboard.
 - [ ] Resume automatically when cooldown ends.
 - [ ] Allow manual override with clear warning.
 
@@ -342,15 +342,15 @@ Manual tests after Phase 16:
 
 ## Phase 17: Reliability, Privacy, And Documentation
 
-- [ ] Document multi-account setup using separate Chrome profiles.
-- [ ] Document how each extension worker maps to one browser profile/account.
-- [ ] Document extension reload/version mismatch steps.
-- [ ] Document debug log and screenshot privacy behavior.
-- [ ] Add troubleshooting guide for failed generation.
-- [ ] Add troubleshooting guide for missing generated media.
-- [ ] Add troubleshooting guide for wrong variant/scene assignment.
-- [ ] Add recovery guide for Meta UI changes.
-- [ ] Add project-level migration notes for older saved projects.
+- [x] Document multi-account setup using separate Chrome profiles.
+- [x] Document how each extension worker maps to one browser profile/account.
+- [x] Document extension reload/version mismatch steps.
+- [x] Document debug log and screenshot privacy behavior.
+- [x] Add troubleshooting guide for failed generation.
+- [x] Add troubleshooting guide for missing generated media.
+- [x] Add troubleshooting guide for wrong variant/scene assignment.
+- [x] Add recovery guide for Meta UI changes.
+- [x] Add project-level migration notes for older saved projects.
 
 Manual tests after Phase 17:
 
@@ -362,7 +362,7 @@ Manual tests after Phase 17:
 ## Phase 18: End-To-End Validation
 
 - [x] Run frontend build.
-- [ ] Run frontend lint if configured.
+- [x] Run frontend lint if configured.
 - [x] Run backend syntax/import checks.
 - [x] Run extension JavaScript syntax checks.
 - [ ] Test Auto Generate Video with one extension worker.
@@ -421,13 +421,13 @@ Manual tests after Phase 18:
 - [ ] Implement Phase 6 provider health check.
 - [ ] Implement Phase 7 live provider debug panel.
 - [ ] Implement Phase 8 job flight recorder.
-- [ ] Implement Phase 9 screenshot on failure.
+- [x] Implement Phase 9 screenshot on failure.
 - [ ] Implement Phase 10 auto recovery modes.
-- [ ] Implement Phase 11 queue dashboard.
+- [x] Implement Phase 11 queue dashboard.
 - [ ] Implement Phase 12 provider adapter tests.
 - [ ] Implement Phase 13 variant capture upgrade.
 - [ ] Implement Phase 14 rate limit and cooldown brain.
 - [ ] Implement Phase 15 provider fallback.
 - [ ] Implement Phase 16 Meta Extend Video for Shorts.
-- [ ] Implement Phase 17 reliability, privacy, and documentation.
+- [x] Implement Phase 17 reliability, privacy, and documentation.
 - [ ] Complete Phase 18 end-to-end validation.

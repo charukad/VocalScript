@@ -127,6 +127,10 @@ def build_browser_bridge_router(
             raise HTTPException(status_code=404, detail="Screenshot not found")
         return FileResponse(path)
 
+    @router.delete("/debug/screenshots")
+    async def clear_debug_screenshots():
+        return {"cleared": bridge_service.clear_screenshots()}
+
     @router.websocket("/ws")
     async def browser_bridge_ws(websocket: WebSocket, token: str = Query("")):
         if token != session_token:

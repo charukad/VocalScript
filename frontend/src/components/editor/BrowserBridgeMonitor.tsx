@@ -2,21 +2,53 @@ import React from 'react';
 import {
   clearBrowserBridgeWorkerError,
   clearDisconnectedBridgeWorkers,
+  clearBrowserBridgeDebugScreenshots,
+  clearGenerationJobHistory,
   getBrowserBridgeStatus,
   listBrowserBridgeDebugEvents,
+  listGenerationJobs,
   pauseBrowserBridgeWorker,
+  pauseGenerationBatch,
   resolveBackendMediaUrl,
   resumeBrowserBridgeWorker,
+  resumeGenerationBatch,
+  retryGenerationJob,
   runBrowserBridgeAdapterTest,
   runBrowserBridgeHealthCheck,
+  selectGenerationJobVariant,
 } from '../../lib/api/client';
-import type { BridgeDebugEvent, BridgeWorkerSnapshot, ProviderCapability, ProviderHealthSnapshot } from '../../types';
+import type {
+  BridgeDebugEvent,
+  BridgeWorkerSnapshot,
+  GeneratedMediaType,
+  GenerationJob,
+  GenerationJobStatus,
+  ProviderCapability,
+  ProviderHealthSnapshot,
+  ProviderName,
+} from '../../types';
 
 type BrowserBridgeMonitorProps = {
   onClose: () => void;
 };
 
 type MonitorTab = 'active' | 'disconnected';
+type QueueFlowFilter = 'all' | 'auto_generate' | 'auto_animate';
+type QueueStatusFilter = 'all' | GenerationJobStatus;
+type QueueProviderFilter = 'all' | ProviderName;
+type QueueMediaFilter = 'all' | GeneratedMediaType;
+
+const queueStatuses: GenerationJobStatus[] = [
+  'queued',
+  'running',
+  'completed',
+  'failed',
+  'manual_action_required',
+  'canceled',
+];
+
+const failedQueueStatuses: GenerationJobStatus[] = ['failed', 'manual_action_required', 'canceled'];
+const finishedQueueStatuses: GenerationJobStatus[] = ['completed', 'failed', 'manual_action_required', 'canceled'];
 
 const statusLabel = (status: BridgeWorkerSnapshot['status']) => status.replaceAll('_', ' ');
 
@@ -62,29 +94,73 @@ const healthLabel = (health: ProviderHealthSnapshot): string =>
 
 const eventTime = (event: BridgeDebugEvent): string => formatTime(event.createdAt);
 
+const queueStatusLabel = (status: GenerationJobStatus): string => status.replaceAll('_', ' ');
+
+const queueFlow = (job: GenerationJob): 'auto_generate' | 'auto_animate' =>
+  job.metadata.flow === 'auto_animate' || job.metadata.source === 'auto_animate'
+    ? 'auto_animate'
+    : 'auto_generate';
+
+const queueFlowLabel = (job: GenerationJob): string =>
+  queueFlow(job) === 'auto_animate' ? 'Auto Animate' : 'Auto Generate';
+
+const queueSubject = (job: GenerationJob): string =>
+  job.metadata.animationAssetName ||
+  job.metadata.assetName ||
+  job.metadata.assetNeedName ||
+  job.metadata.sceneTitle ||
+  job.sceneId ||
+  'scene';
+
+const queueProjectLabel = (job: GenerationJob): string =>
+  job.metadata.projectName || job.projectId || 'No project';
+
+const queueWorkerId = (job: GenerationJob): string => job.metadata.workerId || '';
+
+const canRetryQueueJob = (job: GenerationJob): boolean =>
+  failedQueueStatuses.includes(job.status);
+
+const queueResultLabel = (job: GenerationJob): string => {
+  const variants = job.resultVariants?.length ?? 0;
+  if (variants > 0) return `${variants} variant${variants === 1 ? '' : 's'}`;
+  if (job.resultUrl) return '1 result';
+  return '-';
+};
+
 export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => {
   const [workers, setWorkers] = React.useState<BridgeWorkerSnapshot[]>([]);
   const [debugEvents, setDebugEvents] = React.useState<BridgeDebugEvent[]>([]);
+  const [queueJobs, setQueueJobs] = React.useState<GenerationJob[]>([]);
   const [activeTab, setActiveTab] = React.useState<MonitorTab>('active');
+  const [queueStatusFilter, setQueueStatusFilter] = React.useState<QueueStatusFilter>('all');
+  const [queueFlowFilter, setQueueFlowFilter] = React.useState<QueueFlowFilter>('all');
+  const [queueProviderFilter, setQueueProviderFilter] = React.useState<QueueProviderFilter>('all');
+  const [queueWorkerFilter, setQueueWorkerFilter] = React.useState<string>('all');
+  const [queueProjectFilter, setQueueProjectFilter] = React.useState<string>('all');
+  const [queueMediaFilter, setQueueMediaFilter] = React.useState<QueueMediaFilter>('all');
+  const [selectedJobId, setSelectedJobId] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const [actionId, setActionId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [queueMessage, setQueueMessage] = React.useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = React.useState<string>('');
 
   const refresh = React.useCallback(async (signal?: AbortSignal) => {
     setIsLoading(true);
     setError(null);
     try {
-      const [statusResponse, debugResponse] = await Promise.all([
+      const [statusResponse, debugResponse, queueResponse] = await Promise.all([
         getBrowserBridgeStatus(signal),
         listBrowserBridgeDebugEvents({ limit: 120, signal }),
+        listGenerationJobs({ signal }),
       ]);
       setWorkers(statusResponse.workers);
       setDebugEvents(debugResponse.events);
+      setQueueJobs(queueResponse.jobs);
       setLastRefresh(new Date().toLocaleTimeString());
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
-      setError(err instanceof Error ? err.message : 'Could not load bridge workers');
+      setError(err instanceof Error ? err.message : 'Could not load bridge monitor data');
     } finally {
       setIsLoading(false);
     }
@@ -113,6 +189,24 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
     }
   }, [applyWorkers]);
 
+  const runQueueAction = React.useCallback(async (
+    actionKey: string,
+    action: () => Promise<string>
+  ) => {
+    setActionId(actionKey);
+    setError(null);
+    setQueueMessage(null);
+    try {
+      const message = await action();
+      setQueueMessage(message);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Queue action failed');
+    } finally {
+      setActionId(null);
+    }
+  }, [refresh]);
+
   React.useEffect(() => {
     const controller = new AbortController();
     const initialRefresh = window.setTimeout(() => void refresh(controller.signal), 0);
@@ -137,6 +231,85 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
     });
     return grouped;
   }, [debugEvents]);
+  const eventsByJob = React.useMemo(() => {
+    const grouped = new Map<string, BridgeDebugEvent[]>();
+    debugEvents.forEach(event => {
+      if (!event.jobId) return;
+      const events = grouped.get(event.jobId) ?? [];
+      events.push(event);
+      grouped.set(event.jobId, events);
+    });
+    return grouped;
+  }, [debugEvents]);
+  const queueCounts = React.useMemo(() => {
+    const counts = queueJobs.reduce<Record<GenerationJobStatus, number>>((accumulator, job) => {
+      accumulator[job.status] += 1;
+      return accumulator;
+    }, {
+      queued: 0,
+      running: 0,
+      completed: 0,
+      failed: 0,
+      manual_action_required: 0,
+      canceled: 0,
+    });
+    return {
+      ...counts,
+      active: counts.running,
+      trouble: counts.failed + counts.manual_action_required + counts.canceled,
+      cooldown: workers.filter(worker => worker.status === 'cooldown').length,
+      stale: workers.filter(worker => worker.status === 'stale').length,
+    };
+  }, [queueJobs, workers]);
+  const projectOptions = React.useMemo(() => {
+    const projects = new Map<string, string>();
+    queueJobs.forEach(job => {
+      if (!job.projectId) return;
+      projects.set(job.projectId, queueProjectLabel(job));
+    });
+    return [...projects.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [queueJobs]);
+  const workerOptions = React.useMemo(() => {
+    const workerIds = new Set<string>();
+    queueJobs.forEach(job => {
+      const workerId = queueWorkerId(job);
+      if (workerId) workerIds.add(workerId);
+    });
+    workers.forEach(worker => workerIds.add(worker.workerId));
+    return [...workerIds].sort();
+  }, [queueJobs, workers]);
+  const filteredQueueJobs = React.useMemo(() => queueJobs
+    .filter(job => queueStatusFilter === 'all' || job.status === queueStatusFilter)
+    .filter(job => queueFlowFilter === 'all' || queueFlow(job) === queueFlowFilter)
+    .filter(job => queueProviderFilter === 'all' || job.provider === queueProviderFilter)
+    .filter(job => queueWorkerFilter === 'all' || queueWorkerId(job) === queueWorkerFilter)
+    .filter(job => queueProjectFilter === 'all' || job.projectId === queueProjectFilter)
+    .filter(job => queueMediaFilter === 'all' || job.mediaType === queueMediaFilter)
+    .slice()
+    .reverse(), [
+      queueJobs,
+      queueFlowFilter,
+      queueMediaFilter,
+      queueProjectFilter,
+      queueProviderFilter,
+      queueStatusFilter,
+      queueWorkerFilter,
+    ]);
+  const selectedJob = React.useMemo(
+    () => queueJobs.find(job => job.id === selectedJobId) ?? filteredQueueJobs[0] ?? null,
+    [filteredQueueJobs, queueJobs, selectedJobId]
+  );
+  const selectedJobEvents = selectedJob ? eventsByJob.get(selectedJob.id) ?? [] : [];
+  const selectedWorker = selectedJob
+    ? workers.find(worker => worker.workerId === queueWorkerId(selectedJob))
+    : null;
+  const queueClearFilters = React.useMemo(() => ({
+    provider: queueProviderFilter === 'all' ? null : queueProviderFilter,
+    workerId: queueWorkerFilter === 'all' ? null : queueWorkerFilter,
+    projectId: queueProjectFilter === 'all' ? null : queueProjectFilter,
+    flow: queueFlowFilter === 'all' ? null : queueFlowFilter,
+    mediaType: queueMediaFilter === 'all' ? null : queueMediaFilter,
+  }), [queueFlowFilter, queueMediaFilter, queueProjectFilter, queueProviderFilter, queueWorkerFilter]);
 
   return (
     <div className="bridge-monitor-shell" role="dialog" aria-modal="true" aria-label="Browser Bridge Monitor">
@@ -203,6 +376,354 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
         </div>
 
         {error && <div className="bridge-monitor-error">{error}</div>}
+        {queueMessage && <div className="bridge-monitor-note">{queueMessage}</div>}
+
+        <section className="bridge-queue-panel" aria-label="Generation Queue Dashboard">
+          <div className="bridge-queue-header">
+            <div>
+              <h3>Queue Dashboard</h3>
+              <p>{filteredQueueJobs.length} visible of {queueJobs.length} job{queueJobs.length === 1 ? '' : 's'}</p>
+            </div>
+            <div className="bridge-queue-actions">
+              <button className="btn-secondary" onClick={() => void refresh()} disabled={isLoading}>
+                Refresh Queue
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => void runQueueAction('retry-visible-failed', async () => {
+                  const retryable = filteredQueueJobs.filter(canRetryQueueJob);
+                  await Promise.all(retryable.map(job => retryGenerationJob(job.id)));
+                  return `Retried ${retryable.length} failed job${retryable.length === 1 ? '' : 's'}.`;
+                })}
+                disabled={actionId === 'retry-visible-failed' || filteredQueueJobs.filter(canRetryQueueJob).length === 0}
+              >
+                Retry Failed
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => void runQueueAction('clear-completed', async () => {
+                  const result = await clearGenerationJobHistory({
+                    ...queueClearFilters,
+                    statuses: ['completed'],
+                  });
+                  return `Cleared ${result.cleared} completed job${result.cleared === 1 ? '' : 's'}.`;
+                })}
+                disabled={actionId === 'clear-completed' || queueCounts.completed === 0}
+              >
+                Clear Completed
+              </button>
+              <button
+                className="btn-secondary danger"
+                onClick={() => void runQueueAction('clear-failed', async () => {
+                  const result = await clearGenerationJobHistory({
+                    ...queueClearFilters,
+                    statuses: failedQueueStatuses,
+                  });
+                  return `Cleared ${result.cleared} failed/manual/canceled job${result.cleared === 1 ? '' : 's'}.`;
+                })}
+                disabled={actionId === 'clear-failed' || queueCounts.trouble === 0}
+              >
+                Clear Failed
+              </button>
+              <button
+                className="btn-secondary danger"
+                onClick={() => void runQueueAction('clear-screenshots', async () => {
+                  if (!window.confirm('Clear stored bridge debug screenshots?')) {
+                    return 'Screenshot clear canceled.';
+                  }
+                  const result = await clearBrowserBridgeDebugScreenshots();
+                  return `Cleared ${result.cleared} screenshot file${result.cleared === 1 ? '' : 's'}.`;
+                })}
+                disabled={actionId === 'clear-screenshots'}
+              >
+                Clear Screenshots
+              </button>
+            </div>
+          </div>
+
+          <div className="bridge-queue-counts">
+            <span>Queued <strong>{queueCounts.queued}</strong></span>
+            <span>Active <strong>{queueCounts.active}</strong></span>
+            <span>Completed <strong>{queueCounts.completed}</strong></span>
+            <span>Failed <strong>{queueCounts.trouble}</strong></span>
+            <span>Stale <strong>{queueCounts.stale}</strong></span>
+            <span>Cooldown <strong>{queueCounts.cooldown}</strong></span>
+          </div>
+
+          <div className="bridge-queue-filters">
+            <label>
+              Workflow
+              <select value={queueFlowFilter} onChange={event => setQueueFlowFilter(event.target.value as QueueFlowFilter)}>
+                <option value="all">All workflows</option>
+                <option value="auto_generate">Auto Generate</option>
+                <option value="auto_animate">Auto Animate</option>
+              </select>
+            </label>
+            <label>
+              Status
+              <select value={queueStatusFilter} onChange={event => setQueueStatusFilter(event.target.value as QueueStatusFilter)}>
+                <option value="all">All statuses</option>
+                {queueStatuses.map(status => (
+                  <option key={status} value={status}>{queueStatusLabel(status)}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Provider
+              <select value={queueProviderFilter} onChange={event => setQueueProviderFilter(event.target.value as QueueProviderFilter)}>
+                <option value="all">All providers</option>
+                <option value="meta">Meta</option>
+                <option value="grok">Grok</option>
+              </select>
+            </label>
+            <label>
+              Worker
+              <select value={queueWorkerFilter} onChange={event => setQueueWorkerFilter(event.target.value)}>
+                <option value="all">All workers</option>
+                {workerOptions.map(workerId => {
+                  const worker = workers.find(candidate => candidate.workerId === workerId);
+                  return (
+                    <option key={workerId} value={workerId}>
+                      {worker ? workerDisplayName(worker) : shortWorkerId(workerId)}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <label>
+              Project
+              <select value={queueProjectFilter} onChange={event => setQueueProjectFilter(event.target.value)}>
+                <option value="all">All projects</option>
+                {projectOptions.map(([projectId, label]) => (
+                  <option key={projectId} value={projectId}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Job Type
+              <select value={queueMediaFilter} onChange={event => setQueueMediaFilter(event.target.value as QueueMediaFilter)}>
+                <option value="all">All media</option>
+                <option value="image">Image</option>
+                <option value="video">Video</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="bridge-queue-secondary-actions">
+            <button
+              className="btn-secondary"
+              onClick={() => void runQueueAction('clear-project-finished', async () => {
+                const projectId = queueProjectFilter !== 'all' ? queueProjectFilter : selectedJob?.projectId ?? null;
+                if (!projectId) return 'Choose a project or select a project job first.';
+                const result = await clearGenerationJobHistory({
+                  ...queueClearFilters,
+                  projectId,
+                  statuses: finishedQueueStatuses,
+                });
+                return `Cleared ${result.cleared} finished job${result.cleared === 1 ? '' : 's'} for ${projectId}.`;
+              })}
+              disabled={actionId === 'clear-project-finished' || (!selectedJob?.projectId && queueProjectFilter === 'all')}
+            >
+              Clear Project Finished
+            </button>
+            <button
+              className="btn-secondary danger"
+              onClick={() => void runQueueAction('clear-project-all', async () => {
+                const projectId = queueProjectFilter !== 'all' ? queueProjectFilter : selectedJob?.projectId ?? null;
+                if (!projectId) return 'Choose a project or select a project job first.';
+                if (!window.confirm(`Clear queued, running, completed, and failed jobs for ${projectId}?`)) {
+                  return 'Project clear canceled.';
+                }
+                const result = await clearGenerationJobHistory({
+                  ...queueClearFilters,
+                  projectId,
+                  includeActive: true,
+                });
+                return `Cleared ${result.cleared} total job${result.cleared === 1 ? '' : 's'} for ${projectId}.`;
+              })}
+              disabled={actionId === 'clear-project-all' || (!selectedJob?.projectId && queueProjectFilter === 'all')}
+            >
+              Clear Project All
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={() => void runQueueAction('clear-worker-finished', async () => {
+                if (queueWorkerFilter === 'all') return 'Choose a worker first.';
+                const result = await clearGenerationJobHistory({
+                  ...queueClearFilters,
+                  workerId: queueWorkerFilter,
+                  statuses: finishedQueueStatuses,
+                });
+                return `Cleared ${result.cleared} finished worker job${result.cleared === 1 ? '' : 's'}.`;
+              })}
+              disabled={actionId === 'clear-worker-finished' || queueWorkerFilter === 'all'}
+            >
+              Clear Worker Finished
+            </button>
+            <button
+              className="btn-secondary danger"
+              onClick={() => void runQueueAction('clear-worker-all', async () => {
+                if (queueWorkerFilter === 'all') return 'Choose a worker first.';
+                if (!window.confirm(`Clear queued, running, completed, and failed jobs for ${shortWorkerId(queueWorkerFilter)}?`)) {
+                  return 'Worker clear canceled.';
+                }
+                const result = await clearGenerationJobHistory({
+                  ...queueClearFilters,
+                  workerId: queueWorkerFilter,
+                  includeActive: true,
+                });
+                return `Cleared ${result.cleared} total worker job${result.cleared === 1 ? '' : 's'}.`;
+              })}
+              disabled={actionId === 'clear-worker-all' || queueWorkerFilter === 'all'}
+            >
+              Clear Worker All
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={() => selectedJob && void runQueueAction(`pause-batch-${selectedJob.batchId}`, async () => {
+                await pauseGenerationBatch(selectedJob.batchId, selectedJob.projectId);
+                return `Paused batch ${selectedJob.batchId}.`;
+              })}
+              disabled={!selectedJob || actionId === `pause-batch-${selectedJob?.batchId}`}
+            >
+              Pause Selected Batch
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={() => selectedJob && void runQueueAction(`resume-batch-${selectedJob.batchId}`, async () => {
+                await resumeGenerationBatch(selectedJob.batchId, selectedJob.projectId);
+                return `Resumed batch ${selectedJob.batchId}.`;
+              })}
+              disabled={!selectedJob || actionId === `resume-batch-${selectedJob?.batchId}`}
+            >
+              Resume Selected Batch
+            </button>
+          </div>
+
+          <div className="bridge-queue-body">
+            <div className="bridge-queue-list">
+              {filteredQueueJobs.length === 0 && (
+                <div className="bridge-queue-empty">No jobs match the current filters.</div>
+              )}
+              {filteredQueueJobs.slice(0, 80).map(job => {
+                const workerId = queueWorkerId(job);
+                const worker = workers.find(candidate => candidate.workerId === workerId);
+                return (
+                  <button
+                    type="button"
+                    key={job.id}
+                    className={`bridge-queue-row status-${job.status} ${selectedJob?.id === job.id ? 'selected' : ''}`}
+                    onClick={() => setSelectedJobId(job.id)}
+                  >
+                    <span className={`queue-status-pill status-${job.status}`}>{queueStatusLabel(job.status)}</span>
+                    <strong>{queueSubject(job)}</strong>
+                    <small>{queueFlowLabel(job)} · {job.provider} · {job.mediaType} · {queueProjectLabel(job)}</small>
+                    <small>{worker ? workerDisplayName(worker) : workerId || 'No worker yet'} · {queueResultLabel(job)}</small>
+                    {job.error && <em>{job.error}</em>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {selectedJob && (
+              <aside className="bridge-job-detail" aria-label="Selected job detail">
+                <div className="bridge-job-detail-header">
+                  <div>
+                    <h4>{queueSubject(selectedJob)}</h4>
+                    <p>{selectedJob.id} · {selectedJob.batchId}</p>
+                  </div>
+                  <span className={`queue-status-pill status-${selectedJob.status}`}>{queueStatusLabel(selectedJob.status)}</span>
+                </div>
+                <div className="bridge-job-detail-actions">
+                  <button
+                    className="btn-secondary"
+                    onClick={() => void runQueueAction(`retry-${selectedJob.id}`, async () => {
+                      await retryGenerationJob(selectedJob.id);
+                      return `Retried ${selectedJob.id}.`;
+                    })}
+                    disabled={!canRetryQueueJob(selectedJob) || actionId === `retry-${selectedJob.id}`}
+                  >
+                    Retry Selected
+                  </button>
+                  {selectedJob.resultUrl && (
+                    <a href={resolveBackendMediaUrl(selectedJob.resultUrl)} target="_blank" rel="noreferrer">
+                      Open Result
+                    </a>
+                  )}
+                </div>
+                <div className="bridge-job-detail-grid">
+                  <div><span>Workflow</span><strong>{queueFlowLabel(selectedJob)}</strong></div>
+                  <div><span>Provider</span><strong>{selectedJob.provider}</strong></div>
+                  <div><span>Project</span><strong>{queueProjectLabel(selectedJob)}</strong></div>
+                  <div><span>Worker</span><strong>{selectedWorker ? workerDisplayName(selectedWorker) : queueWorkerId(selectedJob) || '-'}</strong></div>
+                  <div><span>Result</span><strong>{queueResultLabel(selectedJob)}</strong></div>
+                  <div><span>Attempt</span><strong>{selectedJob.metadata.runAttempt || '-'}</strong></div>
+                </div>
+                {selectedJob.error && <div className="bridge-worker-error">{selectedJob.error}</div>}
+                <div className="bridge-job-prompt">
+                  <span>Prompt</span>
+                  <p>{selectedJob.prompt || '-'}</p>
+                  {selectedJob.negativePrompt && (
+                    <>
+                      <span>Negative</span>
+                      <p>{selectedJob.negativePrompt}</p>
+                    </>
+                  )}
+                </div>
+                {selectedJob.resultVariants.length > 0 && (
+                  <div className="bridge-job-variant-grid">
+                    {selectedJob.resultVariants.slice(0, 4).map((variant, index) => (
+                      <button
+                        type="button"
+                        key={`${variant.url}-${index}`}
+                        className={`bridge-job-variant ${selectedJob.resultUrl === variant.url ? 'selected' : ''}`}
+                        onClick={() => void runQueueAction(`select-variant-${selectedJob.id}-${index}`, async () => {
+                          await selectGenerationJobVariant(selectedJob.id, variant.url);
+                          return `Selected variant ${index + 1} for ${selectedJob.id}.`;
+                        })}
+                        disabled={actionId === `select-variant-${selectedJob.id}-${index}` || selectedJob.resultUrl === variant.url}
+                      >
+                        {variant.mediaType === 'video' ? (
+                          <video
+                            src={resolveBackendMediaUrl(variant.url)}
+                            muted
+                            loop
+                            playsInline
+                            preload="metadata"
+                            onMouseEnter={event => void event.currentTarget.play().catch(() => {})}
+                            onMouseLeave={event => event.currentTarget.pause()}
+                          />
+                        ) : (
+                          <img src={resolveBackendMediaUrl(variant.url)} alt={`Variant ${index + 1}`} />
+                        )}
+                        <span>{selectedJob.resultUrl === variant.url ? 'Selected' : `Use ${index + 1}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="bridge-debug-list">
+                  <div className="bridge-debug-title">Flight Recorder</div>
+                  {selectedJobEvents.length === 0 && <div className="bridge-debug-empty">No debug events for this job yet.</div>}
+                  {selectedJobEvents.slice(-8).reverse().map(event => {
+                    const screenshotUrl = event.metadata.screenshotUrl;
+                    return (
+                      <div key={event.id} className={`bridge-debug-event level-${event.level}`}>
+                        <strong>{event.step.replaceAll('_', ' ')}</strong>
+                        <span>{event.message}</span>
+                        <small>{eventTime(event)}{event.provider ? ` · ${event.provider}` : ''}</small>
+                        {screenshotUrl && (
+                          <a href={resolveBackendMediaUrl(screenshotUrl)} target="_blank" rel="noreferrer">
+                            View screenshot
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </aside>
+            )}
+          </div>
+        </section>
 
         <div className="bridge-worker-list">
           {visibleWorkers.length === 0 && !error && (

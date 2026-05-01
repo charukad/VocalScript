@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from backend.src.domain.models.generation import (
     GeneratedMediaAsset,
+    GeneratedMediaType,
     GenerationJob,
     GenerationJobStatus,
     GenerationMediaVariant,
@@ -506,6 +507,9 @@ class SQLiteStore:
         self,
         project_id: Optional[str],
         provider: Optional[ProviderName],
+        worker_id: Optional[str],
+        flow: Optional[str],
+        media_type: Optional[GeneratedMediaType],
         statuses: Iterable[GenerationJobStatus],
     ) -> int:
         project_ids = [project_id] if project_id else [project.id for project in self.list_projects()]
@@ -527,19 +531,38 @@ class SQLiteStore:
                     if provider:
                         where.append("provider = ?")
                         params.append(provider)
+                    if worker_id:
+                        where.append("worker_id = ?")
+                        params.append(worker_id)
+                    if media_type:
+                        where.append("media_type = ?")
+                        params.append(media_type)
                     rows = connection.execute(
-                        f"SELECT id FROM generation_jobs WHERE {' AND '.join(where)}",
+                        f"SELECT id, job_json FROM generation_jobs WHERE {' AND '.join(where)}",
                         params,
                     ).fetchall()
-                    removed_ids = {row["id"] for row in rows}
+                    removed_ids = {
+                        row["id"]
+                        for row in rows
+                        if not flow or self._job_json_matches_flow(row["job_json"], flow)
+                    }
+                    if not removed_ids:
+                        continue
+                    delete_placeholders = ",".join("?" for _ in removed_ids)
                     result = connection.execute(
-                        f"DELETE FROM generation_jobs WHERE {' AND '.join(where)}",
-                        params,
+                        f"DELETE FROM generation_jobs WHERE id IN ({delete_placeholders})",
+                        list(removed_ids),
                     )
                     deleted += result.rowcount if result.rowcount is not None else 0
                     if removed_ids:
                         self._remove_generation_jobs_from_project_file(connection, removed_ids)
         return deleted
+
+    def _job_json_matches_flow(self, job_json: str, flow: str) -> bool:
+        job = self._job_from_json(job_json)
+        if not job:
+            return False
+        return job.metadata.get("flow", "auto_generate") == flow
 
     def _remove_generation_jobs_from_project_file(
         self,

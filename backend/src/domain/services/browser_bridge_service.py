@@ -255,6 +255,26 @@ class BrowserBridgeService:
         )
         return event, screenshot_url, str(local_path)
 
+    def clear_screenshots(self) -> int:
+        if not self.screenshot_dir.exists():
+            return 0
+        cleared = 0
+        for path in self.screenshot_dir.iterdir():
+            if not path.is_file():
+                continue
+            try:
+                path.unlink()
+                cleared += 1
+            except OSError:
+                continue
+        self.record_debug_event(
+            worker_id="system",
+            step="debug_screenshots_cleared",
+            message=f"Cleared {cleared} debug screenshot file{'s' if cleared != 1 else ''}",
+            level="info",
+        )
+        return cleared
+
     def pause_worker(self, worker_id: str) -> Optional[ConnectedWorker]:
         worker = self._workers.get(worker_id)
         if not worker:

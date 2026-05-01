@@ -18,6 +18,7 @@ const elements = {
   providerDelaySeconds: document.getElementById("providerDelaySeconds"),
   providerMeta: document.getElementById("providerMeta"),
   providerGrok: document.getElementById("providerGrok"),
+  captureFailureScreenshots: document.getElementById("captureFailureScreenshots"),
   saveBtn: document.getElementById("saveBtn"),
   connectBtn: document.getElementById("connectBtn"),
   disconnectBtn: document.getElementById("disconnectBtn"),
@@ -120,6 +121,7 @@ function readSettings() {
     metaUrl: elements.metaUrl.value,
     jobTimeoutMs: Math.max(30, Number(elements.jobTimeoutSeconds.value) || 180) * 1000,
     providerDelayMs: Math.max(0, Number(elements.providerDelaySeconds.value) || 0) * 1000,
+    captureFailureScreenshots: elements.captureFailureScreenshots.checked,
     providers,
   };
 }
@@ -138,6 +140,7 @@ function renderSettings(settings) {
   elements.providerDelaySeconds.value = Math.round((settings.providerDelayMs || 12000) / 1000);
   elements.providerMeta.checked = (settings.providers || []).includes("meta");
   elements.providerGrok.checked = (settings.providers || []).includes("grok");
+  elements.captureFailureScreenshots.checked = settings.captureFailureScreenshots !== false;
 }
 
 function renderStatus(status) {
@@ -199,11 +202,11 @@ async function stopJobs() {
 
 async function clearJobHistory(includeActive) {
   const projectId = elements.projectSelect.value;
-  if (!projectId) {
-    addLog("Select a project before clearing job history");
-    return;
-  }
-  if (includeActive && !window.confirm("Clear all queued, running, completed, and failed jobs for this project? This also stops the local runner.")) {
+  const scopeLabel = projectId ? `this project (${projectName(projectId) || projectId})` : "all projects";
+  const confirmMessage = includeActive
+    ? `Clear queued, running, completed, and failed jobs for ${scopeLabel}? This also stops this local runner.`
+    : `Clear completed, failed, manual-action, and canceled jobs for ${scopeLabel}?`;
+  if (!window.confirm(confirmMessage)) {
     return;
   }
   try {
@@ -218,13 +221,13 @@ async function clearJobHistory(includeActive) {
     const url = new URL(`${elements.httpBaseUrl.value.replace(/\/$/, "")}/api/generation/jobs/history`);
     const provider = selectedProviderFilter();
     if (provider) url.searchParams.set("provider", provider);
-    url.searchParams.set("projectId", projectId);
+    if (projectId) url.searchParams.set("projectId", projectId);
     if (includeActive) url.searchParams.set("includeActive", "true");
     const response = await fetch(url, { method: "DELETE" });
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
     await refreshJobList();
-    addLog(`Cleared ${Number(data.cleared || 0)} ${includeActive ? "total" : "finished"} job${Number(data.cleared || 0) === 1 ? "" : "s"}`);
+    addLog(`Cleared ${Number(data.cleared || 0)} ${includeActive ? "total" : "finished"} job${Number(data.cleared || 0) === 1 ? "" : "s"} for ${scopeLabel}`);
   } catch (error) {
     addLog(`Clear history failed: ${error.message}`);
   }
@@ -263,15 +266,11 @@ function renderProjects(selectedProjectId = "") {
 async function refreshJobList() {
   const projectId = elements.projectSelect.value;
   elements.jobList.innerHTML = "";
-  if (!projectId) {
-    renderJobListMessage("Select a project before running jobs.");
-    return;
-  }
   try {
     const url = new URL(`${elements.httpBaseUrl.value.replace(/\/$/, "")}/api/generation/jobs`);
     const provider = selectedProviderFilter();
     if (provider) url.searchParams.set("provider", provider);
-    url.searchParams.set("projectId", projectId);
+    if (projectId) url.searchParams.set("projectId", projectId);
     const response = await fetch(url);
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
@@ -280,7 +279,7 @@ async function refreshJobList() {
     }
     const jobs = Array.isArray(data.jobs) ? data.jobs : [];
     if (jobs.length === 0) {
-      renderJobListMessage("No jobs for this project.");
+      renderJobListMessage(projectId ? "No jobs for this project." : "No jobs across projects.");
       return;
     }
     jobs.slice().reverse().forEach((job) => {

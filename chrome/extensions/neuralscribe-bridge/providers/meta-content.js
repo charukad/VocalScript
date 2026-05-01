@@ -136,7 +136,10 @@ async function runMetaJob(job, options) {
     await waitForPromptText(promptBox, prompt, 3000);
   }
 
-  const generateButton = await waitForGenerateButton(promptBox, requestedMediaType === "video" ? 45000 : 25000);
+  let generateButton = await waitForGenerateButton(promptBox, requestedMediaType === "video" ? 45000 : 25000);
+  if (!generateButton) {
+    generateButton = await recoverGenerateButton(promptBox, prompt, requestedMediaType);
+  }
   if (!generateButton) {
     if (hasManualActionElement()) {
       return manualActionResult(job, "Meta needs login or captcha before generation can start.");
@@ -152,6 +155,10 @@ async function runMetaJob(job, options) {
     result = await waitForGeneratedMedia(timeoutMs, mediaBefore, requestedMediaType, prompt, mediaObserver);
   } finally {
     mediaObserver.disconnect();
+  }
+
+  if (!result) {
+    result = await recoverGeneratedMedia(mediaBefore, requestedMediaType, prompt);
   }
 
   if (!result) {
@@ -183,6 +190,51 @@ async function runMetaJob(job, options) {
       variantCount: String(result.variants.length),
     },
   };
+}
+
+async function recoverGenerateButton(promptBox, prompt, requestedMediaType) {
+  promptBox.scrollIntoView({ block: "center", inline: "nearest" });
+  await sleep(600);
+  await ensureRequestedMode(requestedMediaType);
+  promptBox = await waitForPromptBox(8000) || promptBox;
+  await fillPrompt(promptBox, prompt, true);
+  await waitForPromptText(promptBox, prompt, 3000);
+  promptBox.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+  promptBox.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
+  await sleep(1200);
+  return waitForGenerateButton(promptBox, requestedMediaType === "video" ? 20000 : 12000);
+}
+
+async function recoverGeneratedMedia(mediaBefore, requestedMediaType, prompt) {
+  const originalX = window.scrollX;
+  const originalY = window.scrollY;
+  const mediaObserver = createNewMediaObserver();
+  try {
+    window.scrollTo(0, document.body.scrollHeight);
+    await sleep(1500);
+    const result = await waitForGeneratedMedia(
+      requestedMediaType === "video" ? 42000 : 20000,
+      mediaBefore,
+      requestedMediaType,
+      prompt,
+      mediaObserver
+    );
+    if (result) return result;
+    window.scrollTo(0, 0);
+    await sleep(800);
+    window.scrollTo(0, document.body.scrollHeight);
+    await sleep(1200);
+    return waitForGeneratedMedia(
+      requestedMediaType === "video" ? 32000 : 12000,
+      mediaBefore,
+      requestedMediaType,
+      prompt,
+      mediaObserver
+    );
+  } finally {
+    mediaObserver.disconnect();
+    window.scrollTo(originalX, originalY);
+  }
 }
 
 function manualActionResult(job, message) {

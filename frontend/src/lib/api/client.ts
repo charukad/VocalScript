@@ -96,17 +96,27 @@ export type BridgeDebugEventListResponse = {
   events: BridgeDebugEvent[];
 };
 
+export type BridgeScreenshotCleanupResponse = {
+  cleared: number;
+};
+
 type GenerationListOptions = {
   batchId?: string | null;
   projectId?: string | null;
   status?: GenerationJobStatus | null;
   provider?: ProviderName | null;
+  workerId?: string | null;
+  flow?: 'auto_generate' | 'auto_animate' | null;
+  mediaType?: GeneratedMediaType | null;
   signal?: AbortSignal;
 };
 
 type ClearGenerationHistoryOptions = {
   projectId?: string | null;
   provider?: ProviderName | null;
+  workerId?: string | null;
+  flow?: 'auto_generate' | 'auto_animate' | null;
+  mediaType?: GeneratedMediaType | null;
   statuses?: GenerationJobStatus[];
   includeActive?: boolean;
   signal?: AbortSignal;
@@ -255,6 +265,22 @@ export const listBrowserBridgeDebugEvents = async (
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(formatApiError(errorData.detail, 'Could not load bridge debug events'));
+  }
+
+  return response.json();
+};
+
+export const clearBrowserBridgeDebugScreenshots = async (
+  signal?: AbortSignal
+): Promise<BridgeScreenshotCleanupResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/browser-bridge/debug/screenshots`, {
+    method: 'DELETE',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not clear bridge debug screenshots'));
   }
 
   return response.json();
@@ -672,6 +698,9 @@ export const listGenerationJobs = async (
   if (options.projectId) params.set('projectId', options.projectId);
   if (options.status) params.set('status', options.status);
   if (options.provider) params.set('provider', options.provider);
+  if (options.workerId) params.set('workerId', options.workerId);
+  if (options.flow) params.set('flow', options.flow);
+  if (options.mediaType) params.set('mediaType', options.mediaType);
   const suffix = params.toString() ? `?${params.toString()}` : '';
   const response = await fetch(`${API_BASE_URL}/api/generation/jobs${suffix}`, { signal: options.signal });
 
@@ -689,6 +718,9 @@ export const clearGenerationJobHistory = async (
   const params = new URLSearchParams();
   if (options.projectId) params.set('projectId', options.projectId);
   if (options.provider) params.set('provider', options.provider);
+  if (options.workerId) params.set('workerId', options.workerId);
+  if (options.flow) params.set('flow', options.flow);
+  if (options.mediaType) params.set('mediaType', options.mediaType);
   if (options.includeActive) params.set('includeActive', 'true');
   options.statuses?.forEach(status => params.append('statuses', status));
   const suffix = params.toString() ? `?${params.toString()}` : '';

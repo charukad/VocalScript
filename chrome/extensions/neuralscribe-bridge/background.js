@@ -20,14 +20,19 @@ const DEFAULT_SETTINGS = {
   claimIntervalMs: 5000,
   providerDelayMs: 12000,
   jobTimeoutMs: 180000,
+  captureFailureScreenshots: true,
 };
 
 const JOB_LOOP_ALARM = "neuralscribe-job-loop";
 const IDLE_CLAIM_INTERVAL_MS = 15000;
+const FAILURE_COOLDOWN_BASE_MS = 30000;
+const FAILURE_COOLDOWN_MAX_MS = 5 * 60 * 1000;
+const PROVIDER_FAILURE_PAUSE_THRESHOLD = 3;
 const STORAGE_KEYS = {
   activeJob: "activeJob",
   jobLoopActive: "jobLoopActive",
   providerAvailableAt: "providerAvailableAt",
+  providerFailureStreak: "providerFailureStreak",
 };
 
 let socket = null;
@@ -153,6 +158,7 @@ function sanitizeSettings(settings) {
     claimIntervalMs: Number(settings.claimIntervalMs || DEFAULT_SETTINGS.claimIntervalMs),
     providerDelayMs: Number(settings.providerDelayMs || DEFAULT_SETTINGS.providerDelayMs),
     jobTimeoutMs: Number(settings.jobTimeoutMs || DEFAULT_SETTINGS.jobTimeoutMs),
+    captureFailureScreenshots: settings.captureFailureScreenshots !== false,
   };
 }
 
@@ -433,6 +439,7 @@ async function resetJobRunner() {
     STORAGE_KEYS.activeJob,
     STORAGE_KEYS.jobLoopActive,
     STORAGE_KEYS.providerAvailableAt,
+    STORAGE_KEYS.providerFailureStreak,
   ]);
   await chrome.alarms.clear(JOB_LOOP_ALARM);
   updateStatus({
@@ -550,13 +557,16 @@ async function claimAndRunNextJob() {
     const result = await adapter.run(job, settings);
     if (runToken !== jobRunToken) {
       updateStatus({ jobMessage: `Ignored stale provider result for ${formatJobLabel(job)}` });
-      return { delayMs: Math.max(settings.providerDelayMs, settings.claimIntervalMs) };
+      return { delayMs: Math.max(recovery.delayMs, settings.providerDelayMs, settings.claimIntervalMs) };
     }
     if (result.status === "manual_action_required") {
       await updateJobStatus(settings, job.id, "manual_action_required", result.message, result.metadata);
-      await markProviderDelay(settings);
+      const recovery = await markProviderDelay(settings, { failure: true });
       updateStatus({
-        jobMessage: `Manual action needed for ${formatJobLabel(job)}`,
+        jobRunning: recovery.autoPaused ? false : currentStatus.jobRunning,
+        jobMessage: recovery.autoPaused
+          ? `Paused after ${recovery.failureStreak} provider failures. Last issue: ${result.message || "manual action required"}`
+          : `Manual action needed for ${formatJobLabel(job)}`,
         cooldownUntil: await getProviderCooldownUntil(),
         lastError: result.message || "Manual action required",
       });
@@ -564,9 +574,9 @@ async function claimAndRunNextJob() {
     }
 
     await completeJob(settings, job.id, result.mediaUrl, result.mediaType, result.metadata, result.mediaVariants);
-    await markProviderDelay(settings);
+    await markProviderDelay(settings, { resetFailures: true });
     updateStatus({ jobMessage: `Completed ${formatJobLabel(job)}`, cooldownUntil: await getProviderCooldownUntil(), lastError: null });
-    return { delayMs: Math.max(settings.providerDelayMs, settings.claimIntervalMs) };
+    return { delayMs: Math.max(recovery.delayMs, settings.providerDelayMs, settings.claimIntervalMs) };
   } catch (error) {
     if (runToken !== jobRunToken) {
       updateStatus({ jobMessage: `Ignored stale provider error for ${formatJobLabel(job)}` });
@@ -580,9 +590,12 @@ async function claimAndRunNextJob() {
         level: "warning",
       });
     });
-    await markProviderDelay(settings);
+    const recovery = await markProviderDelay(settings, { failure: true });
     updateStatus({
-      jobMessage: `Failed ${formatJobLabel(job)}: ${error.message}`,
+      jobRunning: recovery.autoPaused ? false : currentStatus.jobRunning,
+      jobMessage: recovery.autoPaused
+        ? `Paused after ${recovery.failureStreak} provider failures. Last failure: ${error.message}`
+        : `Failed ${formatJobLabel(job)}: ${error.message}`,
       cooldownUntil: await getProviderCooldownUntil(),
       lastError: error.message,
     });
@@ -622,10 +635,46 @@ async function getProviderCooldownUntil() {
   return availableAt > Date.now() ? new Date(availableAt).toISOString() : null;
 }
 
-async function markProviderDelay(settings) {
-  const delayMs = Math.max(0, Number(settings.providerDelayMs || 0));
-  if (delayMs === 0) return;
+async function markProviderDelay(settings, options = {}) {
+  const baseDelayMs = Math.max(0, Number(settings.providerDelayMs || 0));
+  let delayMs = baseDelayMs;
+  let failureStreak = await getProviderFailureStreak();
+  let autoPaused = false;
+
+  if (options.resetFailures) {
+    failureStreak = 0;
+    await chrome.storage.local.set({ [STORAGE_KEYS.providerFailureStreak]: 0 });
+  }
+
+  if (options.failure) {
+    failureStreak += 1;
+    await chrome.storage.local.set({ [STORAGE_KEYS.providerFailureStreak]: failureStreak });
+    const failureDelay = Math.max(FAILURE_COOLDOWN_BASE_MS, baseDelayMs) * failureStreak;
+    delayMs = Math.min(Math.max(baseDelayMs, failureDelay), FAILURE_COOLDOWN_MAX_MS);
+    if (failureStreak >= PROVIDER_FAILURE_PAUSE_THRESHOLD) {
+      autoPaused = true;
+      jobLoopActive = false;
+      await chrome.storage.local.set({ [STORAGE_KEYS.jobLoopActive]: false });
+      await chrome.alarms.clear(JOB_LOOP_ALARM);
+      await reportDebugEvent("provider_auto_pause", `Paused worker after ${failureStreak} provider failures`, {
+        provider: "meta",
+        level: "warning",
+        metadata: { failureStreak: String(failureStreak) },
+      });
+    }
+  }
+
+  if (delayMs <= 0) {
+    await chrome.storage.local.remove(STORAGE_KEYS.providerAvailableAt);
+    return { delayMs: 0, failureStreak, autoPaused };
+  }
   await chrome.storage.local.set({ [STORAGE_KEYS.providerAvailableAt]: Date.now() + delayMs });
+  return { delayMs, failureStreak, autoPaused };
+}
+
+async function getProviderFailureStreak() {
+  const stored = await chrome.storage.local.get(STORAGE_KEYS.providerFailureStreak);
+  return Math.max(0, Number(stored[STORAGE_KEYS.providerFailureStreak] || 0));
 }
 
 function formatJobLabel(job) {
@@ -655,6 +704,9 @@ async function completeJob(settings, jobId, mediaUrl, mediaType, metadata = {}, 
 }
 
 async function captureFailureScreenshot(settings, job, error) {
+  if (settings.captureFailureScreenshots === false) {
+    throw new Error("Failure screenshots are disabled in bridge settings");
+  }
   if (!lastProviderTabId) throw new Error("No provider tab available for screenshot");
   const tab = await chrome.tabs.get(lastProviderTabId);
   const url = String(tab.url || "");

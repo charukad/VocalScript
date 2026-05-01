@@ -116,6 +116,9 @@ class GenerationQueueService:
         provider: Optional[ProviderName] = None,
         batch_id: Optional[str] = None,
         project_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+        flow: Optional[str] = None,
+        media_type: Optional[GeneratedMediaType] = None,
     ) -> List[GenerationJob]:
         self._refresh_from_store()
         jobs = [self._jobs[job_id] for job_id in self._job_order if job_id in self._jobs]
@@ -127,12 +130,21 @@ class GenerationQueueService:
             jobs = [job for job in jobs if job.batch_id == batch_id]
         if project_id:
             jobs = [job for job in jobs if job.project_id == project_id]
+        if worker_id:
+            jobs = [job for job in jobs if job.metadata.get("workerId") == worker_id]
+        if flow:
+            jobs = [job for job in jobs if job.metadata.get("flow", "auto_generate") == flow]
+        if media_type:
+            jobs = [job for job in jobs if job.media_type == media_type]
         return jobs
 
     def clear_job_history(
         self,
         provider: Optional[ProviderName] = None,
         project_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+        flow: Optional[str] = None,
+        media_type: Optional[GeneratedMediaType] = None,
         statuses: Optional[Iterable[GenerationJobStatus]] = None,
         include_active: bool = False,
     ) -> int:
@@ -150,6 +162,9 @@ class GenerationQueueService:
             and job.status in clearable_statuses
             and (not provider or job.provider == provider)
             and (not project_id or job.project_id == project_id)
+            and (not worker_id or job.metadata.get("workerId") == worker_id)
+            and (not flow or job.metadata.get("flow", "auto_generate") == flow)
+            and (not media_type or job.media_type == media_type)
         }
         if not remove_ids:
             return 0
@@ -158,6 +173,9 @@ class GenerationQueueService:
             self.store.clear_generation_jobs(
                 project_id=project_id,
                 provider=provider,
+                worker_id=worker_id,
+                flow=flow,
+                media_type=media_type,
                 statuses=clearable_statuses,
             )
 
