@@ -32,6 +32,8 @@ const STORAGE_KEYS = {
   activeJob: "activeJob",
   jobLoopActive: "jobLoopActive",
   providerAvailableAt: "providerAvailableAt",
+  providerCooldownReason: "providerCooldownReason",
+  providerAutoResumeAt: "providerAutoResumeAt",
   providerFailureStreak: "providerFailureStreak",
 };
 
@@ -296,13 +298,13 @@ async function handleBridgeSocketMessage(payload) {
   const settings = await getSettings();
   const workerId = await getWorkerId();
   if (payload.workerId && payload.workerId !== workerId) return;
-  if (payload.command === "health_check" || payload.command === "adapter_test") {
+  if (payload.command === "health_check") {
     await reportDebugEvent(
-      payload.command === "adapter_test" ? "adapter_test_started" : "health_check_started",
-      payload.command === "adapter_test" ? "Running Meta adapter test" : "Running Meta health check",
+      "health_check_started",
+      "Running Meta health check",
       { level: "info", provider: "meta" }
     );
-    const result = await runProviderHealthCheck(settings, payload.command === "adapter_test");
+    const result = await runProviderHealthCheck(settings, false);
     latestHealth = result.health;
     updateStatus({
       health: latestHealth,
@@ -314,10 +316,54 @@ async function handleBridgeSocketMessage(payload) {
       socket.send(JSON.stringify(createHealthResultMessage(workerId, result.health, result.capabilities)));
     }
     await reportDebugEvent(
-      payload.command === "adapter_test" ? "adapter_test_completed" : "health_check_completed",
+      "health_check_completed",
       result.health[0]?.message || "Provider health check completed",
       { level: result.health[0]?.status === "ready" ? "info" : "warning", provider: "meta" }
     );
+    return;
+  }
+  if (payload.command === "clear_cooldown") {
+    await chrome.storage.local.remove([
+      STORAGE_KEYS.providerAvailableAt,
+      STORAGE_KEYS.providerCooldownReason,
+      STORAGE_KEYS.providerAutoResumeAt,
+      STORAGE_KEYS.providerFailureStreak,
+    ]);
+    updateStatus({
+      cooldownUntil: null,
+      lastError: null,
+      jobMessage: "Provider cooldown cleared from Bridge Monitor",
+    });
+    await reportDebugEvent("provider_cooldown_cleared", "Provider cooldown manually cleared", {
+      level: "warning",
+      provider: "meta",
+    });
+    return;
+  }
+  if (payload.command === "adapter_test") {
+    const commandPayload = payload.payload || {};
+    const submitFullTest = commandPayload.submitFullTest === true || commandPayload.submitFullTest === "true";
+    await reportDebugEvent("adapter_test_started", submitFullTest ? "Running full Meta adapter test" : "Running safe Meta adapter test", {
+      level: "info",
+      provider: "meta",
+      metadata: { adapterTestId: commandPayload.adapterTestId || "", submitFullTest: String(submitFullTest) },
+    });
+    const result = await runProviderAdapterTest(settings, commandPayload);
+    latestHealth = result.health;
+    updateStatus({
+      health: latestHealth,
+      capabilities: result.capabilities,
+      jobMessage: result.health[0]?.message || "Adapter test completed",
+      lastError: result.health.some((item) => item.status === "error" || item.status === "blocked") ? result.health[0]?.message : null,
+    });
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(createHealthResultMessage(workerId, result.health, result.capabilities)));
+    }
+    await reportDebugEvent("adapter_test_completed", result.health[0]?.message || "Provider adapter test completed", {
+      level: result.health[0]?.status === "ready" ? "info" : "warning",
+      provider: "meta",
+      metadata: result.health[0]?.metadata || {},
+    });
   }
 }
 
@@ -439,6 +485,8 @@ async function resetJobRunner() {
     STORAGE_KEYS.activeJob,
     STORAGE_KEYS.jobLoopActive,
     STORAGE_KEYS.providerAvailableAt,
+    STORAGE_KEYS.providerCooldownReason,
+    STORAGE_KEYS.providerAutoResumeAt,
     STORAGE_KEYS.providerFailureStreak,
   ]);
   await chrome.alarms.clear(JOB_LOOP_ALARM);
@@ -463,8 +511,19 @@ async function handleJobLoopAlarm() {
   const stored = await chrome.storage.local.get([
     STORAGE_KEYS.jobLoopActive,
     STORAGE_KEYS.activeJob,
+    STORAGE_KEYS.providerAutoResumeAt,
   ]);
   jobLoopActive = Boolean(stored[STORAGE_KEYS.jobLoopActive]);
+  const autoResumeAt = Number(stored[STORAGE_KEYS.providerAutoResumeAt] || 0);
+  if (!jobLoopActive && autoResumeAt > 0 && autoResumeAt <= Date.now()) {
+    jobLoopActive = true;
+    await chrome.storage.local.set({ [STORAGE_KEYS.jobLoopActive]: true });
+    await chrome.storage.local.remove(STORAGE_KEYS.providerAutoResumeAt);
+    await reportDebugEvent("provider_auto_resume", "Worker resumed automatically after cooldown", {
+      provider: "meta",
+      level: "info",
+    });
+  }
   if (stored[STORAGE_KEYS.activeJob] && !currentJob) {
     currentJob = stored[STORAGE_KEYS.activeJob];
   }
@@ -560,8 +619,12 @@ async function claimAndRunNextJob() {
       return { delayMs: Math.max(settings.providerDelayMs, settings.claimIntervalMs) };
     }
     if (result.status === "manual_action_required") {
-      await updateJobStatus(settings, job.id, "manual_action_required", result.message, result.metadata);
-      const recovery = await markProviderDelay(settings, { failure: true });
+      const failureReason = classifyProviderIssue(result.message || "manual action required");
+      await updateJobStatus(settings, job.id, "manual_action_required", result.message, {
+        ...result.metadata,
+        providerFailureReason: failureReason,
+      });
+      const recovery = await markProviderDelay(settings, { failure: true, reason: failureReason });
       updateStatus({
         jobRunning: recovery.autoPaused ? false : currentStatus.jobRunning,
         jobMessage: recovery.autoPaused
@@ -582,7 +645,8 @@ async function claimAndRunNextJob() {
       updateStatus({ jobMessage: `Ignored stale provider error for ${formatJobLabel(job)}` });
       return { delayMs: Math.max(settings.providerDelayMs, settings.claimIntervalMs) };
     }
-    await updateJobStatus(settings, job.id, "failed", error.message, { provider: "meta" });
+    const failureReason = classifyProviderIssue(error.message);
+    await updateJobStatus(settings, job.id, "failed", error.message, { provider: "meta", providerFailureReason: failureReason });
     await captureFailureScreenshot(settings, job, error).catch((screenshotError) => {
       reportDebugEvent("failure_screenshot_skipped", screenshotError.message, {
         provider: "meta",
@@ -590,7 +654,7 @@ async function claimAndRunNextJob() {
         level: "warning",
       });
     });
-    const recovery = await markProviderDelay(settings, { failure: true });
+    const recovery = await markProviderDelay(settings, { failure: true, reason: failureReason });
     updateStatus({
       jobRunning: recovery.autoPaused ? false : currentStatus.jobRunning,
       jobMessage: recovery.autoPaused
@@ -640,26 +704,42 @@ async function markProviderDelay(settings, options = {}) {
   let delayMs = baseDelayMs;
   let failureStreak = await getProviderFailureStreak();
   let autoPaused = false;
+  const reason = options.reason || "normal";
 
   if (options.resetFailures) {
     failureStreak = 0;
     await chrome.storage.local.set({ [STORAGE_KEYS.providerFailureStreak]: 0 });
+    await chrome.storage.local.remove([STORAGE_KEYS.providerCooldownReason, STORAGE_KEYS.providerAutoResumeAt]);
   }
 
   if (options.failure) {
     failureStreak += 1;
     await chrome.storage.local.set({ [STORAGE_KEYS.providerFailureStreak]: failureStreak });
-    const failureDelay = Math.max(FAILURE_COOLDOWN_BASE_MS, baseDelayMs) * failureStreak;
+    const multipliers = {
+      rate_limit: 4,
+      slow_queue: 2,
+      manual_action: 2,
+      blocked: 5,
+      prompt_missing: 1.5,
+      no_media: 1.5,
+      provider_error: 1,
+      normal: 1,
+    };
+    const multiplier = multipliers[reason] || 1;
+    const failureDelay = Math.max(FAILURE_COOLDOWN_BASE_MS, baseDelayMs) * failureStreak * multiplier;
     delayMs = Math.min(Math.max(baseDelayMs, failureDelay), FAILURE_COOLDOWN_MAX_MS);
+    await chrome.storage.local.set({ [STORAGE_KEYS.providerCooldownReason]: reason });
     if (failureStreak >= PROVIDER_FAILURE_PAUSE_THRESHOLD) {
       autoPaused = true;
       jobLoopActive = false;
       await chrome.storage.local.set({ [STORAGE_KEYS.jobLoopActive]: false });
+      await chrome.storage.local.set({ [STORAGE_KEYS.providerAutoResumeAt]: Date.now() + delayMs });
       await chrome.alarms.clear(JOB_LOOP_ALARM);
+      await chrome.alarms.create(JOB_LOOP_ALARM, { when: Date.now() + delayMs + 1000 });
       await reportDebugEvent("provider_auto_pause", `Paused worker after ${failureStreak} provider failures`, {
         provider: "meta",
         level: "warning",
-        metadata: { failureStreak: String(failureStreak) },
+        metadata: { failureStreak: String(failureStreak), reason },
       });
     }
   }
@@ -670,6 +750,17 @@ async function markProviderDelay(settings, options = {}) {
   }
   await chrome.storage.local.set({ [STORAGE_KEYS.providerAvailableAt]: Date.now() + delayMs });
   return { delayMs, failureStreak, autoPaused };
+}
+
+function classifyProviderIssue(message = "") {
+  const text = String(message).toLowerCase();
+  if (/rate|limit|too many|quota|try again later|temporar/i.test(text)) return "rate_limit";
+  if (/slow|queue|busy|wait|processing/i.test(text)) return "slow_queue";
+  if (/login|captcha|manual|permission|password|checkpoint/i.test(text)) return "manual_action";
+  if (/block|policy|restricted|unavailable|region/i.test(text)) return "blocked";
+  if (/prompt input|textbox|contenteditable|prompt box/i.test(text)) return "prompt_missing";
+  if (/media|result|timed out|timeout/i.test(text)) return "no_media";
+  return "provider_error";
 }
 
 async function getProviderFailureStreak() {
@@ -789,14 +880,50 @@ async function runMetaJob(job, settings) {
     provider: "meta",
     jobId: job.id,
   });
-  const response = await sendMetaRunJobMessage(tab.id, {
-    type: "provider.meta.runJob",
-    job,
-    options: {
-      timeoutMs: settings.jobTimeoutMs,
-      httpBaseUrl: settings.httpBaseUrl,
-    },
-  });
+  let response;
+  try {
+    response = await sendMetaRunJobMessage(tab.id, {
+      type: "provider.meta.runJob",
+      job,
+      options: {
+        timeoutMs: settings.jobTimeoutMs,
+        httpBaseUrl: settings.httpBaseUrl,
+      },
+    });
+  } catch (error) {
+    if (!isPromptMissingError(error)) throw error;
+    await reportDebugEvent("recovery_prompt_missing", "Prompt input missing; reopening Meta tab and reinjecting content script", {
+      provider: "meta",
+      jobId: job.id,
+      level: "warning",
+      metadata: { originalError: error.message },
+    });
+    const recoveredTab = await chrome.tabs.update(tab.id, { url: settings.metaUrl, active: true });
+    lastProviderTabId = recoveredTab.id || tab.id || null;
+    await waitForTabReady(recoveredTab.id || tab.id);
+    await ensureMetaContentScript(recoveredTab.id || tab.id);
+    try {
+      response = await sendMetaRunJobMessage(recoveredTab.id || tab.id, {
+        type: "provider.meta.runJob",
+        job,
+        options: {
+          timeoutMs: settings.jobTimeoutMs,
+          httpBaseUrl: settings.httpBaseUrl,
+        },
+      });
+      await reportDebugEvent("recovery_prompt_missing_success", "Prompt input recovery succeeded", {
+        provider: "meta",
+        jobId: job.id,
+      });
+    } catch (recoveryError) {
+      await reportDebugEvent("recovery_prompt_missing_failed", recoveryError.message, {
+        provider: "meta",
+        jobId: job.id,
+        level: "error",
+      });
+      throw new Error(`Prompt input recovery failed: ${recoveryError.message}`);
+    }
+  }
   if (!response?.ok) {
     throw new Error(response?.error || "Meta provider adapter failed");
   }
@@ -809,6 +936,10 @@ async function runMetaJob(job, settings) {
     },
   });
   return response.result;
+}
+
+function isPromptMissingError(error) {
+  return /prompt input|prompt box|textbox|contenteditable/i.test(error?.message || "");
 }
 
 async function runMetaExtendVideoJob(job, settings) {
@@ -881,6 +1012,57 @@ async function runProviderHealthCheck(settings, includeAdapterTest = false) {
         canDetectMedia: false,
         canExtendVideo: false,
         metadata: { workerId },
+      }],
+      capabilities: createProviderCapabilities([PROVIDERS.META]),
+    };
+  }
+}
+
+async function runProviderAdapterTest(settings, payload = {}) {
+  const workerId = await getWorkerId();
+  const submitFullTest = payload.submitFullTest === true || payload.submitFullTest === "true";
+  try {
+    const tab = await findOrOpenProviderTab(settings.metaUrl, "*://*.meta.ai/*");
+    lastProviderTabId = tab.id || null;
+    await waitForTabReady(tab.id);
+    await ensureMetaContentScript(tab.id);
+    const response = await sendTabMessage(tab.id, {
+      type: "provider.meta.adapterTest",
+      options: {
+        includeAdapterTest: true,
+        submitFullTest,
+        fullTestPrompt: payload.fullTestPrompt || "",
+        adapterTestId: payload.adapterTestId || "",
+        httpBaseUrl: settings.httpBaseUrl,
+      },
+    });
+    if (!response?.ok) {
+      throw new Error(response?.error || "Meta adapter test failed");
+    }
+    return {
+      health: [response.health],
+      capabilities: [response.capability],
+    };
+  } catch (error) {
+    return {
+      health: [{
+        provider: "meta",
+        status: "error",
+        checkedAt: new Date().toISOString(),
+        pageUrl: "",
+        pageTitle: "",
+        message: error.message,
+        manualActionRequired: false,
+        canFindPrompt: false,
+        canFindGenerateButton: false,
+        canDetectMedia: false,
+        canExtendVideo: false,
+        metadata: {
+          workerId,
+          adapterTest: "true",
+          adapterTestId: payload.adapterTestId || "",
+          submitFullTest: String(submitFullTest),
+        },
       }],
       capabilities: createProviderCapabilities([PROVIDERS.META]),
     };

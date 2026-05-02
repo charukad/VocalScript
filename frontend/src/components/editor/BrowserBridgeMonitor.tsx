@@ -1,16 +1,20 @@
 import React from 'react';
 import {
+  assignGenerationJobWorker,
   clearBrowserBridgeWorkerError,
+  clearBrowserBridgeWorkerCooldown,
   clearDisconnectedBridgeWorkers,
   clearBrowserBridgeDebugScreenshots,
   clearGenerationJobHistory,
   createExtendVideoJob,
   fallbackGenerationJob,
   getBrowserBridgeStatus,
+  listBrowserBridgeAdapterTests,
   listBrowserBridgeDebugEvents,
   listGenerationJobs,
   pauseBrowserBridgeWorker,
   pauseGenerationBatch,
+  regenerateGenerationJobVariant,
   resolveBackendMediaUrl,
   resumeBrowserBridgeWorker,
   resumeGenerationBatch,
@@ -18,9 +22,13 @@ import {
   runBrowserBridgeAdapterTest,
   runBrowserBridgeHealthCheck,
   selectGenerationJobVariant,
+  selectShortsFinalClip,
+  storeRemoteGenerationJob,
+  updateBrowserBridgeWorkerNickname,
 } from '../../lib/api/client';
 import type {
   BridgeDebugEvent,
+  BridgeAdapterTestRecord,
   BridgeWorkerSnapshot,
   GeneratedMediaType,
   GenerationJob,
@@ -62,10 +70,31 @@ const isWorkerConnectedNow = (worker: BridgeWorkerSnapshot): boolean =>
 const shortWorkerId = (workerId: string): string => workerId.replace(/^neuralscribe-/, '').slice(0, 8);
 
 const workerDisplayName = (worker: BridgeWorkerSnapshot): string =>
+  worker.nickname ||
   worker.chromeProfileLabel ||
   worker.accountLabel ||
   worker.profileEmail ||
   `Profile ${shortWorkerId(worker.workerId)}`;
+
+const workerLabelById = (workers: BridgeWorkerSnapshot[], workerId: string): string => {
+  const worker = workers.find(candidate => candidate.workerId === workerId);
+  return worker ? workerDisplayName(worker) : shortWorkerId(workerId);
+};
+
+const providerCanRunWithWorkers = (
+  workers: BridgeWorkerSnapshot[],
+  provider: ProviderName,
+  mediaType: GeneratedMediaType,
+  requireExtend = false
+): boolean => workers.some(worker => {
+  if (!runnableBridgeProviders.includes(provider)) return false;
+  if (!isWorkerConnectedNow(worker)) return false;
+  if (!worker.providers.includes(provider)) return false;
+  const capability = worker.capabilities.find(item => item.provider === provider);
+  if (!capability) return !requireExtend;
+  if (requireExtend) return capability.canExtendVideo;
+  return mediaType === 'video' ? capability.canGenerateVideo : capability.canGenerateImage;
+});
 
 const formatTime = (value: string | null | undefined): string => {
   if (!value) return '-';
@@ -98,6 +127,15 @@ const healthLabel = (health: ProviderHealthSnapshot): string =>
 
 const eventTime = (event: BridgeDebugEvent): string => formatTime(event.createdAt);
 
+const eventElapsedLabel = (events: BridgeDebugEvent[], event: BridgeDebugEvent): string => {
+  const firstEvent = events[0];
+  if (!firstEvent) return '';
+  const startMs = new Date(firstEvent.createdAt).getTime();
+  const eventMs = new Date(event.createdAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(eventMs) || eventMs < startMs) return '';
+  return `+${Math.round((eventMs - startMs) / 1000)}s`;
+};
+
 const queueStatusLabel = (status: GenerationJobStatus): string => status.replaceAll('_', ' ');
 
 const queueFlow = (job: GenerationJob): 'auto_generate' | 'auto_animate' =>
@@ -119,7 +157,9 @@ const queueSubject = (job: GenerationJob): string =>
 const queueProjectLabel = (job: GenerationJob): string =>
   job.metadata.projectName || job.projectId || 'No project';
 
-const queueWorkerId = (job: GenerationJob): string => job.metadata.workerId || '';
+const queueWorkerId = (job: GenerationJob): string => job.metadata.workerId || job.metadata.assignedWorkerId || '';
+
+const queueAssignedWorkerId = (job: GenerationJob): string => job.metadata.assignedWorkerId || '';
 
 const canRetryQueueJob = (job: GenerationJob): boolean =>
   failedQueueStatuses.includes(job.status);
@@ -134,9 +174,39 @@ const queueResultLabel = (job: GenerationJob): string => {
 const jobTypeLabel = (job: GenerationJob): string =>
   job.metadata.jobType === 'extend_video' ? 'Extend Video' : job.mediaType;
 
+const isExtendVideoJob = (job: GenerationJob): boolean => job.metadata.jobType === 'extend_video';
+
+const jobDurationLabel = (job: GenerationJob): string => {
+  const start = Number(job.metadata.sceneStart);
+  const end = Number(job.metadata.sceneEnd);
+  if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+    return `${(end - start).toFixed(1)}s`;
+  }
+  if (job.metadata.extendedDurationTarget) return `${job.metadata.extendedDurationTarget}s target`;
+  return '-';
+};
+
+const downloadJobDebugEvents = (job: GenerationJob, events: BridgeDebugEvent[]) => {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    job,
+    events,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${job.id}-flight-recorder.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
 export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => {
   const [workers, setWorkers] = React.useState<BridgeWorkerSnapshot[]>([]);
   const [debugEvents, setDebugEvents] = React.useState<BridgeDebugEvent[]>([]);
+  const [adapterTests, setAdapterTests] = React.useState<BridgeAdapterTestRecord[]>([]);
   const [queueJobs, setQueueJobs] = React.useState<GenerationJob[]>([]);
   const [activeTab, setActiveTab] = React.useState<MonitorTab>('active');
   const [queueStatusFilter, setQueueStatusFilter] = React.useState<QueueStatusFilter>('all');
@@ -145,6 +215,11 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
   const [queueWorkerFilter, setQueueWorkerFilter] = React.useState<string>('all');
   const [queueProjectFilter, setQueueProjectFilter] = React.useState<string>('all');
   const [queueMediaFilter, setQueueMediaFilter] = React.useState<QueueMediaFilter>('all');
+  const [workerNicknames, setWorkerNicknames] = React.useState<Record<string, string>>({});
+  const [jobWorkerAssignments, setJobWorkerAssignments] = React.useState<Record<string, string>>({});
+  const [manualMediaUrls, setManualMediaUrls] = React.useState<Record<string, string>>({});
+  const [adapterTestPrompts, setAdapterTestPrompts] = React.useState<Record<string, string>>({});
+  const [autoFallbackEnabled, setAutoFallbackEnabled] = React.useState(false);
   const [selectedJobId, setSelectedJobId] = React.useState<string | null>(null);
   const [extendPrompts, setExtendPrompts] = React.useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = React.useState(false);
@@ -157,22 +232,45 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
     setIsLoading(true);
     setError(null);
     try {
-      const [statusResponse, debugResponse, queueResponse] = await Promise.all([
+      const [statusResponse, debugResponse, adapterTestResponse, queueResponse] = await Promise.all([
         getBrowserBridgeStatus(signal),
         listBrowserBridgeDebugEvents({ limit: 120, signal }),
+        listBrowserBridgeAdapterTests({ limit: 100, signal }),
         listGenerationJobs({ signal }),
       ]);
       setWorkers(statusResponse.workers);
       setDebugEvents(debugResponse.events);
+      setAdapterTests(adapterTestResponse.tests);
       setQueueJobs(queueResponse.jobs);
       setLastRefresh(new Date().toLocaleTimeString());
+      if (autoFallbackEnabled) {
+        const fallbackCandidate = queueResponse.jobs.find(job =>
+          canRetryQueueJob(job)
+          && !job.metadata.autoFallbackQueuedAt
+          && bridgeProviders.some(provider =>
+            provider !== job.provider && providerCanRunWithWorkers(statusResponse.workers, provider, job.mediaType)
+          )
+        );
+        const fallbackProvider = fallbackCandidate
+          ? bridgeProviders.find(provider =>
+            provider !== fallbackCandidate.provider
+            && providerCanRunWithWorkers(statusResponse.workers, provider, fallbackCandidate.mediaType)
+          )
+          : null;
+        if (fallbackCandidate && fallbackProvider) {
+          await fallbackGenerationJob(fallbackCandidate.id, fallbackProvider, {
+            autoFallbackQueuedAt: new Date().toISOString(),
+          });
+          setQueueMessage(`Auto fallback queued ${fallbackCandidate.id} with ${fallbackProvider}.`);
+        }
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       setError(err instanceof Error ? err.message : 'Could not load bridge monitor data');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [autoFallbackEnabled]);
 
   const applyWorkers = React.useCallback((nextWorkers: BridgeWorkerSnapshot[]) => {
     setWorkers(nextWorkers);
@@ -188,8 +286,12 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
     try {
       const response = await action();
       applyWorkers(response.workers);
-      const debugResponse = await listBrowserBridgeDebugEvents({ limit: 120 });
+      const [debugResponse, adapterTestResponse] = await Promise.all([
+        listBrowserBridgeDebugEvents({ limit: 120 }),
+        listBrowserBridgeAdapterTests({ limit: 100 }),
+      ]);
       setDebugEvents(debugResponse.events);
+      setAdapterTests(adapterTestResponse.tests);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Bridge worker action failed');
     } finally {
@@ -249,6 +351,15 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
     });
     return grouped;
   }, [debugEvents]);
+  const adapterTestsByWorker = React.useMemo(() => {
+    const grouped = new Map<string, BridgeAdapterTestRecord[]>();
+    adapterTests.forEach(test => {
+      const tests = grouped.get(test.workerId) ?? [];
+      tests.push(test);
+      grouped.set(test.workerId, tests);
+    });
+    return grouped;
+  }, [adapterTests]);
   const queueCounts = React.useMemo(() => {
     const counts = queueJobs.reduce<Record<GenerationJobStatus, number>>((accumulator, job) => {
       accumulator[job.status] += 1;
@@ -303,6 +414,29 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
       queueStatusFilter,
       queueWorkerFilter,
     ]);
+  const filteredDebugEvents = React.useMemo(() => debugEvents
+    .filter(event => queueProviderFilter === 'all' || event.provider === queueProviderFilter)
+    .filter(event => queueWorkerFilter === 'all' || event.workerId === queueWorkerFilter)
+    .filter(event => {
+      if (!event.jobId) return queueProjectFilter === 'all' && queueStatusFilter === 'all' && queueMediaFilter === 'all' && queueFlowFilter === 'all';
+      const job = queueJobs.find(candidate => candidate.id === event.jobId);
+      if (!job) return true;
+      return (queueProjectFilter === 'all' || job.projectId === queueProjectFilter)
+        && (queueStatusFilter === 'all' || job.status === queueStatusFilter)
+        && (queueMediaFilter === 'all' || job.mediaType === queueMediaFilter)
+        && (queueFlowFilter === 'all' || queueFlow(job) === queueFlowFilter);
+    })
+    .slice(-60)
+    .reverse(), [
+      debugEvents,
+      queueFlowFilter,
+      queueJobs,
+      queueMediaFilter,
+      queueProjectFilter,
+      queueProviderFilter,
+      queueStatusFilter,
+      queueWorkerFilter,
+    ]);
   const selectedJob = React.useMemo(
     () => queueJobs.find(job => job.id === selectedJobId) ?? filteredQueueJobs[0] ?? null,
     [filteredQueueJobs, queueJobs, selectedJobId]
@@ -311,18 +445,37 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
   const selectedWorker = selectedJob
     ? workers.find(worker => worker.workerId === queueWorkerId(selectedJob))
     : null;
+  const selectedJobAssignedWorkerId = selectedJob ? queueAssignedWorkerId(selectedJob) : '';
+  const selectedJobAssignmentDraft = selectedJob
+    ? jobWorkerAssignments[selectedJob.id] ?? selectedJobAssignedWorkerId
+    : '';
+  const selectedJobManualMediaUrl = selectedJob ? manualMediaUrls[selectedJob.id] ?? '' : '';
+  const shortsShots = React.useMemo(() => {
+    const extendJobsBySource = new Map<string, GenerationJob[]>();
+    queueJobs.forEach(job => {
+      if (!isExtendVideoJob(job) || !job.metadata.sourceJobId) return;
+      const children = extendJobsBySource.get(job.metadata.sourceJobId) ?? [];
+      children.push(job);
+      extendJobsBySource.set(job.metadata.sourceJobId, children);
+    });
+    return queueJobs
+      .filter(job => job.mediaType === 'video' && !isExtendVideoJob(job) && (job.resultUrl || extendJobsBySource.has(job.id)))
+      .map(baseJob => {
+        const extendJobs = (extendJobsBySource.get(baseJob.id) ?? []).slice().reverse();
+        const completedExtend = extendJobs.find(job => job.status === 'completed' && Boolean(job.resultUrl || job.metadata.selectedVariantUrl));
+        const selectedFinalId = baseJob.metadata.shortsFinalJobId || completedExtend?.id || baseJob.id;
+        const finalJob = selectedFinalId === baseJob.id
+          ? baseJob
+          : extendJobs.find(job => job.id === selectedFinalId) ?? extendJobs[0] ?? baseJob;
+        return { baseJob, extendJobs, completedExtend, finalJob };
+      })
+      .slice(0, 12);
+  }, [queueJobs]);
   const providerCanRunJob = (
     provider: ProviderName,
     mediaType: GeneratedMediaType,
     requireExtend = false
-  ) => activeWorkers.some(worker => {
-    if (!runnableBridgeProviders.includes(provider)) return false;
-    if (!worker.providers.includes(provider)) return false;
-    const capability = worker.capabilities.find(item => item.provider === provider);
-    if (!capability) return !requireExtend;
-    if (requireExtend) return capability.canExtendVideo;
-    return mediaType === 'video' ? capability.canGenerateVideo : capability.canGenerateImage;
-  });
+  ) => providerCanRunWithWorkers(activeWorkers, provider, mediaType, requireExtend);
   const queueClearFilters = React.useMemo(() => ({
     provider: queueProviderFilter === 'all' ? null : queueProviderFilter,
     workerId: queueWorkerFilter === 'all' ? null : queueWorkerFilter,
@@ -458,6 +611,14 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
               >
                 Clear Screenshots
               </button>
+              <label className="bridge-auto-fallback">
+                <input
+                  type="checkbox"
+                  checked={autoFallbackEnabled}
+                  onChange={event => setAutoFallbackEnabled(event.target.checked)}
+                />
+                Auto fallback
+              </label>
             </div>
           </div>
 
@@ -620,6 +781,67 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
             </button>
           </div>
 
+          {shortsShots.length > 0 && (
+            <section className="bridge-shorts-panel" aria-label="Shorts Shot Builder">
+              <div className="bridge-shorts-header">
+                <div>
+                  <h4>Shorts Shot Builder</h4>
+                  <p>Base and extended clips for quick final-shot selection.</p>
+                </div>
+              </div>
+              <div className="bridge-shorts-list">
+                {shortsShots.map(({ baseJob, extendJobs, completedExtend, finalJob }) => {
+                  const latestExtend = extendJobs[0] ?? null;
+                  const finalIsBase = finalJob.id === baseJob.id;
+                  const baseHasResult = Boolean(baseJob.resultUrl || baseJob.metadata.selectedVariantUrl);
+                  return (
+                    <div key={baseJob.id} className="bridge-shorts-row">
+                      <button type="button" onClick={() => setSelectedJobId(baseJob.id)}>
+                        <strong>{queueSubject(baseJob)}</strong>
+                        <span>Base: {baseJob.status} · {jobDurationLabel(baseJob)}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => latestExtend && setSelectedJobId(latestExtend.id)}
+                        disabled={!latestExtend}
+                      >
+                        <strong>{latestExtend ? queueSubject(latestExtend) : 'No extend yet'}</strong>
+                        <span>Extended: {latestExtend ? `${latestExtend.status} · ${jobDurationLabel(latestExtend)}` : 'not queued'}</span>
+                      </button>
+                      <div className="bridge-shorts-final">
+                        <span>Final: {finalIsBase ? 'base' : 'extended'} · {finalJob.status}</span>
+                        <div>
+                          <button
+                            className={finalIsBase ? 'selected' : ''}
+                            type="button"
+                            onClick={() => void runQueueAction(`shorts-final-base-${baseJob.id}`, async () => {
+                              await selectShortsFinalClip(baseJob.id, baseJob.id);
+                              return `Selected base clip as final for ${baseJob.id}.`;
+                            })}
+                            disabled={!baseHasResult || baseJob.status !== 'completed' || actionId === `shorts-final-base-${baseJob.id}`}
+                          >
+                            Use Base
+                          </button>
+                          <button
+                            className={!finalIsBase ? 'selected' : ''}
+                            type="button"
+                            onClick={() => completedExtend && void runQueueAction(`shorts-final-extend-${baseJob.id}`, async () => {
+                              await selectShortsFinalClip(baseJob.id, completedExtend.id);
+                              return `Selected extended clip as final for ${baseJob.id}.`;
+                            })}
+                            disabled={!completedExtend || actionId === `shorts-final-extend-${baseJob.id}`}
+                          >
+                            Use Extended
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           <div className="bridge-queue-body">
             <div className="bridge-queue-list">
               {filteredQueueJobs.length === 0 && (
@@ -707,7 +929,84 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                       Open Result
                     </a>
                   )}
+                  <button
+                    className="btn-secondary"
+                    onClick={() => downloadJobDebugEvents(selectedJob, selectedJobEvents)}
+                    disabled={selectedJobEvents.length === 0}
+                  >
+                    Download Debug
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => void runQueueAction(`regenerate-variant-${selectedJob.id}`, async () => {
+                      await regenerateGenerationJobVariant(selectedJob.id, selectedJob.resultUrl);
+                      return `Queued a separate variant regeneration for ${selectedJob.id}.`;
+                    })}
+                    disabled={!selectedJob.resultUrl || actionId === `regenerate-variant-${selectedJob.id}`}
+                  >
+                    Regen Variant
+                  </button>
                 </div>
+                <label className="bridge-job-assignment">
+                  Assign Worker
+                  <div>
+                    <select
+                      value={selectedJobAssignmentDraft}
+                      onChange={event => setJobWorkerAssignments(previous => ({
+                        ...previous,
+                        [selectedJob.id]: event.target.value,
+                      }))}
+                    >
+                      <option value="">Auto route</option>
+                      {workers.map(worker => (
+                        <option key={worker.workerId} value={worker.workerId}>
+                          {workerDisplayName(worker)}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => void runQueueAction(`assign-worker-${selectedJob.id}`, async () => {
+                        const workerId = selectedJobAssignmentDraft || null;
+                        await assignGenerationJobWorker(selectedJob.id, workerId);
+                        return workerId
+                          ? `Assigned ${selectedJob.id} to ${workerId}.`
+                          : `Cleared worker assignment for ${selectedJob.id}.`;
+                      })}
+                      disabled={selectedJobAssignmentDraft === selectedJobAssignedWorkerId || actionId === `assign-worker-${selectedJob.id}`}
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </label>
+                <label className="bridge-job-assignment">
+                  Manual Media URL
+                  <div>
+                    <input
+                      value={selectedJobManualMediaUrl}
+                      onChange={event => setManualMediaUrls(previous => ({
+                        ...previous,
+                        [selectedJob.id]: event.target.value,
+                      }))}
+                      placeholder="Paste generated image or video URL"
+                    />
+                    <button
+                      className="btn-secondary"
+                      onClick={() => void runQueueAction(`manual-import-${selectedJob.id}`, async () => {
+                        const mediaUrl = selectedJobManualMediaUrl.trim();
+                        await storeRemoteGenerationJob(selectedJob.id, mediaUrl);
+                        setManualMediaUrls(previous => ({
+                          ...previous,
+                          [selectedJob.id]: '',
+                        }));
+                        return `Imported manual media for ${selectedJob.id}.`;
+                      })}
+                      disabled={!selectedJobManualMediaUrl.trim() || actionId === `manual-import-${selectedJob.id}`}
+                    >
+                      Import
+                    </button>
+                  </div>
+                </label>
                 {selectedJob.status === 'completed' && selectedJob.mediaType === 'video' && selectedJob.resultUrl && (
                   <label className="bridge-job-extend-prompt">
                     Continuation Prompt
@@ -727,6 +1026,7 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                   <div><span>Provider</span><strong>{selectedJob.provider}</strong></div>
                   <div><span>Project</span><strong>{queueProjectLabel(selectedJob)}</strong></div>
                   <div><span>Worker</span><strong>{selectedWorker ? workerDisplayName(selectedWorker) : queueWorkerId(selectedJob) || '-'}</strong></div>
+                  <div><span>Assigned</span><strong>{selectedJobAssignedWorkerId ? workerLabelById(workers, selectedJobAssignedWorkerId) : 'Auto route'}</strong></div>
                   <div><span>Result</span><strong>{queueResultLabel(selectedJob)}</strong></div>
                   <div><span>Attempt</span><strong>{selectedJob.metadata.runAttempt || '-'}</strong></div>
                   <div><span>Job Type</span><strong>{jobTypeLabel(selectedJob)}</strong></div>
@@ -783,7 +1083,7 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                       <div key={event.id} className={`bridge-debug-event level-${event.level}`}>
                         <strong>{event.step.replaceAll('_', ' ')}</strong>
                         <span>{event.message}</span>
-                        <small>{eventTime(event)}{event.provider ? ` · ${event.provider}` : ''}</small>
+                      <small>{eventTime(event)} · {eventElapsedLabel(selectedJobEvents, event)}{event.provider ? ` · ${event.provider}` : ''}</small>
                         {screenshotUrl && (
                           <a href={resolveBackendMediaUrl(screenshotUrl)} target="_blank" rel="noreferrer">
                             View screenshot
@@ -798,6 +1098,48 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
           </div>
         </section>
 
+        <section className="bridge-live-debug-panel" aria-label="Live Provider Debug Panel">
+          <div className="bridge-live-debug-header">
+            <div>
+              <h3>Live Provider Debug</h3>
+              <p>{filteredDebugEvents.length} events using the queue filters above</p>
+            </div>
+            <button className="btn-secondary" onClick={() => void refresh()} disabled={isLoading}>
+              Refresh Debug
+            </button>
+          </div>
+          <div className="bridge-live-debug-list">
+            {filteredDebugEvents.length === 0 && (
+              <div className="bridge-debug-empty">No provider debug events match the current filters.</div>
+            )}
+            {filteredDebugEvents.map(event => {
+              const eventJob = event.jobId ? queueJobs.find(job => job.id === event.jobId) : null;
+              const screenshotUrl = event.metadata.screenshotUrl;
+              return (
+                <button
+                  type="button"
+                  key={event.id}
+                  className={`bridge-live-debug-row level-${event.level}`}
+                  onClick={() => event.jobId && setSelectedJobId(event.jobId)}
+                >
+                  <span>{eventTime(event)}</span>
+                  <strong>{event.step.replaceAll('_', ' ')}</strong>
+                  <small>
+                    {event.provider || '-'} · {workerLabelById(workers, event.workerId)}
+                    {eventJob ? ` · ${queueSubject(eventJob)} · ${eventJob.status}` : ''}
+                  </small>
+                  <em>{event.message}</em>
+                  {screenshotUrl && (
+                    <a href={resolveBackendMediaUrl(screenshotUrl)} target="_blank" rel="noreferrer">
+                      screenshot
+                    </a>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
         <div className="bridge-worker-list">
           {visibleWorkers.length === 0 && !error && (
             <div className="bridge-worker-empty">
@@ -809,6 +1151,9 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
 
           {visibleWorkers.map(worker => {
             const connectedNow = isWorkerConnectedNow(worker);
+            const nicknameDraft = workerNicknames[worker.workerId] ?? worker.nickname ?? '';
+            const adapterPromptDraft = adapterTestPrompts[worker.workerId] ?? '';
+            const workerAdapterTests = adapterTestsByWorker.get(worker.workerId) ?? [];
             return (
             <article key={worker.workerId} className={`bridge-worker-card status-${worker.status}`}>
               <div className="bridge-worker-topline">
@@ -823,6 +1168,29 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                   <span className={`bridge-status-pill status-${worker.status}`}>{statusLabel(worker.status)}</span>
                 </div>
               </div>
+
+              <label className="bridge-worker-nickname">
+                <span>Nickname</span>
+                <div>
+                  <input
+                    value={nicknameDraft}
+                    onChange={event => setWorkerNicknames(previous => ({
+                      ...previous,
+                      [worker.workerId]: event.target.value,
+                    }))}
+                    placeholder={worker.chromeProfileLabel || worker.profileEmail || shortWorkerId(worker.workerId)}
+                  />
+                  <button
+                    className="btn-secondary"
+                    onClick={() => void runWorkerAction(`nickname-${worker.workerId}`, () =>
+                      updateBrowserBridgeWorkerNickname(worker.workerId, nicknameDraft)
+                    )}
+                    disabled={nicknameDraft.trim() === (worker.nickname || '').trim() || actionId === `nickname-${worker.workerId}`}
+                  >
+                    Save
+                  </button>
+                </div>
+              </label>
 
               <div className="bridge-worker-grid">
                 <div>
@@ -888,6 +1256,17 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                   Extension protocol mismatch. Reload the unpacked extension so it matches protocol {worker.compatibility.supportedProtocolVersion}.
                 </div>
               )}
+              <label className="bridge-worker-adapter-test">
+                <span>Full Test Prompt</span>
+                <input
+                  value={adapterPromptDraft}
+                  onChange={event => setAdapterTestPrompts(previous => ({
+                    ...previous,
+                    [worker.workerId]: event.target.value,
+                  }))}
+                  placeholder="Optional prompt for user-confirmed full adapter test"
+                />
+              </label>
               <div className="bridge-worker-actions">
                 {worker.paused ? (
                   <button
@@ -915,6 +1294,16 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                 </button>
                 <button
                   className="btn-secondary"
+                  onClick={() => {
+                    if (!window.confirm('Clear this provider cooldown and allow this profile to try again now?')) return;
+                    void runWorkerAction(`clear-cooldown-${worker.workerId}`, () => clearBrowserBridgeWorkerCooldown(worker.workerId));
+                  }}
+                  disabled={!connectedNow || !worker.cooldownUntil || actionId === `clear-cooldown-${worker.workerId}`}
+                >
+                  Clear Cooldown
+                </button>
+                <button
+                  className="btn-secondary"
                   onClick={() => void runWorkerAction(`health-${worker.workerId}`, () => runBrowserBridgeHealthCheck(worker.workerId))}
                   disabled={!connectedNow || actionId === `health-${worker.workerId}`}
                 >
@@ -927,7 +1316,38 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                 >
                   {actionId === `adapter-${worker.workerId}` ? 'Testing...' : 'Test Meta'}
                 </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    if (!window.confirm('Run a full Meta adapter test? This submits the prompt in this Chrome profile.')) return;
+                    void runWorkerAction(`adapter-full-${worker.workerId}`, () => runBrowserBridgeAdapterTest(worker.workerId, {
+                      fullTestPrompt: adapterPromptDraft || 'NeuralScribe adapter test image, simple blue geometric logo, no text',
+                      submitFullTest: true,
+                    }));
+                  }}
+                  disabled={!connectedNow || actionId === `adapter-full-${worker.workerId}`}
+                >
+                  {actionId === `adapter-full-${worker.workerId}` ? 'Testing...' : 'Full Test'}
+                </button>
               </div>
+
+              {workerAdapterTests.length > 0 && (
+                <div className="bridge-adapter-test-list">
+                  <div className="bridge-debug-title">Adapter Tests</div>
+                  {workerAdapterTests.slice(-4).reverse().map(test => (
+                    <div key={test.id} className={`bridge-adapter-test-row status-${test.status}`}>
+                      <strong>{test.mode} · {test.status}</strong>
+                      <span>{test.message || 'No adapter test message'}</span>
+                      <small>{formatTime(test.completedAt || test.createdAt)} · {test.provider}</small>
+                      {test.resultUrl && (
+                        <a href={resolveBackendMediaUrl(test.resultUrl)} target="_blank" rel="noreferrer">
+                          Open result
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {(eventsByWorker.get(worker.workerId) ?? []).length > 0 && (
                 <div className="bridge-debug-list">

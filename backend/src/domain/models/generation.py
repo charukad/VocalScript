@@ -217,6 +217,18 @@ class GenerationExtendVideoRequest(ApiModel):
     metadata: Dict[str, str] = Field(default_factory=dict)
 
 
+class GenerationShortsFinalRequest(ApiModel):
+    final_job_id: str = Field(alias="finalJobId")
+
+
+class GenerationJobAssignWorkerRequest(ApiModel):
+    worker_id: Optional[str] = Field(default=None, alias="workerId")
+
+
+class GenerationJobRegenerateVariantRequest(ApiModel):
+    variant_url: Optional[str] = Field(default=None, alias="variantUrl")
+
+
 class ProviderCapability(ApiModel):
     provider: ProviderName
     can_generate_image: bool = Field(default=True, alias="canGenerateImage")
@@ -259,10 +271,38 @@ class BridgeDebugEventListResponse(ApiModel):
     events: List[BridgeDebugEvent]
 
 
+class BridgeAdapterTestRequest(ApiModel):
+    provider: ProviderName = "meta"
+    full_test_prompt: str = Field(default="", alias="fullTestPrompt")
+    submit_full_test: bool = Field(default=False, alias="submitFullTest")
+
+
+class BridgeAdapterTestRecord(ApiModel):
+    id: str
+    worker_id: str = Field(alias="workerId")
+    provider: ProviderName = "meta"
+    mode: str = "safe"
+    status: str = "requested"
+    prompt: str = ""
+    message: str = ""
+    result_url: Optional[str] = Field(default=None, alias="resultUrl")
+    created_at: str = Field(alias="createdAt")
+    completed_at: Optional[str] = Field(default=None, alias="completedAt")
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
+class BridgeAdapterTestListResponse(ApiModel):
+    tests: List[BridgeAdapterTestRecord]
+
+
 class BridgeWorkerCommandResponse(ApiModel):
     ok: bool
     message: str
     workers: List["BridgeWorkerSnapshot"] = Field(default_factory=list)
+
+
+class BridgeWorkerNicknameRequest(ApiModel):
+    nickname: str = ""
 
 
 class BridgeScreenshotUploadResponse(ApiModel):
@@ -326,6 +366,7 @@ class BridgeWorkerSnapshot(ApiModel):
     providers: List[ProviderName]
     status: BridgeConnectionStatus
     paused: bool = False
+    nickname: str = ""
     account_label: str = Field(default="", alias="accountLabel")
     chrome_profile_label: str = Field(default="", alias="chromeProfileLabel")
     profile_email: str = Field(default="", alias="profileEmail")

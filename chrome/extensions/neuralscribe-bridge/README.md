@@ -60,6 +60,10 @@ Recommended setup:
 
 Each connected profile appears as its own worker. The app can pause, resume, clear errors, run health checks, and inspect queue/debug state per worker.
 
+Use the worker `Nickname` field in the app monitor to give each Chrome profile a stable human label, such as `Meta Main` or `Meta Backup`.
+
+Use the selected job `Assign Worker` control when a specific profile should handle a job. Jobs assigned to one worker are skipped by other workers until the assignment is cleared.
+
 ## Queue And Clearing Jobs
 
 The side panel shows visible jobs for the selected project. If no project is selected, it shows jobs across projects.
@@ -67,6 +71,8 @@ The side panel shows visible jobs for the selected project. If no project is sel
 - `Clear Finished` clears completed, failed, manual-action, and canceled jobs for the selected project, or all projects when no project is selected.
 - `Clear All` clears queued, running, completed, failed, manual-action, and canceled jobs for the selected project, or all projects when no project is selected. It also resets this local runner.
 - The app-side `Bridge Monitor` has the larger queue dashboard with filters for workflow, provider, worker, project, status, and media type.
+- If a provider generated media but automatic capture missed it, paste the media URL into `Manual Media URL` on the selected job and click `Import`.
+- `Regen Variant` queues a separate variant-regeneration job so the currently approved variants are not replaced.
 
 ## Provider Fallback
 
@@ -74,11 +80,25 @@ The app-side `Bridge Monitor` can retry a failed job with another provider when 
 
 Grok fallback stays disabled until a runnable Grok adapter is added to the extension worker.
 
+`Auto fallback` is an optional dashboard toggle. When enabled, failed jobs can be retried with another active capable provider; when disabled, fallback remains manual only.
+
+## Adapter Tests And Debugging
+
+`Health Check` runs a safe provider inspection. `Test Meta` performs a safe adapter test that checks prompt insertion and generate-button detection without submitting project prompts.
+
+`Full Test` requires user confirmation and submits the prompt shown in the worker card. Full test results are stored as adapter-test history, separate from project jobs.
+
+The `Live Provider Debug` panel shows recent provider steps using the queue filters above it. Job flight-recorder events are persisted in backend debug storage and can be downloaded from selected job details.
+
+Cooldowns are classified by failure type, such as rate limit, slow queue, manual action, blocked provider, prompt missing, or no media. Repeated failures pause the worker temporarily, then auto-resume after cooldown; `Clear Cooldown` manually overrides that wait with a warning.
+
 ## Meta Extend Video
 
 For completed video jobs, `Bridge Monitor` can create a child `extend_video` job. The child job keeps the source job id, source media URL, project link, prompt metadata, target duration metadata, and provider metadata.
 
 The `Extend Video` button is capability-gated. Run `Health Check` or `Test Meta` first; the button only enables when an active Meta worker reports that the account exposes Extend Video.
+
+The `Shorts Shot Builder` section groups each base video with its Extend children, shows status and duration, and records whether the base or extended clip is the selected final shot.
 
 ## Version Reload Steps
 

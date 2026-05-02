@@ -53,6 +53,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
+  if (message?.type === "provider.meta.adapterTest") {
+    runMetaAdapterTest(message.options || {})
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message?.type === "provider.meta.extendVideo") {
     runMetaExtendVideo(message.job, message.options || {})
       .then((result) => sendResponse({ ok: true, result }))
@@ -114,6 +120,100 @@ async function runMetaHealthCheck(options = {}) {
       metadata: {
         pageUrl: location.href,
         mediaCandidateCount: String(mediaCandidates.length),
+      },
+    },
+  };
+}
+
+async function runMetaAdapterTest(options = {}) {
+  const submitFullTest = Boolean(options.submitFullTest);
+  const testPrompt = String(
+    options.fullTestPrompt || "NeuralScribe adapter test image, simple blue geometric logo, no text"
+  ).trim();
+  const base = await runMetaHealthCheck({ includeAdapterTest: true });
+  const promptBox = await waitForPromptBox(10000);
+  let promptInserted = false;
+  let generateButton = promptBox ? findGenerateButton(promptBox, true) : null;
+  let result = null;
+
+  if (promptBox) {
+    await fillPrompt(promptBox, testPrompt, true);
+    promptInserted = await waitForPromptText(promptBox, testPrompt, 4000);
+    generateButton = await waitForGenerateButton(promptBox, 6000) || findGenerateButton(promptBox, true);
+  }
+
+  if (submitFullTest) {
+    if (!promptBox || !promptInserted) {
+      throw new Error("Full adapter test could not insert the prompt.");
+    }
+    if (!generateButton) {
+      throw new Error("Full adapter test could not find an enabled generate button.");
+    }
+    result = await runMetaJob(
+      {
+        id: options.adapterTestId || `adapter-test-${Date.now()}`,
+        sceneId: "adapter-test",
+        projectId: "",
+        provider: "meta",
+        mediaType: "image",
+        prompt: testPrompt,
+        negativePrompt: "",
+        metadata: {
+          aspectRatio: "1:1",
+          sceneStyle: "adapter test",
+          jobType: "adapter_test",
+        },
+      },
+      {
+        timeoutMs: 180000,
+        httpBaseUrl: options.httpBaseUrl,
+        skipBackendUpload: true,
+      }
+    );
+    if (result?.variants?.some((variant) => isLocalObjectUrl(variant.url))) {
+      result = await uploadAdapterTestVariants(options.adapterTestId || "adapter-test", result, options.httpBaseUrl);
+    }
+  } else if (promptBox) {
+    await fillPrompt(promptBox, "", true);
+  }
+
+  const status = base.health.manualActionRequired
+    ? base.health.status
+    : promptInserted && generateButton
+      ? "ready"
+      : base.health.status;
+  const message = submitFullTest
+    ? `Full Meta adapter test ${result?.mediaUrl ? "generated media successfully" : "completed"}.`
+    : `Safe Meta adapter test ${promptInserted ? "inserted prompt" : "could not insert prompt"} and ${generateButton ? "found generate button" : "did not find generate button"}.`;
+  const adapterMetadata = {
+    ...base.health.metadata,
+    adapterTest: "true",
+    adapterTestId: options.adapterTestId || "",
+    submitFullTest: String(submitFullTest),
+    promptInserted: String(promptInserted),
+    generateButtonFound: String(Boolean(generateButton)),
+    adapterResultUrl: result?.mediaUrl || "",
+    adapterVariantCount: String(result?.mediaVariants?.length || 0),
+  };
+
+  return {
+    health: {
+      ...base.health,
+      status,
+      message,
+      canFindPrompt: Boolean(promptBox),
+      canFindGenerateButton: Boolean(generateButton),
+      canDetectMedia: base.health.canDetectMedia || Boolean(result?.mediaUrl),
+      metadata: adapterMetadata,
+    },
+    capability: {
+      ...base.capability,
+      canGenerateImage: Boolean(promptBox) && !base.health.manualActionRequired,
+      metadata: {
+        ...base.capability.metadata,
+        adapterTest: "true",
+        promptInserted: String(promptInserted),
+        generateButtonFound: String(Boolean(generateButton)),
       },
     },
   };
@@ -181,7 +281,7 @@ async function runMetaJob(job, options) {
     throw new Error(`Timed out waiting for generated media. ${diagnostics.message}`);
   }
 
-  if (result.variants.some((variant) => isLocalObjectUrl(variant.url))) {
+  if (result.variants.some((variant) => isLocalObjectUrl(variant.url)) && options.skipBackendUpload !== true) {
     result = await uploadLocalObjectVariants(job, result, options.httpBaseUrl);
   }
 
@@ -721,6 +821,44 @@ async function uploadLocalObjectVariants(job, result, httpBaseUrl) {
     mediaType: uploadedJob.mediaType,
     variants: uploadedJob.resultVariants || [],
     backendStored: true,
+  };
+}
+
+async function uploadAdapterTestVariants(testId, result, httpBaseUrl) {
+  const baseUrl = String(httpBaseUrl || "http://127.0.0.1:8000").replace(/\/$/, "");
+  const formData = new FormData();
+  let uploadedCount = 0;
+  for (const [index, variant] of result.variants.entries()) {
+    const response = await fetch(variant.url);
+    if (!response.ok) {
+      throw new Error(`Adapter test captured ${variant.mediaType} result, but could not read blob variant ${index + 1}.`);
+    }
+    const blob = await response.blob();
+    const extension = extensionForBlob(blob, variant.mediaType || result.mediaType);
+    formData.append("files", blob, `${testId}_variant_${index + 1}.${extension}`);
+    uploadedCount += 1;
+  }
+  if (uploadedCount === 0) {
+    throw new Error("Adapter test captured media, but no variants were available to upload.");
+  }
+  const uploadResponse = await fetch(`${baseUrl}/api/browser-bridge/adapter-tests/${encodeURIComponent(testId)}/media`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!uploadResponse.ok) {
+    throw new Error(`Adapter test media upload failed: ${await uploadResponse.text()}`);
+  }
+  const uploaded = await uploadResponse.json();
+  const url = uploaded.resultUrl || result.mediaUrl;
+  return {
+    ...result,
+    mediaUrl: url,
+    variants: (uploaded.urls || []).map((item, index) => ({
+      id: `adapter-${index + 1}`,
+      url: item,
+      mediaType: result.mediaType,
+      source: "adapter_test_upload",
+    })),
   };
 }
 

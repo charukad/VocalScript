@@ -260,6 +260,9 @@ class GenerationQueueService:
                 continue
             if project_id and job.project_id != project_id:
                 continue
+            assigned_worker_id = job.metadata.get("assignedWorkerId")
+            if assigned_worker_id and assigned_worker_id != worker_id:
+                continue
             if self.is_batch_paused(job.batch_id, job.project_id):
                 continue
             metadata = dict(job.metadata)
@@ -272,6 +275,71 @@ class GenerationQueueService:
             metadata["claimExpiresAt"] = (claimed_at + timedelta(seconds=RUNNING_JOB_TIMEOUT_SECONDS)).isoformat()
             return self._replace_job(job_id, status="running", metadata=metadata)
         return None
+
+    def assign_worker(self, job_id: str, worker_id: Optional[str] = None) -> Optional[GenerationJob]:
+        self._refresh_from_store()
+        job = self._jobs.get(job_id)
+        if not job:
+            return None
+        metadata = dict(job.metadata)
+        cleaned_worker_id = (worker_id or "").strip()
+        if cleaned_worker_id:
+            metadata["assignedWorkerId"] = cleaned_worker_id
+            metadata["assignedWorkerAt"] = _utc_now_iso()
+        else:
+            metadata.pop("assignedWorkerId", None)
+            metadata["assignedWorkerClearedAt"] = _utc_now_iso()
+        return self._replace_job(job_id, metadata=metadata)
+
+    def regenerate_variant(self, job_id: str, variant_url: Optional[str] = None) -> Optional[GenerationJob]:
+        self._refresh_from_store()
+        source_job = self._jobs.get(job_id)
+        if not source_job:
+            return None
+        selected_variant = None
+        if variant_url:
+            selected_variant = next(
+                (variant for variant in source_job.result_variants if variant.url == variant_url),
+                None,
+            )
+            if not selected_variant and source_job.result_url != variant_url:
+                raise ValueError("Variant not found on the source job")
+        next_metadata = dict(source_job.metadata)
+        for key in (
+            "workerId",
+            "claimedAt",
+            "claimExpiresAt",
+            "selectedVariantUrl",
+            "selectedVariantAt",
+            "remoteSourceUrl",
+            "remoteContentType",
+        ):
+            next_metadata.pop(key, None)
+        next_metadata.update(
+            {
+                "retryMode": "variant_regeneration",
+                "variantRegenerationForJobId": source_job.id,
+                "variantRegenerationAt": _utc_now_iso(),
+                "variantRegenerationSourceUrl": variant_url or "",
+                "variantRegenerationSourceId": selected_variant.id if selected_variant else "",
+            }
+        )
+        job = GenerationJob(
+            id=f"job-{uuid.uuid4().hex[:12]}",
+            batchId=source_job.batch_id,
+            projectId=source_job.project_id,
+            sceneId=f"{source_job.scene_id}-variant",
+            provider=source_job.provider,
+            mediaType=source_job.media_type,
+            prompt=source_job.prompt,
+            negativePrompt=source_job.negative_prompt,
+            status="queued",
+            metadata=next_metadata,
+        )
+        self._jobs[job.id] = job
+        self._job_order.append(job.id)
+        self._save_state()
+        return job
 
     def pause_batch(self, batch_id: str, project_id: Optional[str] = None) -> List[GenerationJob]:
         self._paused_batches.add(self._batch_key(batch_id, project_id))
@@ -444,6 +512,44 @@ class GenerationQueueService:
         self._job_order.append(job_id)
         self._save_state()
         return job
+
+    def select_shorts_final_clip(self, base_job_id: str, final_job_id: str) -> Optional[GenerationJob]:
+        self._refresh_from_store()
+        base_job = self._jobs.get(base_job_id)
+        final_job = self._jobs.get(final_job_id)
+        if not base_job or not final_job:
+            return None
+        if base_job.media_type != "video" or base_job.metadata.get("jobType") == "extend_video":
+            raise ValueError("Shorts final selection must start from a base video job")
+        if final_job.id != base_job.id and final_job.metadata.get("sourceJobId") != base_job.id:
+            raise ValueError("Final clip must be the base video or one of its Extend Video child jobs")
+        if final_job.media_type != "video":
+            raise ValueError("Final clip must be a video job")
+        final_result_url = final_job.metadata.get("selectedVariantUrl") or final_job.result_url
+        if final_job.status != "completed" or not final_result_url:
+            raise ValueError("Final clip must be completed and have a selected video result")
+
+        selected_at = _utc_now_iso()
+        base_metadata = dict(base_job.metadata)
+        base_metadata.update(
+            {
+                "shortsFinalJobId": final_job.id,
+                "shortsFinalSelectedAt": selected_at,
+                "shortsFinalResultUrl": final_result_url,
+                "shortsFinalJobType": final_job.metadata.get("jobType", "base_video"),
+            }
+        )
+        final_metadata = dict(final_job.metadata)
+        final_metadata.update(
+            {
+                "shortsFinalForJobId": base_job.id,
+                "shortsFinalSelectedAt": selected_at,
+            }
+        )
+        self._jobs[base_job.id] = base_job.model_copy(update={"metadata": base_metadata})
+        self._jobs[final_job.id] = final_job.model_copy(update={"metadata": final_metadata})
+        self._save_state()
+        return self._jobs[base_job.id]
 
     def update_status(
         self,

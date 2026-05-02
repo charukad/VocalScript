@@ -5,6 +5,8 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, Web
 from fastapi.responses import FileResponse
 
 from backend.src.domain.models.generation import (
+    BridgeAdapterTestListResponse,
+    BridgeAdapterTestRequest,
     BridgeDebugEventListResponse,
     BridgeScreenshotUploadResponse,
     BridgeStatusResponse,
@@ -12,6 +14,7 @@ from backend.src.domain.models.generation import (
     BridgeWorkerDebugEventMessage,
     BridgeWorkerHeartbeat,
     BridgeWorkerHealthResult,
+    BridgeWorkerNicknameRequest,
     BridgeWorkerRegistration,
 )
 from backend.src.domain.services.browser_bridge_service import (
@@ -59,6 +62,21 @@ def build_browser_bridge_router(
             raise HTTPException(status_code=404, detail="Worker not found")
         return BridgeStatusResponse(workers=bridge_service.snapshots())
 
+    @router.post("/workers/{worker_id}/clear-cooldown", response_model=BridgeStatusResponse)
+    async def clear_bridge_worker_cooldown(worker_id: str):
+        ok, message = await bridge_service.send_worker_command(worker_id, "clear_cooldown")
+        if not ok:
+            raise HTTPException(status_code=409 if message != "Worker not found" else 404, detail=message)
+        bridge_service.record_debug_event(worker_id, "cooldown_clear_requested", message, provider="meta")
+        return BridgeStatusResponse(workers=bridge_service.snapshots())
+
+    @router.post("/workers/{worker_id}/nickname", response_model=BridgeStatusResponse)
+    async def update_bridge_worker_nickname(worker_id: str, request: BridgeWorkerNicknameRequest):
+        worker = bridge_service.update_worker_nickname(worker_id, request.nickname)
+        if not worker:
+            raise HTTPException(status_code=404, detail="Worker not found")
+        return BridgeStatusResponse(workers=bridge_service.snapshots())
+
     @router.delete("/workers/disconnected", response_model=BridgeWorkerCleanupResponse)
     async def clear_disconnected_bridge_workers(
         older_than_seconds: int = Query(0, alias="olderThanSeconds", ge=0),
@@ -75,12 +93,62 @@ def build_browser_bridge_router(
         return BridgeStatusResponse(workers=bridge_service.snapshots())
 
     @router.post("/workers/{worker_id}/adapter-test", response_model=BridgeStatusResponse)
-    async def run_worker_adapter_test(worker_id: str):
-        ok, message = await bridge_service.send_worker_command(worker_id, "adapter_test")
+    async def run_worker_adapter_test(worker_id: str, request: BridgeAdapterTestRequest = BridgeAdapterTestRequest()):
+        mode = "full" if request.submit_full_test else "safe"
+        record = bridge_service.record_adapter_test_request(
+            worker_id,
+            request.provider,
+            mode,
+            prompt=request.full_test_prompt,
+            metadata={"submitFullTest": str(request.submit_full_test).lower()},
+        )
+        ok, message = await bridge_service.send_worker_command(
+            worker_id,
+            "adapter_test",
+            payload={
+                "provider": request.provider,
+                "fullTestPrompt": request.full_test_prompt,
+                "submitFullTest": str(request.submit_full_test).lower(),
+                "adapterTestId": record.id,
+            },
+        )
         if not ok:
             raise HTTPException(status_code=409 if message != "Worker not found" else 404, detail=message)
-        bridge_service.record_debug_event(worker_id, "adapter_test_requested", message)
+        bridge_service.record_debug_event(
+            worker_id,
+            "adapter_test_requested",
+            message,
+            provider=request.provider,
+            metadata={"mode": mode, "adapterTestId": record.id},
+        )
         return BridgeStatusResponse(workers=bridge_service.snapshots())
+
+    @router.get("/adapter-tests", response_model=BridgeAdapterTestListResponse)
+    async def list_adapter_tests(
+        worker_id: str = Query("", alias="workerId"),
+        limit: int = Query(100, ge=1, le=200),
+    ):
+        return BridgeAdapterTestListResponse(
+            tests=bridge_service.adapter_tests(worker_id=worker_id or None, limit=limit)
+        )
+
+    @router.post("/adapter-tests/{test_id}/media")
+    async def upload_adapter_test_media(
+        test_id: str,
+        files: list[UploadFile] = File(...),
+    ):
+        result_url, urls = bridge_service.store_adapter_test_media(
+            test_id,
+            [(file.filename or f"variant-{index}", file.file) for index, file in enumerate(files, 1)],
+        )
+        return {"resultUrl": result_url, "urls": urls}
+
+    @router.get("/adapter-tests/media/{filename}")
+    async def get_adapter_test_media(filename: str):
+        path = bridge_service.adapter_media_dir / filename
+        if not path.exists() or not path.is_file():
+            raise HTTPException(status_code=404, detail="Adapter test media not found")
+        return FileResponse(path)
 
     @router.get("/debug/events", response_model=BridgeDebugEventListResponse)
     async def list_debug_events(
@@ -197,6 +265,16 @@ def build_browser_bridge_router(
                         health=result.health,
                         capabilities=result.capabilities,
                     )
+                    if result.health and result.health[0].metadata.get("adapterTest") == "true":
+                        health = result.health[0]
+                        bridge_service.complete_adapter_test(
+                            result.worker_id,
+                            provider=health.provider,
+                            status="completed" if health.status == "ready" else health.status,
+                            message=health.message or "Adapter test completed",
+                            result_url=health.metadata.get("adapterResultUrl") or None,
+                            metadata=health.metadata,
+                        )
                     await websocket.send_json({
                         "type": "bridge.health_ack",
                         "workerId": result.worker_id,

@@ -441,6 +441,20 @@ export type BridgeDebugEvent = {
   metadata: Record<string, string>;
 };
 
+export type BridgeAdapterTestRecord = {
+  id: string;
+  workerId: string;
+  provider: ProviderName;
+  mode: string;
+  status: string;
+  prompt: string;
+  message: string;
+  resultUrl: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  metadata: Record<string, string>;
+};
+
 export type BridgeWorkerSnapshot = {
   workerId: string;
   version: string;
@@ -448,6 +462,7 @@ export type BridgeWorkerSnapshot = {
   providers: ProviderName[];
   status: BridgeConnectionStatus;
   paused: boolean;
+  nickname: string;
   accountLabel: string;
   chromeProfileLabel: string;
   profileEmail: string;

@@ -463,18 +463,27 @@ class SQLiteStore:
                     if provider:
                         where.append("provider = ?")
                         params.append(provider)
-                    row = connection.execute(
+                    rows = connection.execute(
                         f"""
                         SELECT job_json FROM generation_jobs
                         WHERE {" AND ".join(where)}
                         ORDER BY sort_order ASC, created_at ASC
-                        LIMIT 1
+                        LIMIT 50
                         """,
                         params,
-                    ).fetchone()
-                    if not row:
+                    ).fetchall()
+                    if not rows:
                         continue
-                    job = self._job_from_json(row["job_json"])
+                    job = None
+                    for row in rows:
+                        candidate = self._job_from_json(row["job_json"])
+                        if not candidate:
+                            continue
+                        assigned_worker_id = candidate.metadata.get("assignedWorkerId")
+                        if assigned_worker_id and assigned_worker_id != worker_id:
+                            continue
+                        job = candidate
+                        break
                     if not job:
                         continue
                     metadata = dict(job.metadata)

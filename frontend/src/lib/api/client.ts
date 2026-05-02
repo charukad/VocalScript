@@ -18,6 +18,7 @@ import type {
   GenerationJob,
   GenerationJobStatus,
   BridgeDebugEvent,
+  BridgeAdapterTestRecord,
   BridgeWorkerSnapshot,
   ProjectDetail,
   ProjectSummary,
@@ -94,6 +95,10 @@ export type BridgeWorkerCleanupResponse = {
 
 export type BridgeDebugEventListResponse = {
   events: BridgeDebugEvent[];
+};
+
+export type BridgeAdapterTestListResponse = {
+  tests: BridgeAdapterTestRecord[];
 };
 
 export type BridgeScreenshotCleanupResponse = {
@@ -202,6 +207,43 @@ export const clearBrowserBridgeWorkerError = async (
   return response.json();
 };
 
+export const clearBrowserBridgeWorkerCooldown = async (
+  workerId: string,
+  signal?: AbortSignal
+): Promise<BridgeStatusResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/browser-bridge/workers/${encodeURIComponent(workerId)}/clear-cooldown`, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not clear bridge worker cooldown'));
+  }
+
+  return response.json();
+};
+
+export const updateBrowserBridgeWorkerNickname = async (
+  workerId: string,
+  nickname: string,
+  signal?: AbortSignal
+): Promise<BridgeStatusResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/browser-bridge/workers/${encodeURIComponent(workerId)}/nickname`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nickname }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not update bridge worker nickname'));
+  }
+
+  return response.json();
+};
+
 export const clearDisconnectedBridgeWorkers = async (
   signal?: AbortSignal
 ): Promise<BridgeWorkerCleanupResponse> => {
@@ -237,16 +279,40 @@ export const runBrowserBridgeHealthCheck = async (
 
 export const runBrowserBridgeAdapterTest = async (
   workerId: string,
+  options: { fullTestPrompt?: string; submitFullTest?: boolean } = {},
   signal?: AbortSignal
 ): Promise<BridgeStatusResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/browser-bridge/workers/${encodeURIComponent(workerId)}/adapter-test`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: 'meta',
+      fullTestPrompt: options.fullTestPrompt || '',
+      submitFullTest: Boolean(options.submitFullTest),
+    }),
     signal,
   });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(formatApiError(errorData.detail, 'Could not run bridge adapter test'));
+  }
+
+  return response.json();
+};
+
+export const listBrowserBridgeAdapterTests = async (
+  options: { workerId?: string; limit?: number; signal?: AbortSignal } = {}
+): Promise<BridgeAdapterTestListResponse> => {
+  const params = new URLSearchParams();
+  if (options.workerId) params.set('workerId', options.workerId);
+  if (options.limit) params.set('limit', String(options.limit));
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const response = await fetch(`${API_BASE_URL}/api/browser-bridge/adapter-tests${suffix}`, { signal: options.signal });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not load bridge adapter tests'));
   }
 
   return response.json();
@@ -796,15 +862,56 @@ export const retryGenerationJob = async (
   return response.json();
 };
 
+export const assignGenerationJobWorker = async (
+  jobId: string,
+  workerId: string | null,
+  signal?: AbortSignal
+): Promise<GenerationJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs/${jobId}/assign-worker`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workerId }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not assign generation job worker'));
+  }
+
+  return response.json();
+};
+
+export const regenerateGenerationJobVariant = async (
+  jobId: string,
+  variantUrl?: string | null,
+  signal?: AbortSignal
+): Promise<GenerationJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs/${jobId}/regenerate-variant`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ variantUrl: variantUrl || null }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not queue variant regeneration'));
+  }
+
+  return response.json();
+};
+
 export const fallbackGenerationJob = async (
   jobId: string,
   provider: ProviderName,
+  metadata: Record<string, string> = {},
   signal?: AbortSignal
 ): Promise<GenerationJob> => {
   const response = await fetch(`${API_BASE_URL}/api/generation/jobs/${jobId}/fallback`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, requireManualApproval: true }),
+    body: JSON.stringify({ provider, requireManualApproval: true, metadata }),
     signal,
   });
 
@@ -832,6 +939,26 @@ export const createExtendVideoJob = async (
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(formatApiError(errorData.detail, 'Could not create Meta Extend Video job'));
+  }
+
+  return response.json();
+};
+
+export const selectShortsFinalClip = async (
+  baseJobId: string,
+  finalJobId: string,
+  signal?: AbortSignal
+): Promise<GenerationJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/generation/jobs/${baseJobId}/shorts-final`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ finalJobId }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(errorData.detail, 'Could not select Shorts final clip'));
   }
 
   return response.json();

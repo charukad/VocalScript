@@ -13,13 +13,16 @@ from backend.src.domain.models.generation import (
     GeneratedMediaListResponse,
     GenerationExtendVideoRequest,
     GenerationJob,
+    GenerationJobAssignWorkerRequest,
     GenerationJobClaimRequest,
     GenerationJobCreateRequest,
     GenerationJobFallbackRequest,
     GenerationJobHistoryClearResponse,
     GenerationJobListResponse,
     GenerationJobRemoteStoreRequest,
+    GenerationJobRegenerateVariantRequest,
     GenerationJobResultRequest,
+    GenerationShortsFinalRequest,
     GenerationJobStatus,
     GenerationJobStatusUpdate,
     StoryboardMotionIntensity,
@@ -201,7 +204,7 @@ def build_generation_router(
     @router.post("/jobs/claim", response_model=GenerationJob)
     async def claim_generation_job(request: GenerationJobClaimRequest):
         if bridge_service and request.worker_id:
-            can_claim, reason = bridge_service.can_worker_claim(request.worker_id)
+            can_claim, reason = bridge_service.can_worker_claim(request.worker_id, request.provider)
             if not can_claim:
                 raise HTTPException(status_code=409, detail=reason)
         job = queue_service.claim_next_job(
@@ -223,6 +226,23 @@ def build_generation_router(
     @router.post("/jobs/{job_id}/retry", response_model=GenerationJob)
     async def retry_generation_job(job_id: str):
         job = queue_service.retry_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
+
+    @router.post("/jobs/{job_id}/assign-worker", response_model=GenerationJob)
+    async def assign_generation_job_worker(job_id: str, request: GenerationJobAssignWorkerRequest):
+        job = queue_service.assign_worker(job_id, request.worker_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
+
+    @router.post("/jobs/{job_id}/regenerate-variant", response_model=GenerationJob)
+    async def regenerate_generation_job_variant(job_id: str, request: GenerationJobRegenerateVariantRequest = GenerationJobRegenerateVariantRequest()):
+        try:
+            job = queue_service.regenerate_variant(job_id, request.variant_url)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
         return job
@@ -252,6 +272,16 @@ def build_generation_router(
                 media_url=request.media_url,
                 metadata=request.metadata,
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
+
+    @router.post("/jobs/{job_id}/shorts-final", response_model=GenerationJob)
+    async def select_shorts_final_clip(job_id: str, request: GenerationShortsFinalRequest):
+        try:
+            job = queue_service.select_shorts_final_clip(job_id, request.final_job_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         if not job:

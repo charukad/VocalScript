@@ -1,3 +1,4 @@
+import json
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -9,6 +10,7 @@ from fastapi import WebSocket
 
 from backend.src.domain.models.generation import (
     BridgeConnectionStatus,
+    BridgeAdapterTestRecord,
     BridgeDebugEvent,
     BridgeWorkerHeartbeat,
     BridgeWorkerSnapshot,
@@ -43,6 +45,7 @@ class ConnectedWorker:
     cooldown_until: Optional[str] = None
     last_error: Optional[str] = None
     paused: bool = False
+    nickname: str = ""
     capabilities: List[ProviderCapability] = field(default_factory=list)
     health: List[ProviderHealthSnapshot] = field(default_factory=list)
     connected_at: str = field(default_factory=utc_now_iso)
@@ -54,9 +57,16 @@ class BrowserBridgeService:
     def __init__(self, debug_dir: str = "backend/output/browser_bridge_debug"):
         self._workers: Dict[str, ConnectedWorker] = {}
         self._debug_events: List[BridgeDebugEvent] = []
+        self._adapter_tests: List[BridgeAdapterTestRecord] = []
         self.debug_dir = Path(debug_dir)
         self.screenshot_dir = self.debug_dir / "screenshots"
+        self.job_record_dir = self.debug_dir / "jobs"
+        self.adapter_media_dir = self.debug_dir / "adapter_test_media"
         self.screenshot_dir.mkdir(parents=True, exist_ok=True)
+        self.job_record_dir.mkdir(parents=True, exist_ok=True)
+        self.adapter_media_dir.mkdir(parents=True, exist_ok=True)
+        self._debug_events = self._load_debug_events()
+        self._adapter_tests = self._load_adapter_tests()
 
     def register_worker(
         self,
@@ -128,6 +138,7 @@ class BrowserBridgeService:
                 providers=worker.providers,
                 status=self._worker_status(worker),
                 paused=worker.paused,
+                nickname=worker.nickname,
                 accountLabel=worker.account_label,
                 chromeProfileLabel=worker.chrome_profile_label,
                 profileEmail=worker.profile_email,
@@ -203,6 +214,9 @@ class BrowserBridgeService:
         )
         self._debug_events.append(event)
         self._debug_events = self._debug_events[-500:]
+        self._save_debug_events()
+        if job_id:
+            self._persist_job_record(job_id)
         worker = self._workers.get(worker_id)
         if worker:
             worker.job_message = message
@@ -210,6 +224,105 @@ class BrowserBridgeService:
             if level == "error":
                 worker.last_error = message
         return event
+
+    def record_adapter_test_request(
+        self,
+        worker_id: str,
+        provider: ProviderName,
+        mode: str,
+        prompt: str = "",
+        metadata: Optional[Dict[str, str]] = None,
+    ) -> BridgeAdapterTestRecord:
+        record = BridgeAdapterTestRecord(
+            id=f"adapter-{uuid.uuid4().hex[:12]}",
+            workerId=worker_id,
+            provider=provider,
+            mode=mode,
+            status="requested",
+            prompt=prompt[:500],
+            message="Adapter test requested",
+            createdAt=utc_now_iso(),
+            metadata=metadata or {},
+        )
+        self._adapter_tests.append(record)
+        self._adapter_tests = self._adapter_tests[-200:]
+        self._save_adapter_tests()
+        return record
+
+    def complete_adapter_test(
+        self,
+        worker_id: str,
+        provider: ProviderName,
+        status: str,
+        message: str,
+        result_url: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
+    ) -> None:
+        record = next(
+            (
+                item
+                for item in reversed(self._adapter_tests)
+                if item.worker_id == worker_id and item.provider == provider and item.status == "requested"
+            ),
+            None,
+        )
+        if not record:
+            record = self.record_adapter_test_request(worker_id, provider, "safe")
+        merged_metadata = dict(record.metadata)
+        if metadata:
+            merged_metadata.update(metadata)
+        completed = record.model_copy(
+            update={
+                "status": status,
+                "message": message,
+                "result_url": result_url,
+                "completed_at": utc_now_iso(),
+                "metadata": merged_metadata,
+            }
+        )
+        self._adapter_tests = [
+            completed if item.id == record.id else item
+            for item in self._adapter_tests
+        ][-200:]
+        self._save_adapter_tests()
+
+    def adapter_tests(self, worker_id: Optional[str] = None, limit: int = 100) -> List[BridgeAdapterTestRecord]:
+        tests = self._adapter_tests
+        if worker_id:
+            tests = [item for item in tests if item.worker_id == worker_id]
+        return tests[-max(1, min(limit, 200)):]
+
+    def store_adapter_test_media(
+        self,
+        test_id: str,
+        files: List[tuple[str, BinaryIO]],
+    ) -> tuple[str, List[str]]:
+        safe_test = test_id.replace("/", "_")
+        urls: List[str] = []
+        for index, (filename, file) in enumerate(files, 1):
+            suffix = Path(filename or f"variant-{index}.png").suffix or ".png"
+            local_path = self.adapter_media_dir / f"{safe_test}-{index}-{uuid.uuid4().hex[:8]}{suffix}"
+            with local_path.open("wb") as output:
+                shutil.copyfileobj(file, output)
+            urls.append(f"/api/browser-bridge/adapter-tests/media/{local_path.name}")
+        if urls:
+            self._attach_adapter_test_media(test_id, urls[0], {"adapterMediaCount": str(len(urls))})
+        return (urls[0] if urls else ""), urls
+
+    def _attach_adapter_test_media(self, test_id: str, result_url: str, metadata: Dict[str, str]) -> None:
+        for index, record in enumerate(self._adapter_tests):
+            if record.id != test_id:
+                continue
+            merged_metadata = dict(record.metadata)
+            merged_metadata.update(metadata)
+            self._adapter_tests[index] = record.model_copy(
+                update={
+                    "result_url": result_url,
+                    "metadata": merged_metadata,
+                }
+            )
+            self._save_adapter_tests()
+            break
 
     def debug_events(
         self,
@@ -301,6 +414,14 @@ class BrowserBridgeService:
             worker.job_message = "Error cleared"
         return worker
 
+    def update_worker_nickname(self, worker_id: str, nickname: str) -> Optional[ConnectedWorker]:
+        worker = self._workers.get(worker_id)
+        if not worker:
+            return None
+        worker.nickname = nickname.strip()[:80]
+        worker.job_message = "Nickname updated"
+        return worker
+
     def cleanup_disconnected_workers(self, older_than_seconds: int = 0) -> int:
         now = datetime.now(timezone.utc)
         remove_ids: list[str] = []
@@ -317,7 +438,7 @@ class BrowserBridgeService:
             self._workers.pop(worker_id, None)
         return len(remove_ids)
 
-    def can_worker_claim(self, worker_id: Optional[str]) -> tuple[bool, str]:
+    def can_worker_claim(self, worker_id: Optional[str], provider: Optional[ProviderName] = None) -> tuple[bool, str]:
         if not worker_id:
             return True, ""
         worker = self._workers.get(worker_id)
@@ -332,6 +453,10 @@ class BrowserBridgeService:
             return False, "Worker is cooling down before the next provider request."
         if worker.current_job_id:
             return False, f"Worker is already running {worker.current_job_id}."
+        if provider:
+            health = next((item for item in worker.health if item.provider == provider), None)
+            if health and health.status in ("needs_login", "manual_action_required", "blocked", "error"):
+                return False, f"Worker provider health is {health.status.replace('_', ' ')}."
         return True, ""
 
     def _apply_heartbeat(self, worker: ConnectedWorker, heartbeat: BridgeWorkerHeartbeat) -> None:
@@ -391,6 +516,76 @@ class BrowserBridgeService:
             "minExtensionVersion": MIN_EXTENSION_VERSION,
             "status": "version_mismatch" if self._is_version_mismatch(worker) else "ok",
         }
+
+    def _debug_events_path(self) -> Path:
+        return self.debug_dir / "debug_events.json"
+
+    def _adapter_tests_path(self) -> Path:
+        return self.debug_dir / "adapter_tests.json"
+
+    def _load_debug_events(self) -> List[BridgeDebugEvent]:
+        path = self._debug_events_path()
+        if not path.exists():
+            return []
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        events: List[BridgeDebugEvent] = []
+        for item in raw[-500:] if isinstance(raw, list) else []:
+            try:
+                events.append(BridgeDebugEvent(**item))
+            except ValueError:
+                continue
+        return events
+
+    def _save_debug_events(self) -> None:
+        self.debug_dir.mkdir(parents=True, exist_ok=True)
+        payload = [event.model_dump(by_alias=True) for event in self._debug_events[-500:]]
+        tmp_path = self._debug_events_path().with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp_path.replace(self._debug_events_path())
+
+    def _load_adapter_tests(self) -> List[BridgeAdapterTestRecord]:
+        path = self._adapter_tests_path()
+        if not path.exists():
+            return []
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        tests: List[BridgeAdapterTestRecord] = []
+        for item in raw[-200:] if isinstance(raw, list) else []:
+            try:
+                tests.append(BridgeAdapterTestRecord(**item))
+            except ValueError:
+                continue
+        return tests
+
+    def _save_adapter_tests(self) -> None:
+        self.debug_dir.mkdir(parents=True, exist_ok=True)
+        payload = [record.model_dump(by_alias=True) for record in self._adapter_tests[-200:]]
+        tmp_path = self._adapter_tests_path().with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp_path.replace(self._adapter_tests_path())
+
+    def _persist_job_record(self, job_id: str) -> None:
+        safe_job = job_id.replace("/", "_")
+        events = [
+            event.model_dump(by_alias=True)
+            for event in self._debug_events
+            if event.job_id == job_id
+        ]
+        if not events:
+            return
+        payload = {
+            "jobId": job_id,
+            "updatedAt": utc_now_iso(),
+            "events": events,
+        }
+        tmp_path = (self.job_record_dir / f"{safe_job}.json").with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp_path.replace(self.job_record_dir / f"{safe_job}.json")
 
 
 def _parse_iso(value: Optional[str]) -> Optional[datetime]:

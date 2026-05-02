@@ -295,6 +295,57 @@
   gap: 0.55rem;
 }
 
+.bridge-worker-nickname {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  color: var(--text-secondary);
+  font-size: 0.66rem;
+}
+
+.bridge-worker-nickname div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+}
+
+.bridge-worker-nickname input {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 0.45rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.7rem;
+}
+
+.bridge-worker-nickname .btn-secondary {
+  min-height: 30px;
+  padding: 0 0.55rem;
+  font-size: 0.68rem;
+}
+
+.bridge-worker-adapter-test {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  color: var(--text-secondary);
+  font-size: 0.66rem;
+}
+
+.bridge-worker-adapter-test input {
+  min-height: 30px;
+  padding: 0 0.45rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.7rem;
+}
+
 .bridge-capability-list {
   display: flex;
   flex-wrap: wrap;
@@ -311,14 +362,16 @@
 }
 
 .bridge-health-list,
-.bridge-debug-list {
+.bridge-debug-list,
+.bridge-adapter-test-list {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
 }
 
 .bridge-health-item,
-.bridge-debug-event {
+.bridge-debug-event,
+.bridge-adapter-test-row {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
@@ -332,16 +385,24 @@
   border-color: rgba(137, 209, 133, 0.45);
 }
 
+.bridge-adapter-test-row.status-completed,
+.bridge-adapter-test-row.status-ready {
+  border-color: rgba(137, 209, 133, 0.45);
+}
+
 .bridge-health-item.status-error,
 .bridge-health-item.status-blocked,
 .bridge-health-item.status-needs_login,
 .bridge-health-item.status-manual_action_required,
-.bridge-debug-event.level-error {
+.bridge-debug-event.level-error,
+.bridge-adapter-test-row.status-error,
+.bridge-adapter-test-row.status-failed {
   border-color: rgba(244, 135, 113, 0.55);
 }
 
 .bridge-health-item strong,
 .bridge-debug-event strong,
+.bridge-adapter-test-row strong,
 .bridge-debug-title {
   color: var(--text-highlight);
   font-size: 0.7rem;
@@ -350,14 +411,17 @@
 
 .bridge-health-item span,
 .bridge-debug-event span,
+.bridge-adapter-test-row span,
 .bridge-health-item small,
-.bridge-debug-event small {
+.bridge-debug-event small,
+.bridge-adapter-test-row small {
   color: var(--text-secondary);
   font-size: 0.66rem;
   line-height: 1.35;
 }
 
-.bridge-debug-event a {
+.bridge-debug-event a,
+.bridge-adapter-test-row a {
   color: var(--accent-color);
   font-size: 0.66rem;
   text-decoration: none;
@@ -469,6 +533,18 @@
   font-size: 0.68rem;
 }
 
+.bridge-auto-fallback {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
 .btn-secondary.danger {
   color: #f48771;
   border-color: rgba(244, 135, 113, 0.48);
@@ -519,12 +595,210 @@
   font-size: 0.66rem;
 }
 
+.bridge-shorts-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.bridge-shorts-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.bridge-shorts-header h4 {
+  margin: 0;
+  color: var(--text-highlight);
+  font-size: 0.76rem;
+}
+
+.bridge-shorts-header p {
+  margin: 0.18rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+}
+
+.bridge-shorts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.bridge-shorts-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(180px, 0.8fr);
+  gap: 0.45rem;
+  align-items: stretch;
+  padding: 0.45rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.bridge-shorts-row > button,
+.bridge-shorts-final {
+  min-width: 0;
+  padding: 0.42rem;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text-primary);
+}
+
+.bridge-shorts-row > button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bridge-shorts-row > button:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.bridge-shorts-row strong,
+.bridge-shorts-row span {
+  overflow-wrap: anywhere;
+}
+
+.bridge-shorts-row strong {
+  color: var(--text-highlight);
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.bridge-shorts-row span {
+  color: var(--text-secondary);
+  font-size: 0.6rem;
+  line-height: 1.25;
+}
+
+.bridge-shorts-final {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.38rem;
+}
+
+.bridge-shorts-final div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.bridge-shorts-final button {
+  min-height: 26px;
+  padding: 0.2rem 0.42rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-highlight);
+  background: transparent;
+  font: inherit;
+  font-size: 0.6rem;
+}
+
+.bridge-shorts-final button.selected {
+  border-color: rgba(137, 209, 133, 0.62);
+  color: #89d185;
+}
+
 .bridge-queue-body {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr);
   gap: 0.7rem;
   overflow: hidden;
+}
+
+.bridge-live-debug-panel {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin: 0.75rem 1rem 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.022);
+  max-height: 210px;
+  overflow: hidden;
+}
+
+.bridge-live-debug-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.bridge-live-debug-header h3 {
+  margin: 0;
+  color: var(--text-highlight);
+  font-size: 0.78rem;
+}
+
+.bridge-live-debug-header p {
+  margin: 0.18rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+}
+
+.bridge-live-debug-list {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow-y: auto;
+}
+
+.bridge-live-debug-row {
+  display: grid;
+  grid-template-columns: auto minmax(100px, 0.5fr) minmax(0, 0.9fr) minmax(0, 1.4fr) auto;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.42rem;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: inherit;
+  text-align: left;
+}
+
+.bridge-live-debug-row.level-error {
+  border-color: rgba(244, 135, 113, 0.55);
+}
+
+.bridge-live-debug-row strong,
+.bridge-live-debug-row small,
+.bridge-live-debug-row em,
+.bridge-live-debug-row span {
+  overflow-wrap: anywhere;
+}
+
+.bridge-live-debug-row strong {
+  color: var(--text-highlight);
+  font-size: 0.66rem;
+  text-transform: capitalize;
+}
+
+.bridge-live-debug-row span,
+.bridge-live-debug-row small,
+.bridge-live-debug-row em,
+.bridge-live-debug-row a {
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+  font-style: normal;
+  text-decoration: none;
 }
 
 .bridge-queue-list,
@@ -664,7 +938,8 @@
   text-decoration: none;
 }
 
-.bridge-job-extend-prompt {
+.bridge-job-extend-prompt,
+.bridge-job-assignment {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -672,7 +947,15 @@
   font-size: 0.62rem;
 }
 
-.bridge-job-extend-prompt input {
+.bridge-job-assignment div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+}
+
+.bridge-job-extend-prompt input,
+.bridge-job-assignment input,
+.bridge-job-assignment select {
   min-height: 28px;
   background: rgba(255, 255, 255, 0.045);
   color: var(--text-primary);
@@ -680,6 +963,12 @@
   border-radius: 4px;
   padding: 0 0.45rem;
   font: inherit;
+  font-size: 0.66rem;
+}
+
+.bridge-job-assignment .btn-secondary {
+  min-height: 28px;
+  padding: 0 0.5rem;
   font-size: 0.66rem;
 }
 
