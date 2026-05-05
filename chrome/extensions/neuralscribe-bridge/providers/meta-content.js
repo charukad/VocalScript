@@ -16,6 +16,11 @@ const META_SELECTORS = {
   generateButton: [
     "button[data-testid*='generate' i]",
     "button[aria-label*='generate' i]",
+    "button[aria-label*='send' i]",
+    "button[aria-label*='submit' i]",
+    "[role='button'][aria-label*='generate' i]",
+    "[role='button'][aria-label*='send' i]",
+    "[role='button'][aria-label*='submit' i]",
     "button[data-slot='button'][class*='bg-linear-to-r']",
     "button[type='submit']",
   ],
@@ -489,7 +494,7 @@ async function ensureRequestedMode(mediaType) {
 
 function findModeControl(labelPatterns) {
   const controls = [
-    ...document.querySelectorAll("button, [role='tab'], [role='button'], a[role='tab'], a[role='button']")
+    ...querySelectorAllDeep("button, [role='tab'], [role='button'], a[role='tab'], a[role='button']")
   ].filter(isVisibleElement);
   const scored = controls
     .map((element) => ({ element, score: modeControlScore(element, labelPatterns) }))
@@ -537,7 +542,7 @@ async function waitForGenerateButton(promptBox, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const button = findGenerateButton(promptBox, true);
-    if (button && !button.disabled && button.getAttribute("aria-disabled") !== "true") {
+    if (button && !isDisabledControl(button)) {
       return button;
     }
     await sleep(500);
@@ -547,9 +552,7 @@ async function waitForGenerateButton(promptBox, timeoutMs) {
 
 function generateButtonDisabledMessage(mediaType, promptBox) {
   const buttons = findGenerateButtonCandidates(promptBox);
-  const disabledCount = buttons.filter((button) =>
-    button.disabled || button.getAttribute("aria-disabled") === "true"
-  ).length;
+  const disabledCount = buttons.filter(isDisabledControl).length;
   const modeText = mediaType === "video" ? " Also check that Meta is in video mode." : "";
   const promptTextLength = getPromptText(promptBox).length;
   return `Meta prompt was inserted, but the generate button was not enabled. Visible generate buttons: ${buttons.length}, disabled: ${disabledCount}, prompt text length: ${promptTextLength}.${modeText}`;
@@ -656,7 +659,7 @@ function createNewMediaObserver() {
   const rememberNode = (node) => {
     if (!node || !(node instanceof Element)) return;
     if (node.matches(mediaSelector)) rememberMediaElement(node);
-    node.querySelectorAll?.(mediaSelector).forEach(rememberMediaElement);
+    querySelectorAllDeep(mediaSelector, node).forEach(rememberMediaElement);
   };
 
   const observer = new MutationObserver((mutations) => {
@@ -693,7 +696,7 @@ function findMediaCandidates(prompt = "") {
   const candidates = [];
   let index = 0;
   for (const selector of META_SELECTORS.media) {
-    document.querySelectorAll(selector).forEach((element) => {
+    querySelectorAllDeep(selector).forEach((element) => {
       const url = extractUrl(element);
       if (!isUsableMediaUrl(url) || candidates.some((candidate) => candidate.url === url)) return;
       const rect = element.getBoundingClientRect();
@@ -876,10 +879,10 @@ function findMediaGroup(element) {
   let current = element.parentElement;
   let fallback = current || element;
   for (let depth = 0; current && depth < 8; depth++) {
-    const mediaCount = current.querySelectorAll(META_SELECTORS.media.join(",")).length;
+    const mediaCount = querySelectorAllDeep(META_SELECTORS.media.join(","), current).length;
     if (mediaCount >= 2 && mediaCount <= 6) return current;
     fallback = current;
-    current = current.parentElement;
+    current = parentElementOrHost(current);
   }
   return fallback;
 }
@@ -971,7 +974,7 @@ async function waitForPromptBox(timeoutMs) {
 
 function findPromptBox() {
   const candidates = uniqueElements(
-    META_SELECTORS.promptBox.flatMap((selector) => [...document.querySelectorAll(selector)])
+    META_SELECTORS.promptBox.flatMap((selector) => querySelectorAllDeep(selector))
   )
     .filter(isEditablePromptElement)
     .map((element) => ({ element, score: promptBoxScore(element) }))
@@ -1019,7 +1022,7 @@ function nearbyPromptText(element) {
   let current = element;
   for (let depth = 0; current && depth < 4; depth += 1) {
     parts.push(current.textContent || "");
-    current = current.parentElement;
+    current = parentElementOrHost(current);
   }
   return parts.join(" ").slice(0, 300);
 }
@@ -1027,7 +1030,7 @@ function nearbyPromptText(element) {
 function promptInputDebugSummary() {
   const editors = uniqueElements(
     [
-      ...document.querySelectorAll("[contenteditable], textarea, input, [role='textbox'], [data-lexical-editor='true']"),
+      ...querySelectorAllDeep("[contenteditable], textarea, input, [role='textbox'], [data-lexical-editor='true']"),
     ]
   )
     .filter(isVisibleElement)
@@ -1044,7 +1047,7 @@ function promptInputDebugSummary() {
       ].filter(Boolean).join(" "));
       return `${label.slice(0, 90)} @ ${Math.round(rect.width)}x${Math.round(rect.height)}`;
     });
-  const buttons = [...document.querySelectorAll("button")]
+  const buttons = [...querySelectorAllDeep("button")]
     .filter(isVisibleElement)
     .slice(0, 10)
     .map((button) => normalizeText([
@@ -1053,7 +1056,7 @@ function promptInputDebugSummary() {
       button.textContent,
     ].filter(Boolean).join(" ")).slice(0, 50))
     .filter(Boolean);
-  const bodyHint = normalizeText(document.body?.innerText || "").slice(0, 240);
+  const bodyHint = normalizeText(document.body?.innerText || deepTextContent()).slice(0, 240);
   return `URL: ${location.href}. Title: ${document.title || "untitled"}. Visible editors: ${editors.join(" | ") || "none"}. Buttons: ${buttons.join(" | ") || "none"}. Page text: ${bodyHint}`;
 }
 
@@ -1087,7 +1090,7 @@ function promptTextMatches(value, prompt) {
 
 function findGenerateButton(promptBox, enabledOnly = false) {
   const candidates = findGenerateButtonCandidates(promptBox)
-    .filter((button) => !enabledOnly || (!button.disabled && button.getAttribute("aria-disabled") !== "true"))
+    .filter((button) => !enabledOnly || !isDisabledControl(button))
     .map((button) => ({ button, score: generateButtonScore(button, promptBox) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
@@ -1096,14 +1099,15 @@ function findGenerateButton(promptBox, enabledOnly = false) {
 
 function findGenerateButtonCandidates(promptBox) {
   const selectorMatches = META_SELECTORS.generateButton
-    .flatMap((selector) => [...document.querySelectorAll(selector)]);
-  const scoredButtons = [...document.querySelectorAll("button")]
+    .flatMap((selector) => querySelectorAllDeep(selector));
+  const scoredButtons = [...querySelectorAllDeep("button")]
     .filter((button) => generateButtonScore(button, promptBox) > 0);
   return uniqueElements([...selectorMatches, ...scoredButtons]).filter(isVisibleElement);
 }
 
 function generateButtonScore(button, promptBox) {
   if (!isVisibleElement(button)) return 0;
+  if (isDisabledControl(button)) return 0;
   const text = normalizeText([
     button.getAttribute("aria-label"),
     button.getAttribute("title"),
@@ -1114,13 +1118,19 @@ function generateButtonScore(button, promptBox) {
   if (/\b(download|share|copy|close|cancel|delete|remove|like|dislike|menu|settings|profile|login|log in|sign in)\b/.test(text)) {
     return 0;
   }
+  const isPromptSubmitPosition = promptBox ? isNearPromptSubmitPosition(button, promptBox) : false;
+  const createOnlyLabel = /\bcreate\b/.test(text) && !/\b(generate|submit|send|imagine)\b/.test(text);
+  if (createOnlyLabel && !isPromptSubmitPosition) return 0;
 
   let score = 0;
-  if (/\b(generate|create|submit|send|imagine)\b/.test(text)) score += 55;
+  if (/\b(generate|submit|send|imagine)\b/.test(text)) score += 55;
+  if (createOnlyLabel) score += 22;
   if (button.getAttribute("type") === "submit") score += 24;
   if (button.matches(META_SELECTORS.generateButton.join(","))) score += 20;
   if (button.querySelector("svg")) score += 8;
   if (String(button.className || "").includes("bg-linear-to-r")) score += 12;
+  if (isPromptSubmitPosition) score += 46;
+  if (isPromptSubmitPosition && button.querySelector("svg") && !text) score += 26;
 
   if (promptBox) {
     const promptRect = promptBox.getBoundingClientRect();
@@ -1137,17 +1147,98 @@ function generateButtonScore(button, promptBox) {
   return score;
 }
 
+function isDisabledControl(element) {
+  return Boolean(
+    element.disabled ||
+    element.getAttribute("disabled") !== null ||
+    element.getAttribute("aria-disabled") === "true"
+  );
+}
+
+function isNearPromptSubmitPosition(button, promptBox) {
+  const promptRect = promptBox.getBoundingClientRect();
+  const buttonRect = button.getBoundingClientRect();
+  if (!promptRect.width || !promptRect.height || !buttonRect.width || !buttonRect.height) return false;
+  const buttonCenterX = (buttonRect.left + buttonRect.right) / 2;
+  const buttonCenterY = (buttonRect.top + buttonRect.bottom) / 2;
+  const promptCenterY = (promptRect.top + promptRect.bottom) / 2;
+  const nearRightEdge = buttonCenterX >= promptRect.left + promptRect.width * 0.62;
+  const closeToRightEdge = Math.abs(buttonRect.right - promptRect.right) <= Math.max(160, promptRect.width * 0.24);
+  const verticallyAligned = Math.abs(buttonCenterY - promptCenterY) <= Math.max(140, promptRect.height * 2.8);
+  const sharedDepth = sharedAncestorDepth(promptBox, button, 8);
+  return sharedDepth >= 0 && verticallyAligned && (nearRightEdge || closeToRightEdge);
+}
+
 function sharedAncestorDepth(first, second, maxDepth) {
   let current = first;
   for (let depth = 0; current && depth <= maxDepth; depth++) {
-    if (current.contains(second)) return depth;
-    current = current.parentElement;
+    if (containsDeep(current, second)) return depth;
+    current = parentElementOrHost(current);
   }
   return -1;
 }
 
 function uniqueElements(elements) {
   return [...new Set(elements.filter(Boolean))];
+}
+
+function querySelectorAllDeep(selector, root = document) {
+  const results = [];
+  const roots = [];
+  const seenRoots = new Set();
+
+  const addRoot = (candidate) => {
+    if (candidate && !seenRoots.has(candidate)) {
+      seenRoots.add(candidate);
+      roots.push(candidate);
+    }
+  };
+
+  addRoot(root);
+  for (let index = 0; index < roots.length; index += 1) {
+    const current = roots[index];
+    if (current instanceof Element && current.matches(selector)) {
+      results.push(current);
+    }
+    current.querySelectorAll?.(selector).forEach((element) => results.push(element));
+    current.querySelectorAll?.("*").forEach((element) => {
+      if (element.shadowRoot) addRoot(element.shadowRoot);
+    });
+  }
+
+  return uniqueElements(results);
+}
+
+function parentElementOrHost(element) {
+  return element?.parentElement || element?.getRootNode?.().host || null;
+}
+
+function containsDeep(container, target) {
+  if (!container || !target) return false;
+  if (container === target || container.contains?.(target)) return true;
+  let current = target;
+  while (current) {
+    if (current === container) return true;
+    current = parentElementOrHost(current);
+  }
+  return false;
+}
+
+function deepTextContent(root = document) {
+  const roots = [root];
+  const seenRoots = new Set(roots);
+  const parts = [];
+  for (let index = 0; index < roots.length; index += 1) {
+    const current = roots[index];
+    parts.push(current.body?.innerText || current.textContent || "");
+    current.querySelectorAll?.("*").forEach((element) => {
+      if (element.shadowRoot && !seenRoots.has(element.shadowRoot)) {
+        seenRoots.add(element.shadowRoot);
+        roots.push(element.shadowRoot);
+      }
+    });
+  }
+  return parts.join(" ");
 }
 
 async function waitForElement(selectors, timeoutMs) {
@@ -1162,7 +1253,7 @@ async function waitForElement(selectors, timeoutMs) {
 
 function findFirst(selectors, visibleOnly = false) {
   for (const selector of selectors) {
-    const element = [...document.querySelectorAll(selector)]
+    const element = querySelectorAllDeep(selector)
       .find((candidate) => !visibleOnly || isVisibleElement(candidate));
     if (element) return element;
   }

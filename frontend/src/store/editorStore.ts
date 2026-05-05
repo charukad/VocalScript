@@ -3384,7 +3384,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         batchId ? listGenerationJobs({ batchId, projectId }) : Promise.resolve({ jobs: [] as GenerationJob[], batchId: null }),
         projectId ? listGenerationJobs({ projectId }) : Promise.resolve({ jobs: [] as GenerationJob[], batchId: null }),
       ]);
-      const animationJobs = uniqueGenerationJobsById([
+      let animationJobs = uniqueGenerationJobsById([
         ...batchJobsResponse.jobs,
         ...projectJobsResponse.jobs,
       ]).filter(isAutoAnimateJob);
@@ -3396,12 +3396,44 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ...batchMediaResponse.assets,
         ...projectMediaResponse.assets,
       ]);
-      const completedAssets = mediaAssets.filter(asset =>
-        asset.status === 'completed' &&
-        Boolean(asset.resultUrl) &&
-        animationJobs.some(job => job.id === asset.jobId) &&
-        (getAssetVariantUrls(asset).length <= 1 || Boolean(asset.metadata.selectedVariantUrl))
-      );
+      const completedAssets: GeneratedMediaAsset[] = [];
+      for (const asset of mediaAssets) {
+        if (
+          asset.status !== 'completed' ||
+          !asset.resultUrl ||
+          !animationJobs.some(job => job.id === asset.jobId)
+        ) {
+          continue;
+        }
+
+        const variantUrls = getAssetVariantUrls(asset);
+        if (variantUrls.length > 1 && !asset.metadata.selectedVariantUrl) {
+          const selectedUrl = asset.resultUrl ?? variantUrls[0];
+          const selectedJob = await selectGenerationJobVariant(asset.jobId, selectedUrl).catch(error => {
+            console.warn('Could not select default animation variant.', asset.jobId, error);
+            return null;
+          });
+
+          if (selectedJob?.resultUrl) {
+            animationJobs = uniqueGenerationJobsById(
+              animationJobs.map(job => job.id === selectedJob.id ? selectedJob : job)
+            );
+            completedAssets.push(generatedMediaAssetFromJob(selectedJob));
+            continue;
+          }
+
+          completedAssets.push({
+            ...asset,
+            metadata: {
+              ...(asset.metadata ?? {}),
+              selectedVariantUrl: selectedUrl,
+            },
+          });
+          continue;
+        }
+
+        completedAssets.push(asset);
+      }
 
       const newMediaAssets: MediaAsset[] = [];
       const newMemoryItems: AnimationAssetMemoryItem[] = [];
