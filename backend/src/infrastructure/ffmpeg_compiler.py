@@ -262,13 +262,20 @@ class FFmpegMediaCompiler(IMediaCompiler):
 
         # ─── Visual Processing ─────────────────────────────────────────────
         visual_clips = []
+        text_clips = []
         for track in blueprint.tracks:
             if track.type == "visual" and not blueprint.audio_only:
                 for clip in track.clips:
                     visual_clips.append(clip)
+            if track.type == "text" and not blueprint.audio_only:
+                for clip in track.clips:
+                    if clip.text:
+                        text_clips.append(clip)
         visual_clips.sort(key=lambda c: c.start_time)
 
-        if visual_clips:
+        should_render_video = bool(visual_clips or text_clips)
+
+        if should_render_video:
             filter_complex.append(
                 f"color=c=black:s={blueprint.width}x{blueprint.height}:r={blueprint.fps}:d={total_duration}[base]"
             )
@@ -300,7 +307,12 @@ class FFmpegMediaCompiler(IMediaCompiler):
                 scale_factor = clip.transform.scale / 100.0
                 if scale_factor != 1.0 or clip.transform.rotation != 0:
                     tf_filters.append(f"scale=iw*{scale_factor}:ih*{scale_factor}")
-                    tf_filters.append(f"crop={blueprint.width}:{blueprint.height}")
+                    if scale_factor < 1.0 and clip.transform.rotation == 0:
+                        tf_filters.append(
+                            f"pad={blueprint.width}:{blueprint.height}:(ow-iw)/2:(oh-ih)/2"
+                        )
+                    else:
+                        tf_filters.append(f"crop={blueprint.width}:{blueprint.height}")
 
                 out_node = f"v_base_{i}"
                 if tf_filters:
@@ -345,30 +357,26 @@ class FFmpegMediaCompiler(IMediaCompiler):
             # Render text to transparent PNGs with Pillow, then composite the
             # PNGs in FFmpeg. This works even when FFmpeg lacks drawtext.
             text_counter = 0
-            for track in blueprint.tracks:
-                if track.type == "text":
-                    for clip in track.clips:
-                        if not clip.text:
-                            continue
-                        td = clip.text
-                        overlay_path = self._render_text_overlay(td, blueprint, output_path, text_counter)
-                        text_overlay_paths.append(overlay_path)
-                        cmd.extend(["-loop", "1", "-t", f"{total_duration:.3f}", "-i", overlay_path])
-                        overlay_input_idx = idx
-                        idx += 1
+            for clip in text_clips:
+                td = clip.text
+                overlay_path = self._render_text_overlay(td, blueprint, output_path, text_counter)
+                text_overlay_paths.append(overlay_path)
+                cmd.extend(["-loop", "1", "-t", f"{total_duration:.3f}", "-i", overlay_path])
+                overlay_input_idx = idx
+                idx += 1
 
-                        overlay_src = f"text_src_{text_counter}"
-                        next_text_out = f"text_{text_counter}"
-                        filter_complex.append(
-                            f"[{overlay_input_idx}:v]format=rgba[{overlay_src}]"
-                        )
-                        filter_complex.append(
-                            f"[{last_out}][{overlay_src}]"
-                            f"overlay=0:0:enable='between(t,{clip.start_time},{clip.start_time + clip.duration})'"
-                            f"[{next_text_out}]"
-                        )
-                        last_out = next_text_out
-                        text_counter += 1
+                overlay_src = f"text_src_{text_counter}"
+                next_text_out = f"text_{text_counter}"
+                filter_complex.append(
+                    f"[{overlay_input_idx}:v]format=rgba[{overlay_src}]"
+                )
+                filter_complex.append(
+                    f"[{last_out}][{overlay_src}]"
+                    f"overlay=0:0:enable='between(t,{clip.start_time},{clip.start_time + clip.duration})'"
+                    f"[{next_text_out}]"
+                )
+                last_out = next_text_out
+                text_counter += 1
 
             filter_complex.append(f"[{last_out}]format=yuv420p[video_final]")
 
@@ -379,7 +387,7 @@ class FFmpegMediaCompiler(IMediaCompiler):
         # ─── Final Command ─────────────────────────────────────────────────
         cmd.extend(["-filter_complex", ";".join(filter_complex)])
 
-        if visual_clips:
+        if should_render_video:
             cmd.extend([
                 "-map", "[video_final]",
                 "-map", "[audio_final]",

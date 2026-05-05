@@ -561,10 +561,6 @@ async function claimAndRunNextJob() {
   }
 
   const settings = await getSettings();
-  if (!settings.projectId) {
-    updateStatus({ jobMessage: "Select a project before starting jobs" });
-    return { delayMs: IDLE_CLAIM_INTERVAL_MS };
-  }
   const provider = settings.providers.find((name) => PROVIDER_ADAPTERS[name]);
   if (!provider) {
     updateStatus({ jobMessage: "No supported provider is enabled" });
@@ -598,7 +594,9 @@ async function claimAndRunNextJob() {
   }
 
   if (!job) {
-    updateStatus({ jobMessage: "No queued jobs for selected project" });
+    updateStatus({
+      jobMessage: settings.projectId ? "No queued jobs for selected project" : "No queued jobs across projects",
+    });
     return { delayMs: Math.max(IDLE_CLAIM_INTERVAL_MS, settings.claimIntervalMs) };
   }
 
@@ -1126,8 +1124,9 @@ async function sendMetaRunJobMessage(tabId, message) {
       lastError = new Error("Meta provider adapter returned no response");
     } catch (error) {
       lastError = error;
-      const retryable = /message channel closed|receiving end does not exist|extension context invalidated/i.test(error.message || "");
+      const retryable = /message channel closed|back\/forward cache|bfcache|receiving end does not exist|extension context invalidated/i.test(error.message || "");
       if (!retryable || attempt === 3) break;
+      await chrome.tabs.reload(tabId).catch(() => {});
       await waitForTabReady(tabId).catch(() => {});
       await ensureMetaContentScript(tabId).catch(() => {});
       await sleep(1200 * attempt);
@@ -1150,4 +1149,20 @@ function sendTabMessage(tabId, message) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+bootstrapBridgeWorker().catch((error) => {
+  updateStatus({
+    connected: false,
+    status: "error",
+    message: `Bridge startup failed: ${error.message}`,
+    lastError: error.message,
+  });
+});
+
+async function bootstrapBridgeWorker() {
+  await restoreRuntimeState();
+  if (!manualDisconnect) {
+    await connect();
+  }
 }

@@ -3800,6 +3800,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           continue;
         }
 
+        if (visualLayer && need?.optional) {
+          continue;
+        }
+
         const placeholderText = visualLayer
           ? `${need?.name || layer.layerType}\n${need?.status === 'missing' ? 'Missing reusable asset' : 'Assign or generate this asset'}`
           : kineticCaptionContent(scene, layer.text || scene.summary || scene.transcript);

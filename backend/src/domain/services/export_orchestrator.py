@@ -61,9 +61,13 @@ class ExportOrchestrator:
                     shutil.copyfileobj(file.file, f)
                 file_paths[file_id] = safe_path
 
-            # Determine output format based on visuals
-            has_visuals = (not blueprint.audio_only) and any(t.type == "visual" and len(t.clips) > 0 for t in blueprint.tracks)
-            output_ext = ".mp4" if has_visuals else ".mp3"
+            # Text-only animation plans still need a video container so captions
+            # and placeholders are visible instead of exporting audio-only.
+            has_video_layers = (not blueprint.audio_only) and any(
+                t.type in {"visual", "text"} and len(t.clips) > 0
+                for t in blueprint.tracks
+            )
+            output_ext = ".mp4" if has_video_layers else ".mp3"
             output_path = os.path.join(self.output_dir, f"export_{session_id}{output_ext}")
             
             # 1. Compile Media

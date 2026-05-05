@@ -262,7 +262,7 @@ async function runMetaJob(job, options) {
   const mediaObserver = createNewMediaObserver();
   let result = null;
   try {
-    clickElement(generateButton);
+    await submitPrompt(generateButton, promptBox);
     result = await waitForGeneratedMedia(timeoutMs, mediaBefore, requestedMediaType, prompt, mediaObserver);
   } finally {
     mediaObserver.disconnect();
@@ -370,8 +370,10 @@ async function recoverGenerateButton(promptBox, prompt, requestedMediaType) {
   await sleep(600);
   await ensureRequestedMode(requestedMediaType);
   promptBox = await waitForPromptBox(8000) || promptBox;
-  await fillPrompt(promptBox, prompt, true);
-  await waitForPromptText(promptBox, prompt, 3000);
+  if (!promptTextMatches(getPromptText(promptBox), prompt)) {
+    await fillPrompt(promptBox, prompt, true);
+    await waitForPromptText(promptBox, prompt, 3000);
+  }
   promptBox.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
   promptBox.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
   await sleep(1200);
@@ -453,9 +455,17 @@ async function fillPrompt(element, prompt, forceTextContent = false) {
   }
 
   element.focus();
-  document.execCommand("selectAll", false);
-  document.execCommand("delete", false);
+  const currentText = normalizeText(getPromptText(element));
+  const nextText = normalizeText(prompt);
+  if (currentText === nextText) return;
+
+  clearEditablePrompt(element);
   await sleep(50);
+  if (!prompt) {
+    dispatchPromptInputEvents(element, "", "deleteContentBackward");
+    return;
+  }
+
   if (forceTextContent) {
     element.textContent = prompt;
   } else {
@@ -465,18 +475,131 @@ async function fillPrompt(element, prompt, forceTextContent = false) {
     selection?.removeAllRanges();
     selection?.addRange(range);
     document.execCommand("insertText", false, prompt);
+    if (!promptTextMatches(getPromptText(element), prompt)) {
+      element.textContent = prompt;
+    }
   }
-  element.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: prompt }));
-  element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
+  dispatchPromptInputEvents(element, prompt, "insertText");
   element.dispatchEvent(new Event("change", { bubbles: true }));
   element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: " " }));
   element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: " " }));
   element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: " " }));
 }
 
+function clearEditablePrompt(element) {
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  document.execCommand("selectAll", false);
+  document.execCommand("delete", false);
+  element.innerHTML = "";
+  element.textContent = "";
+  dispatchPromptInputEvents(element, "", "deleteContentBackward");
+}
+
+function dispatchPromptInputEvents(element, data, inputType) {
+  const eventInit = { bubbles: true, cancelable: true, composed: true, inputType, data };
+  element.dispatchEvent(new InputEvent("beforeinput", eventInit));
+  element.dispatchEvent(new InputEvent("input", eventInit));
+}
+
+async function submitPrompt(generateButton, promptBox) {
+  const candidates = uniqueElements([
+    generateButton,
+    findDirectSubmitButton(promptBox),
+    ...findGenerateButtonCandidates(promptBox),
+  ]).filter(Boolean);
+
+  for (const button of candidates) {
+    clickElement(button);
+    await sleep(1400);
+    if (promptSubmissionStarted(promptBox)) return true;
+  }
+
+  const form = promptBox?.closest?.("form");
+  if (form) {
+    if (typeof form.requestSubmit === "function") form.requestSubmit();
+    else form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true, composed: true }));
+    await sleep(1400);
+    if (promptSubmissionStarted(promptBox)) return true;
+  }
+
+  for (const keyInit of [
+    { key: "Enter", code: "Enter", metaKey: true },
+    { key: "Enter", code: "Enter", ctrlKey: true },
+    { key: "Enter", code: "Enter" },
+  ]) {
+    promptBox.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, ...keyInit }));
+    promptBox.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, composed: true, ...keyInit }));
+    await sleep(1400);
+    if (promptSubmissionStarted(promptBox)) return true;
+  }
+
+  return false;
+}
+
+function promptSubmissionStarted(promptBox) {
+  const textLength = getPromptText(promptBox).trim().length;
+  const enabledButton = findGenerateButton(promptBox, true);
+  const busyElement = querySelectorAllDeep("[aria-busy='true'], [role='progressbar'], [data-testid*='loading' i], [data-testid*='spinner' i]")
+    .find(isVisibleElement);
+  return textLength === 0 || Boolean(busyElement) || !enabledButton;
+}
+
+function findDirectSubmitButton(promptBox) {
+  const buttons = [...querySelectorAllDeep("button")].filter(isVisibleElement);
+  const scored = buttons
+    .map((button) => ({ button, score: directSubmitButtonScore(button, promptBox) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return scored[0]?.button || null;
+}
+
+function directSubmitButtonScore(button, promptBox) {
+  if (isDisabledControl(button)) return 0;
+  const text = normalizeText([
+    button.getAttribute("aria-label"),
+    button.getAttribute("title"),
+    button.textContent,
+  ].filter(Boolean).join(" "));
+  let score = 0;
+  if (/\bsend\b/.test(text)) score += 90;
+  if (/\bsubmit\b/.test(text)) score += 80;
+  if (/\bgenerate\b/.test(text)) score += 70;
+  if (button.querySelector("svg")) score += 8;
+  if (promptBox && isNearPromptSubmitPosition(button, promptBox)) score += 50;
+  if (/\b(create|image|video)\b/.test(text) && !/\b(send|submit|generate)\b/.test(text)) score -= 40;
+  return score;
+}
+
 function clickElement(element) {
-  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  element.scrollIntoView?.({ block: "center", inline: "center" });
+  const rect = element.getBoundingClientRect();
+  const clientX = rect.left + rect.width / 2;
+  const clientY = rect.top + rect.height / 2;
+  const eventInit = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    button: 0,
+    buttons: 1,
+    clientX,
+    clientY,
+    screenX: window.screenX + clientX,
+    screenY: window.screenY + clientY,
+  };
+  if (typeof PointerEvent !== "undefined") {
+    element.dispatchEvent(new PointerEvent("pointerdown", { ...eventInit, pointerId: 1, pointerType: "mouse", isPrimary: true }));
+  }
+  element.dispatchEvent(new MouseEvent("mousedown", eventInit));
+  if (typeof PointerEvent !== "undefined") {
+    element.dispatchEvent(new PointerEvent("pointerup", { ...eventInit, pointerId: 1, pointerType: "mouse", isPrimary: true }));
+  }
+  element.dispatchEvent(new MouseEvent("mouseup", eventInit));
+  element.dispatchEvent(new MouseEvent("click", eventInit));
   element.click();
 }
 
