@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import Field
 
+from backend.src.domain.models.content_profile import PlatformTarget
 from backend.src.domain.models.generation import ApiModel
 
 
@@ -18,11 +19,25 @@ class ProjectSummary(ApiModel):
     project_file_path: str = Field(default="", alias="projectFilePath")
     created_at: str = Field(alias="createdAt")
     updated_at: str = Field(alias="updatedAt")
+    content_profile_id: Optional[str] = Field(default=None, alias="contentProfileId")
+    target_platform: Optional[PlatformTarget] = Field(default=None, alias="targetPlatform")
+    content_goal: str = Field(default="", alias="contentGoal")
+    video_type: str = Field(default="", alias="videoType")
+    planned_title: str = Field(default="", alias="plannedTitle")
+    planned_description: str = Field(default="", alias="plannedDescription")
+    script_id: Optional[str] = Field(default=None, alias="scriptId")
 
 
 class ProjectCreateRequest(ApiModel):
     name: str = "Untitled Project"
     parent_directory: Optional[str] = Field(default=None, alias="parentDirectory")
+    content_profile_id: Optional[str] = Field(default=None, alias="contentProfileId")
+    target_platform: Optional[PlatformTarget] = Field(default=None, alias="targetPlatform")
+    content_goal: str = Field(default="", alias="contentGoal")
+    video_type: str = Field(default="", alias="videoType")
+    planned_title: str = Field(default="", alias="plannedTitle")
+    planned_description: str = Field(default="", alias="plannedDescription")
+    script_id: Optional[str] = Field(default=None, alias="scriptId")
 
 
 class ProjectLoadRequest(ApiModel):
@@ -43,6 +58,13 @@ class ProjectAssetResponse(ApiModel):
 class ProjectSaveRequest(ApiModel):
     name: Optional[str] = None
     state: Dict[str, Any] = Field(default_factory=dict)
+    content_profile_id: Optional[str] = Field(default=None, alias="contentProfileId")
+    target_platform: Optional[PlatformTarget] = Field(default=None, alias="targetPlatform")
+    content_goal: Optional[str] = Field(default=None, alias="contentGoal")
+    video_type: Optional[str] = Field(default=None, alias="videoType")
+    planned_title: Optional[str] = Field(default=None, alias="plannedTitle")
+    planned_description: Optional[str] = Field(default=None, alias="plannedDescription")
+    script_id: Optional[str] = Field(default=None, alias="scriptId")
 
 
 class ProjectDetail(ProjectSummary):

@@ -1,0 +1,104 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from backend.src.domain.models.content_profile import ContentProfileCreateRequest
+from backend.src.domain.models.content_studio import (
+    ContentIdeaCreateRequest,
+    ContentIdeaUpdateRequest,
+    ScriptCreateRequest,
+    ScriptSplitLinesRequest,
+    ScriptUpdateRequest,
+    ScriptVersionCreateRequest,
+)
+from backend.src.domain.services.content_profile_service import ContentProfileService
+from backend.src.domain.services.content_studio_service import ContentStudioService
+from backend.src.domain.services.sqlite_store import SQLiteStore
+
+
+class ContentStudioTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.store = SQLiteStore(str(self.root / "registry.db"))
+        self.profile_service = ContentProfileService(self.store)
+        self.studio_service = ContentStudioService(self.store)
+        self.profile = self.profile_service.create_profile(
+            ContentProfileCreateRequest(name="Daily AI Facts", platforms=["youtube_shorts"])
+        )
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_ideas_can_be_created_updated_and_archived(self) -> None:
+        idea = self.studio_service.create_idea(
+            self.profile.id,
+            ContentIdeaCreateRequest(
+                title="Three AI habits",
+                platform="youtube_shorts",
+                hook="Most beginners miss the third one.",
+            ),
+        )
+        updated = self.studio_service.update_idea(
+            idea.id,
+            ContentIdeaUpdateRequest(status="selected", estimatedViralScore=81),
+        )
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.status, "selected")
+        self.assertEqual(updated.estimated_viral_score, 81)
+        self.assertEqual([item.id for item in self.studio_service.list_ideas(self.profile.id)], [idea.id])
+
+        archived = self.studio_service.archive_idea(idea.id)
+        self.assertIsNotNone(archived)
+        self.assertEqual(self.studio_service.list_ideas(self.profile.id), [])
+        self.assertEqual(
+            [item.id for item in self.studio_service.list_ideas(self.profile.id, include_archived=True)],
+            [idea.id],
+        )
+
+    def test_scripts_versions_and_narration_lines_persist(self) -> None:
+        script = self.studio_service.create_script(
+            self.profile.id,
+            ScriptCreateRequest(
+                title="AI facts draft",
+                content="First line. Second line!\nThird line?",
+            ),
+        )
+        self.assertEqual(len(script.versions), 1)
+
+        versioned = self.studio_service.create_script_version(
+            script.id,
+            ScriptVersionCreateRequest(
+                label="Punchier",
+                content="Hook line. Fast middle. Strong payoff.",
+                selectAsFinal=True,
+            ),
+        )
+        self.assertIsNotNone(versioned)
+        assert versioned is not None
+        self.assertEqual(versioned.status, "final")
+        self.assertEqual(versioned.final_version_id, versioned.versions[0].id)
+
+        updated = self.studio_service.update_script(
+            script.id,
+            ScriptUpdateRequest(title="AI facts final"),
+        )
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.title, "AI facts final")
+
+        lines = self.studio_service.split_script_into_lines(script.id, ScriptSplitLinesRequest())
+        self.assertIsNotNone(lines)
+        assert lines is not None
+        self.assertEqual([line.text for line in lines], ["Hook line.", "Fast middle.", "Strong payoff."])
+
+        detail = self.studio_service.get_script_detail(script.id)
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        self.assertEqual(len(detail.versions), 2)
+        self.assertEqual([line.index for line in detail.narration_lines], [0, 1, 2])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,10 +1,14 @@
+import { useEffect } from 'react';
 import { useEditorStore } from '../../store/editorStore';
+import { useContentProfileStore } from '../../features/contentProfiles/contentProfileStore';
+import { PLATFORM_OPTIONS } from '../../features/contentProfiles/types';
 
 type NavbarProps = {
   onOpenBridgeMonitor?: () => void;
+  onOpenContentProfiles?: () => void;
 };
 
-export const Navbar = ({ onOpenBridgeMonitor }: NavbarProps) => {
+export const Navbar = ({ onOpenBridgeMonitor, onOpenContentProfiles }: NavbarProps) => {
   const {
     clips,
     isProcessing,
@@ -13,14 +17,23 @@ export const Navbar = ({ onOpenBridgeMonitor }: NavbarProps) => {
     assets,
     currentProject,
     projectName,
+    projectContentProfileId,
+    projectTargetPlatform,
     projectStatus,
     isSavingProject,
     setProjectName,
+    setProjectContentProfileId,
+    setProjectTargetPlatform,
     newProject,
     saveProject,
   } = useEditorStore();
+  const { profiles, loadProfiles } = useContentProfileStore();
   const visualAsset = assets.find(a => a.type === 'visual');
   const exportedAudioOnly = mediaUrl?.endsWith('.mp3');
+
+  useEffect(() => {
+    void loadProfiles();
+  }, [loadProfiles]);
 
   return (
     <div className="navbar">
@@ -44,6 +57,28 @@ export const Navbar = ({ onOpenBridgeMonitor }: NavbarProps) => {
           onChange={event => setProjectName(event.target.value)}
           aria-label="Project name"
         />
+        <select
+          className="project-meta-select"
+          value={projectContentProfileId ?? ''}
+          onChange={event => setProjectContentProfileId(event.target.value || null)}
+          aria-label="Content profile"
+        >
+          <option value="">No profile</option>
+          {profiles.map(profile => (
+            <option key={profile.id} value={profile.id}>{profile.name}</option>
+          ))}
+        </select>
+        <select
+          className="project-meta-select"
+          value={projectTargetPlatform ?? ''}
+          onChange={event => setProjectTargetPlatform((event.target.value || null) as typeof projectTargetPlatform)}
+          aria-label="Target platform"
+        >
+          <option value="">No platform</option>
+          {PLATFORM_OPTIONS.map(option => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
         <button className="btn-secondary" onClick={() => void saveProject()} disabled={isSavingProject}>
           {isSavingProject ? 'Saving...' : 'Save Project'}
         </button>
@@ -58,6 +93,12 @@ export const Navbar = ({ onOpenBridgeMonitor }: NavbarProps) => {
         </span>
       </div>
       <div className="nav-actions">
+        <button className="btn-secondary" onClick={() => window.open('/#content-studio', '_blank', 'noopener,noreferrer')}>
+          Content Studio
+        </button>
+        <button className="btn-secondary" onClick={onOpenContentProfiles}>
+          Content Profiles
+        </button>
         <button className="btn-secondary" onClick={onOpenBridgeMonitor}>
           Bridge Monitor
         </button>

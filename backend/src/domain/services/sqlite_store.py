@@ -13,6 +13,8 @@ from backend.src.domain.models.generation import (
     GenerationMediaVariant,
     ProviderName,
 )
+from backend.src.domain.models.content_profile import ContentProfile
+from backend.src.domain.models.content_studio import ContentIdea, NarrationLine, Script, ScriptVersion
 from backend.src.domain.models.project import ProjectDetail, ProjectSummary
 
 
@@ -87,6 +89,12 @@ class SQLiteStore:
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
+    def _project_read_only_connect(self, database_path: Path) -> sqlite3.Connection:
+        connection = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
     def _initialize_registry(self) -> None:
         with self._lock, self._registry_connect() as connection:
             connection.execute("PRAGMA journal_mode = WAL")
@@ -106,15 +114,143 @@ class SQLiteStore:
                     database_path TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    last_opened_at TEXT NOT NULL
+                    last_opened_at TEXT NOT NULL,
+                    content_profile_id TEXT,
+                    target_platform TEXT,
+                    content_goal TEXT NOT NULL DEFAULT '',
+                    video_type TEXT NOT NULL DEFAULT '',
+                    planned_title TEXT NOT NULL DEFAULT '',
+                    planned_description TEXT NOT NULL DEFAULT '',
+                    script_id TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_registry_projects_updated
                     ON registry_projects(updated_at DESC);
 
+                CREATE TABLE IF NOT EXISTS content_profiles (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    avatar_path TEXT,
+                    platforms_json TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    target_audience TEXT NOT NULL,
+                    language TEXT NOT NULL,
+                    tone TEXT NOT NULL,
+                    default_video_length_seconds INTEGER NOT NULL,
+                    voice_style TEXT NOT NULL,
+                    visual_style TEXT NOT NULL,
+                    hook_style TEXT NOT NULL,
+                    caption_style TEXT NOT NULL,
+                    brand_colors_json TEXT NOT NULL,
+                    competitors_json TEXT NOT NULL,
+                    posting_goals TEXT NOT NULL,
+                    analytics_connection_status_json TEXT NOT NULL,
+                    is_archived INTEGER NOT NULL DEFAULT 0,
+                    archived_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    profile_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_content_profiles_updated
+                    ON content_profiles(is_archived, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS content_ideas (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    topic TEXT NOT NULL DEFAULT '',
+                    platform TEXT,
+                    hook TEXT NOT NULL DEFAULT '',
+                    estimated_viral_score INTEGER,
+                    reason_it_may_work TEXT NOT NULL DEFAULT '',
+                    difficulty TEXT NOT NULL DEFAULT '',
+                    target_duration_seconds INTEGER,
+                    suggested_visual_style TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    idea_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_content_ideas_profile_updated
+                    ON content_ideas(profile_id, status, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS scripts (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL DEFAULT '',
+                    idea_id TEXT,
+                    final_version_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    script_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_scripts_profile_updated
+                    ON scripts(profile_id, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS script_versions (
+                    id TEXT PRIMARY KEY,
+                    script_id TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    is_selected INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    version_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_script_versions_script_created
+                    ON script_versions(script_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS narration_lines (
+                    id TEXT PRIMARY KEY,
+                    script_id TEXT NOT NULL,
+                    scene_id TEXT,
+                    order_index INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    voice_style TEXT,
+                    emotion TEXT,
+                    speed TEXT,
+                    pause_after_seconds REAL,
+                    audio_asset_id TEXT,
+                    duration_seconds REAL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    line_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_narration_lines_script_order
+                    ON narration_lines(script_id, order_index ASC);
+
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
                 VALUES (1, CURRENT_TIMESTAMP);
+
+                INSERT OR IGNORE INTO schema_migrations(version, applied_at)
+                VALUES (2, CURRENT_TIMESTAMP);
+
+                INSERT OR IGNORE INTO schema_migrations(version, applied_at)
+                VALUES (3, CURRENT_TIMESTAMP);
                 """
+            )
+            self._ensure_columns(
+                connection,
+                "registry_projects",
+                {
+                    "content_profile_id": "TEXT",
+                    "target_platform": "TEXT",
+                    "content_goal": "TEXT NOT NULL DEFAULT ''",
+                    "video_type": "TEXT NOT NULL DEFAULT ''",
+                    "planned_title": "TEXT NOT NULL DEFAULT ''",
+                    "planned_description": "TEXT NOT NULL DEFAULT ''",
+                    "script_id": "TEXT",
+                },
             )
 
     def _initialize_project_database(self, connection: sqlite3.Connection) -> None:
@@ -133,7 +269,14 @@ class SQLiteStore:
                 generated_media_path TEXT NOT NULL,
                 project_file_path TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                content_profile_id TEXT,
+                target_platform TEXT,
+                content_goal TEXT NOT NULL DEFAULT '',
+                video_type TEXT NOT NULL DEFAULT '',
+                planned_title TEXT NOT NULL DEFAULT '',
+                planned_description TEXT NOT NULL DEFAULT '',
+                script_id TEXT
             );
 
             CREATE TABLE IF NOT EXISTS project_settings (
@@ -341,6 +484,19 @@ class SQLiteStore:
             VALUES (1, CURRENT_TIMESTAMP);
             """
         )
+        self._ensure_columns(
+            connection,
+            "projects",
+            {
+                "content_profile_id": "TEXT",
+                "target_platform": "TEXT",
+                "content_goal": "TEXT NOT NULL DEFAULT ''",
+                "video_type": "TEXT NOT NULL DEFAULT ''",
+                "planned_title": "TEXT NOT NULL DEFAULT ''",
+                "planned_description": "TEXT NOT NULL DEFAULT ''",
+                "script_id": "TEXT",
+            },
+        )
 
     def upsert_project(self, project: ProjectDetail) -> None:
         database_path = Path(project.folder_path) / PROJECT_DATABASE_NAME
@@ -353,6 +509,324 @@ class SQLiteStore:
                 self._save_state_to_project_db(project_connection, project)
             self._upsert_registry_project(project, database_path)
 
+    def upsert_content_profile(self, profile: ContentProfile) -> None:
+        payload = profile.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO content_profiles (
+                    id, name, description, avatar_path, platforms_json, content_type,
+                    target_audience, language, tone, default_video_length_seconds,
+                    voice_style, visual_style, hook_style, caption_style,
+                    brand_colors_json, competitors_json, posting_goals,
+                    analytics_connection_status_json, is_archived, archived_at,
+                    created_at, updated_at, profile_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    description = excluded.description,
+                    avatar_path = excluded.avatar_path,
+                    platforms_json = excluded.platforms_json,
+                    content_type = excluded.content_type,
+                    target_audience = excluded.target_audience,
+                    language = excluded.language,
+                    tone = excluded.tone,
+                    default_video_length_seconds = excluded.default_video_length_seconds,
+                    voice_style = excluded.voice_style,
+                    visual_style = excluded.visual_style,
+                    hook_style = excluded.hook_style,
+                    caption_style = excluded.caption_style,
+                    brand_colors_json = excluded.brand_colors_json,
+                    competitors_json = excluded.competitors_json,
+                    posting_goals = excluded.posting_goals,
+                    analytics_connection_status_json = excluded.analytics_connection_status_json,
+                    is_archived = excluded.is_archived,
+                    archived_at = excluded.archived_at,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    profile_json = excluded.profile_json
+                """,
+                (
+                    profile.id,
+                    profile.name,
+                    profile.description,
+                    profile.avatar_path,
+                    _json_dumps(profile.platforms),
+                    profile.content_type,
+                    profile.target_audience,
+                    profile.language,
+                    profile.tone,
+                    profile.default_video_length_seconds,
+                    profile.voice_style,
+                    profile.visual_style,
+                    profile.hook_style,
+                    profile.caption_style,
+                    _json_dumps(profile.brand_colors),
+                    _json_dumps(profile.competitors),
+                    profile.posting_goals,
+                    _json_dumps(profile.analytics_connection_status),
+                    int(profile.is_archived),
+                    profile.archived_at,
+                    profile.created_at,
+                    profile.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_content_profile(self, profile_id: str) -> Optional[ContentProfile]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM content_profiles WHERE id = ?",
+                (profile_id,),
+            ).fetchone()
+        return self._content_profile_from_row(row) if row else None
+
+    def list_content_profiles(self, include_archived: bool = False) -> List[ContentProfile]:
+        query = "SELECT * FROM content_profiles"
+        params: tuple[Any, ...] = ()
+        if not include_archived:
+            query += " WHERE is_archived = ?"
+            params = (0,)
+        query += " ORDER BY updated_at DESC, created_at DESC"
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [profile for row in rows if (profile := self._content_profile_from_row(row))]
+
+    def upsert_content_idea(self, idea: ContentIdea) -> None:
+        payload = idea.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO content_ideas (
+                    id, profile_id, title, topic, platform, hook, estimated_viral_score,
+                    reason_it_may_work, difficulty, target_duration_seconds,
+                    suggested_visual_style, status, created_at, updated_at, idea_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    title = excluded.title,
+                    topic = excluded.topic,
+                    platform = excluded.platform,
+                    hook = excluded.hook,
+                    estimated_viral_score = excluded.estimated_viral_score,
+                    reason_it_may_work = excluded.reason_it_may_work,
+                    difficulty = excluded.difficulty,
+                    target_duration_seconds = excluded.target_duration_seconds,
+                    suggested_visual_style = excluded.suggested_visual_style,
+                    status = excluded.status,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    idea_json = excluded.idea_json
+                """,
+                (
+                    idea.id,
+                    idea.profile_id,
+                    idea.title,
+                    idea.topic,
+                    idea.platform,
+                    idea.hook,
+                    idea.estimated_viral_score,
+                    idea.reason_it_may_work,
+                    idea.difficulty,
+                    idea.target_duration_seconds,
+                    idea.suggested_visual_style,
+                    idea.status,
+                    idea.created_at,
+                    idea.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_content_idea(self, idea_id: str) -> Optional[ContentIdea]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute("SELECT idea_json FROM content_ideas WHERE id = ?", (idea_id,)).fetchone()
+        return self._content_idea_from_json(row["idea_json"]) if row else None
+
+    def list_content_ideas(self, profile_id: str, include_archived: bool = False) -> List[ContentIdea]:
+        query = "SELECT idea_json FROM content_ideas WHERE profile_id = ?"
+        params: list[Any] = [profile_id]
+        if not include_archived:
+            query += " AND status <> ?"
+            params.append("archived")
+        query += " ORDER BY updated_at DESC, created_at DESC"
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [idea for row in rows if (idea := self._content_idea_from_json(row["idea_json"]))]
+
+    def upsert_script(self, script: Script) -> None:
+        payload = script.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO scripts (
+                    id, profile_id, title, content, idea_id, final_version_id,
+                    status, created_at, updated_at, script_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    title = excluded.title,
+                    content = excluded.content,
+                    idea_id = excluded.idea_id,
+                    final_version_id = excluded.final_version_id,
+                    status = excluded.status,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    script_json = excluded.script_json
+                """,
+                (
+                    script.id,
+                    script.profile_id,
+                    script.title,
+                    script.content,
+                    script.idea_id,
+                    script.final_version_id,
+                    script.status,
+                    script.created_at,
+                    script.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_script(self, script_id: str) -> Optional[Script]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute("SELECT script_json FROM scripts WHERE id = ?", (script_id,)).fetchone()
+        return self._script_from_json(row["script_json"]) if row else None
+
+    def list_scripts(self, profile_id: str) -> List[Script]:
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT script_json FROM scripts
+                WHERE profile_id = ? AND status <> ?
+                ORDER BY updated_at DESC, created_at DESC
+                """,
+                (profile_id, "archived"),
+            ).fetchall()
+        return [script for row in rows if (script := self._script_from_json(row["script_json"]))]
+
+    def upsert_script_version(self, version: ScriptVersion) -> None:
+        payload = version.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO script_versions (
+                    id, script_id, label, content, is_selected, created_at, updated_at, version_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    script_id = excluded.script_id,
+                    label = excluded.label,
+                    content = excluded.content,
+                    is_selected = excluded.is_selected,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    version_json = excluded.version_json
+                """,
+                (
+                    version.id,
+                    version.script_id,
+                    version.label,
+                    version.content,
+                    int(version.is_selected),
+                    version.created_at,
+                    version.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def list_script_versions(self, script_id: str) -> List[ScriptVersion]:
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT version_json FROM script_versions
+                WHERE script_id = ?
+                ORDER BY created_at DESC, updated_at DESC
+                """,
+                (script_id,),
+            ).fetchall()
+        return [version for row in rows if (version := self._script_version_from_json(row["version_json"]))]
+
+    def mark_selected_script_version(self, script_id: str, selected_version_id: Optional[str]) -> None:
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(
+                "SELECT version_json FROM script_versions WHERE script_id = ?",
+                (script_id,),
+            ).fetchall()
+            for row in rows:
+                version = self._script_version_from_json(row["version_json"])
+                if not version:
+                    continue
+                next_selected = bool(selected_version_id and version.id == selected_version_id)
+                if version.is_selected == next_selected:
+                    continue
+                updated = version.model_copy(
+                    update={
+                        "is_selected": next_selected,
+                        "updated_at": _utc_now_iso(),
+                    }
+                )
+                connection.execute(
+                    """
+                    UPDATE script_versions
+                    SET is_selected = ?, updated_at = ?, version_json = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        int(updated.is_selected),
+                        updated.updated_at,
+                        _json_dumps(updated.model_dump(by_alias=True)),
+                        updated.id,
+                    ),
+                )
+
+    def replace_narration_lines(self, script_id: str, lines: List[NarrationLine]) -> None:
+        with self._lock, self._registry_connect() as connection:
+            connection.execute("DELETE FROM narration_lines WHERE script_id = ?", (script_id,))
+            for line in lines:
+                connection.execute(
+                    """
+                    INSERT INTO narration_lines (
+                        id, script_id, scene_id, order_index, text, voice_style, emotion,
+                        speed, pause_after_seconds, audio_asset_id, duration_seconds,
+                        status, error, created_at, updated_at, line_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        line.id,
+                        line.script_id,
+                        line.scene_id,
+                        line.index,
+                        line.text,
+                        line.voice_style,
+                        line.emotion,
+                        line.speed,
+                        line.pause_after_seconds,
+                        line.audio_asset_id,
+                        line.duration_seconds,
+                        line.status,
+                        line.error,
+                        line.created_at,
+                        line.updated_at,
+                        _json_dumps(line.model_dump(by_alias=True)),
+                    ),
+                )
+
+    def list_narration_lines(self, script_id: str) -> List[NarrationLine]:
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT line_json FROM narration_lines
+                WHERE script_id = ?
+                ORDER BY order_index ASC
+                """,
+                (script_id,),
+            ).fetchall()
+        return [line for row in rows if (line := self._narration_line_from_json(row["line_json"]))]
+
     def get_project(self, project_id: str) -> Optional[ProjectDetail]:
         row = self._registry_project_row(project_id)
         if not row:
@@ -360,28 +834,38 @@ class SQLiteStore:
         database_path = Path(row["database_path"])
         if not database_path.exists():
             return self._project_from_registry_row(row)
-        with self._lock, self._project_connect(database_path) as connection:
-            self._initialize_project_database(connection)
-            project_row = connection.execute(
-                "SELECT * FROM projects WHERE id = ?",
-                (project_id,),
-            ).fetchone()
-            if not project_row:
-                return self._project_from_registry_row(row)
-            return self._project_from_project_db_row(connection, project_row)
+        try:
+            with self._lock, self._project_connect(database_path) as connection:
+                self._initialize_project_database(connection)
+                project_row = connection.execute(
+                    "SELECT * FROM projects WHERE id = ?",
+                    (project_id,),
+                ).fetchone()
+                if not project_row:
+                    return self._project_from_registry_row(row)
+                return self._project_from_project_db_row(connection, project_row)
+        except sqlite3.OperationalError:
+            project = self._read_project_database_read_only(database_path, project_id=project_id)
+            return project or self._project_from_registry_row(row)
 
     def get_project_from_database_path(self, database_path: Path) -> Optional[ProjectDetail]:
         if database_path.is_dir():
             database_path = database_path / PROJECT_DATABASE_NAME
         if not database_path.exists():
             return None
-        with self._lock, self._project_connect(database_path) as connection:
-            self._initialize_project_database(connection)
-            row = connection.execute("SELECT * FROM projects LIMIT 1").fetchone()
-            if not row:
-                return None
-            project = self._project_from_project_db_row(connection, row)
-            self._upsert_registry_project(project, database_path)
+        try:
+            with self._lock, self._project_connect(database_path) as connection:
+                self._initialize_project_database(connection)
+                row = connection.execute("SELECT * FROM projects LIMIT 1").fetchone()
+                if not row:
+                    return None
+                project = self._project_from_project_db_row(connection, row)
+                self._upsert_registry_project(project, database_path)
+                return project
+        except sqlite3.OperationalError:
+            project = self._read_project_database_read_only(database_path)
+            if project:
+                self._upsert_registry_project(project, database_path)
             return project
 
     def list_projects(self) -> List[ProjectDetail]:
@@ -419,11 +903,14 @@ class SQLiteStore:
                 database_path = self._project_database_path_for_id(project_id)
                 if not database_path:
                     continue
-                with self._project_connect(database_path) as connection:
-                    self._initialize_project_database(connection)
-                    self._set_paused_batches(connection, paused_by_project.get(project_id, set()))
-                    for sort_order, job in indexed_jobs:
-                        self._upsert_generation_job_row(connection, job, sort_order)
+                try:
+                    with self._project_connect(database_path) as connection:
+                        self._initialize_project_database(connection)
+                        self._set_paused_batches(connection, paused_by_project.get(project_id, set()))
+                        for sort_order, job in indexed_jobs:
+                            self._upsert_generation_job_row(connection, job, sort_order)
+                except sqlite3.OperationalError:
+                    continue
 
     def load_generation_state(self) -> Tuple[List[GenerationJob], List[str], set[str]]:
         jobs: List[GenerationJob] = []
@@ -434,13 +921,16 @@ class SQLiteStore:
                 database_path = self._project_database_path_for_id(project.id)
                 if not database_path or not database_path.exists():
                     continue
-                with self._project_connect(database_path) as connection:
-                    self._initialize_project_database(connection)
-                    for job in self._load_jobs_from_connection(connection):
-                        jobs.append(job)
-                        order.append(job.id)
-                    for row in connection.execute("SELECT id FROM generation_batches WHERE paused = 1").fetchall():
-                        paused.add(self._batch_key(row["id"], project.id))
+                try:
+                    with self._project_connect(database_path) as connection:
+                        self._initialize_project_database(connection)
+                        for job in self._load_jobs_from_connection(connection):
+                            jobs.append(job)
+                            order.append(job.id)
+                        for row in connection.execute("SELECT id FROM generation_batches WHERE paused = 1").fetchall():
+                            paused.add(self._batch_key(row["id"], project.id))
+                except sqlite3.OperationalError:
+                    continue
         return jobs, order, paused
 
     def claim_next_generation_job(
@@ -455,51 +945,54 @@ class SQLiteStore:
                 database_path = self._project_database_path_for_id(current_project_id)
                 if not database_path:
                     continue
-                with self._project_connect(database_path) as connection:
-                    self._initialize_project_database(connection)
-                    self._recover_stale_running_jobs(connection, provider)
-                    params: list[Any] = ["queued"]
-                    where = ["status = ?", "batch_id NOT IN (SELECT id FROM generation_batches WHERE paused = 1)"]
-                    if provider:
-                        where.append("provider = ?")
-                        params.append(provider)
-                    rows = connection.execute(
-                        f"""
-                        SELECT job_json FROM generation_jobs
-                        WHERE {" AND ".join(where)}
-                        ORDER BY sort_order ASC, created_at ASC
-                        LIMIT 50
-                        """,
-                        params,
-                    ).fetchall()
-                    if not rows:
-                        continue
-                    job = None
-                    for row in rows:
-                        candidate = self._job_from_json(row["job_json"])
-                        if not candidate:
+                try:
+                    with self._project_connect(database_path) as connection:
+                        self._initialize_project_database(connection)
+                        self._recover_stale_running_jobs(connection, provider)
+                        params: list[Any] = ["queued"]
+                        where = ["status = ?", "batch_id NOT IN (SELECT id FROM generation_batches WHERE paused = 1)"]
+                        if provider:
+                            where.append("provider = ?")
+                            params.append(provider)
+                        rows = connection.execute(
+                            f"""
+                            SELECT job_json FROM generation_jobs
+                            WHERE {" AND ".join(where)}
+                            ORDER BY sort_order ASC, created_at ASC
+                            LIMIT 50
+                            """,
+                            params,
+                        ).fetchall()
+                        if not rows:
                             continue
-                        assigned_worker_id = candidate.metadata.get("assignedWorkerId")
-                        if assigned_worker_id and assigned_worker_id != worker_id:
+                        job = None
+                        for row in rows:
+                            candidate = self._job_from_json(row["job_json"])
+                            if not candidate:
+                                continue
+                            assigned_worker_id = candidate.metadata.get("assignedWorkerId")
+                            if assigned_worker_id and assigned_worker_id != worker_id:
+                                continue
+                            job = candidate
+                            break
+                        if not job:
                             continue
-                        job = candidate
-                        break
-                    if not job:
-                        continue
-                    metadata = dict(job.metadata)
-                    run_attempt = self._metadata_int(metadata.get("runAttempt"), 0) + 1
-                    claimed_at = _utc_now()
-                    metadata["runAttempt"] = str(run_attempt)
-                    metadata["claimedAt"] = claimed_at.isoformat()
-                    metadata["claimExpiresAt"] = (
-                        claimed_at + timedelta(seconds=RUNNING_JOB_TIMEOUT_SECONDS)
-                    ).isoformat()
-                    if worker_id:
-                        metadata["workerId"] = worker_id
-                    claimed_job = job.model_copy(update={"status": "running", "metadata": metadata})
-                    sort_order = self._job_sort_order(connection, claimed_job.id)
-                    self._upsert_generation_job_row(connection, claimed_job, sort_order)
-                    return claimed_job
+                        metadata = dict(job.metadata)
+                        run_attempt = self._metadata_int(metadata.get("runAttempt"), 0) + 1
+                        claimed_at = _utc_now()
+                        metadata["runAttempt"] = str(run_attempt)
+                        metadata["claimedAt"] = claimed_at.isoformat()
+                        metadata["claimExpiresAt"] = (
+                            claimed_at + timedelta(seconds=RUNNING_JOB_TIMEOUT_SECONDS)
+                        ).isoformat()
+                        if worker_id:
+                            metadata["workerId"] = worker_id
+                        claimed_job = job.model_copy(update={"status": "running", "metadata": metadata})
+                        sort_order = self._job_sort_order(connection, claimed_job.id)
+                        self._upsert_generation_job_row(connection, claimed_job, sort_order)
+                        return claimed_job
+                except sqlite3.OperationalError:
+                    continue
         return None
 
     def upsert_generation_job(self, job: GenerationJob, sort_order: int = 0) -> None:
@@ -508,9 +1001,12 @@ class SQLiteStore:
         database_path = self._project_database_path_for_id(job.project_id)
         if not database_path:
             return
-        with self._lock, self._project_connect(database_path) as connection:
-            self._initialize_project_database(connection)
-            self._upsert_generation_job_row(connection, job, sort_order)
+        try:
+            with self._lock, self._project_connect(database_path) as connection:
+                self._initialize_project_database(connection)
+                self._upsert_generation_job_row(connection, job, sort_order)
+        except sqlite3.OperationalError:
+            return
 
     def clear_generation_jobs(
         self,
@@ -532,40 +1028,59 @@ class SQLiteStore:
                 database_path = self._project_database_path_for_id(current_project_id)
                 if not database_path or not database_path.exists():
                     continue
-                with self._project_connect(database_path) as connection:
-                    self._initialize_project_database(connection)
-                    placeholders = ",".join("?" for _ in status_values)
-                    params: list[Any] = [*status_values]
-                    where = [f"status IN ({placeholders})"]
-                    if provider:
-                        where.append("provider = ?")
-                        params.append(provider)
-                    if worker_id:
-                        where.append("worker_id = ?")
-                        params.append(worker_id)
-                    if media_type:
-                        where.append("media_type = ?")
-                        params.append(media_type)
-                    rows = connection.execute(
-                        f"SELECT id, job_json FROM generation_jobs WHERE {' AND '.join(where)}",
-                        params,
-                    ).fetchall()
-                    removed_ids = {
-                        row["id"]
-                        for row in rows
-                        if not flow or self._job_json_matches_flow(row["job_json"], flow)
-                    }
-                    if not removed_ids:
-                        continue
-                    delete_placeholders = ",".join("?" for _ in removed_ids)
-                    result = connection.execute(
-                        f"DELETE FROM generation_jobs WHERE id IN ({delete_placeholders})",
-                        list(removed_ids),
-                    )
-                    deleted += result.rowcount if result.rowcount is not None else 0
-                    if removed_ids:
-                        self._remove_generation_jobs_from_project_file(connection, removed_ids)
+                try:
+                    with self._project_connect(database_path) as connection:
+                        self._initialize_project_database(connection)
+                        placeholders = ",".join("?" for _ in status_values)
+                        params: list[Any] = [*status_values]
+                        where = [f"status IN ({placeholders})"]
+                        if provider:
+                            where.append("provider = ?")
+                            params.append(provider)
+                        if worker_id:
+                            where.append("worker_id = ?")
+                            params.append(worker_id)
+                        if media_type:
+                            where.append("media_type = ?")
+                            params.append(media_type)
+                        rows = connection.execute(
+                            f"SELECT id, job_json FROM generation_jobs WHERE {' AND '.join(where)}",
+                            params,
+                        ).fetchall()
+                        removed_ids = {
+                            row["id"]
+                            for row in rows
+                            if not flow or self._job_json_matches_flow(row["job_json"], flow)
+                        }
+                        if not removed_ids:
+                            continue
+                        delete_placeholders = ",".join("?" for _ in removed_ids)
+                        result = connection.execute(
+                            f"DELETE FROM generation_jobs WHERE id IN ({delete_placeholders})",
+                            list(removed_ids),
+                        )
+                        deleted += result.rowcount if result.rowcount is not None else 0
+                        if removed_ids:
+                            self._remove_generation_jobs_from_project_file(connection, removed_ids)
+                except sqlite3.OperationalError:
+                    continue
         return deleted
+
+    def _read_project_database_read_only(
+        self,
+        database_path: Path,
+        project_id: Optional[str] = None,
+    ) -> Optional[ProjectDetail]:
+        try:
+            with self._lock, self._project_read_only_connect(database_path) as connection:
+                query = "SELECT * FROM projects WHERE id = ?" if project_id else "SELECT * FROM projects LIMIT 1"
+                params = (project_id,) if project_id else ()
+                row = connection.execute(query, params).fetchone()
+                if not row:
+                    return None
+                return self._project_from_project_db_row(connection, row)
+        except sqlite3.OperationalError:
+            return None
 
     def _job_json_matches_flow(self, job_json: str, flow: str) -> bool:
         job = self._job_from_json(job_json)
@@ -641,9 +1156,11 @@ class SQLiteStore:
                 """
                 INSERT INTO registry_projects (
                     id, name, folder_path, generated_media_path, project_file_path,
-                    database_path, created_at, updated_at, last_opened_at
+                    database_path, created_at, updated_at, last_opened_at,
+                    content_profile_id, target_platform, content_goal, video_type,
+                    planned_title, planned_description, script_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     folder_path = excluded.folder_path,
@@ -652,7 +1169,14 @@ class SQLiteStore:
                     database_path = excluded.database_path,
                     created_at = excluded.created_at,
                     updated_at = excluded.updated_at,
-                    last_opened_at = excluded.last_opened_at
+                    last_opened_at = excluded.last_opened_at,
+                    content_profile_id = excluded.content_profile_id,
+                    target_platform = excluded.target_platform,
+                    content_goal = excluded.content_goal,
+                    video_type = excluded.video_type,
+                    planned_title = excluded.planned_title,
+                    planned_description = excluded.planned_description,
+                    script_id = excluded.script_id
                 """,
                 (
                     project.id,
@@ -664,6 +1188,13 @@ class SQLiteStore:
                     project.created_at,
                     project.updated_at,
                     _utc_now_iso(),
+                    project.content_profile_id,
+                    project.target_platform,
+                    project.content_goal,
+                    project.video_type,
+                    project.planned_title,
+                    project.planned_description,
+                    project.script_id,
                 ),
             )
 
@@ -672,16 +1203,24 @@ class SQLiteStore:
             """
             INSERT INTO projects (
                 id, name, folder_path, generated_media_path, project_file_path,
-                created_at, updated_at
+                created_at, updated_at, content_profile_id, target_platform,
+                content_goal, video_type, planned_title, planned_description, script_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 folder_path = excluded.folder_path,
                 generated_media_path = excluded.generated_media_path,
                 project_file_path = excluded.project_file_path,
                 created_at = excluded.created_at,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                content_profile_id = excluded.content_profile_id,
+                target_platform = excluded.target_platform,
+                content_goal = excluded.content_goal,
+                video_type = excluded.video_type,
+                planned_title = excluded.planned_title,
+                planned_description = excluded.planned_description,
+                script_id = excluded.script_id
             """,
             (
                 project.id,
@@ -691,6 +1230,13 @@ class SQLiteStore:
                 project.project_file_path,
                 project.created_at,
                 project.updated_at,
+                project.content_profile_id,
+                project.target_platform,
+                project.content_goal,
+                project.video_type,
+                project.planned_title,
+                project.planned_description,
+                project.script_id,
             ),
         )
 
@@ -1107,6 +1653,13 @@ class SQLiteStore:
             projectFilePath=row["project_file_path"],
             createdAt=row["created_at"],
             updatedAt=row["updated_at"],
+            contentProfileId=row["content_profile_id"] if "content_profile_id" in row.keys() else None,
+            targetPlatform=row["target_platform"] if "target_platform" in row.keys() else None,
+            contentGoal=row["content_goal"] if "content_goal" in row.keys() else "",
+            videoType=row["video_type"] if "video_type" in row.keys() else "",
+            plannedTitle=row["planned_title"] if "planned_title" in row.keys() else "",
+            plannedDescription=row["planned_description"] if "planned_description" in row.keys() else "",
+            scriptId=row["script_id"] if "script_id" in row.keys() else None,
             state=state,
         )
 
@@ -1137,6 +1690,13 @@ class SQLiteStore:
                 "projectFilePath": project_row["project_file_path"],
                 "createdAt": project_row["created_at"],
                 "updatedAt": project_row["updated_at"],
+                "contentProfileId": project_row["content_profile_id"] if "content_profile_id" in project_row.keys() else None,
+                "targetPlatform": project_row["target_platform"] if "target_platform" in project_row.keys() else None,
+                "contentGoal": project_row["content_goal"] if "content_goal" in project_row.keys() else "",
+                "videoType": project_row["video_type"] if "video_type" in project_row.keys() else "",
+                "plannedTitle": project_row["planned_title"] if "planned_title" in project_row.keys() else "",
+                "plannedDescription": project_row["planned_description"] if "planned_description" in project_row.keys() else "",
+                "scriptId": project_row["script_id"] if "script_id" in project_row.keys() else None,
             },
             "assets": self._load_json_rows(connection, "media_assets", "asset_json", "id ASC"),
             "tracks": self._load_json_rows(connection, "timeline_tracks", "track_json", "order_index ASC"),
@@ -1301,6 +1861,80 @@ class SQLiteStore:
                 (project_id,),
             ).fetchone()
 
+    def _content_profile_from_row(self, row: sqlite3.Row) -> Optional[ContentProfile]:
+        payload = _json_loads(row["profile_json"], {})
+        if isinstance(payload, dict):
+            try:
+                return ContentProfile(**payload)
+            except ValueError:
+                pass
+        try:
+            return ContentProfile(
+                id=row["id"],
+                name=row["name"],
+                description=row["description"],
+                avatarPath=row["avatar_path"],
+                platforms=_json_loads(row["platforms_json"], ["youtube_shorts"]),
+                contentType=row["content_type"],
+                targetAudience=row["target_audience"],
+                language=row["language"],
+                tone=row["tone"],
+                defaultVideoLengthSeconds=row["default_video_length_seconds"],
+                voiceStyle=row["voice_style"],
+                visualStyle=row["visual_style"],
+                hookStyle=row["hook_style"],
+                captionStyle=row["caption_style"],
+                brandColors=_json_loads(row["brand_colors_json"], []),
+                competitors=_json_loads(row["competitors_json"], []),
+                postingGoals=row["posting_goals"],
+                analyticsConnectionStatus=_json_loads(row["analytics_connection_status_json"], {}),
+                isArchived=bool(row["is_archived"]),
+                archivedAt=row["archived_at"],
+                createdAt=row["created_at"],
+                updatedAt=row["updated_at"],
+            )
+        except ValueError:
+            return None
+
+    def _content_idea_from_json(self, raw: str) -> Optional[ContentIdea]:
+        try:
+            return ContentIdea(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _script_from_json(self, raw: str) -> Optional[Script]:
+        try:
+            return Script(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _script_version_from_json(self, raw: str) -> Optional[ScriptVersion]:
+        try:
+            return ScriptVersion(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _narration_line_from_json(self, raw: str) -> Optional[NarrationLine]:
+        try:
+            return NarrationLine(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _ensure_columns(
+        self,
+        connection: sqlite3.Connection,
+        table_name: str,
+        columns: Dict[str, str],
+    ) -> None:
+        existing = {
+            row["name"]
+            for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        for column_name, definition in columns.items():
+            if column_name in existing:
+                continue
+            connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
     def _project_database_path_for_id(self, project_id: str) -> Optional[Path]:
         row = self._registry_project_row(project_id)
         if not row:
@@ -1316,6 +1950,13 @@ class SQLiteStore:
             projectFilePath=row["project_file_path"],
             createdAt=row["created_at"],
             updatedAt=row["updated_at"],
+            contentProfileId=row["content_profile_id"] if "content_profile_id" in row.keys() else None,
+            targetPlatform=row["target_platform"] if "target_platform" in row.keys() else None,
+            contentGoal=row["content_goal"] if "content_goal" in row.keys() else "",
+            videoType=row["video_type"] if "video_type" in row.keys() else "",
+            plannedTitle=row["planned_title"] if "planned_title" in row.keys() else "",
+            plannedDescription=row["planned_description"] if "planned_description" in row.keys() else "",
+            scriptId=row["script_id"] if "script_id" in row.keys() else None,
             state={},
         )
 

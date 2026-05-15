@@ -10,6 +10,7 @@ import { BrowserBridgeMonitor } from './BrowserBridgeMonitor';
 import { TimelinePanel } from '../timeline/TimelinePanel';
 import { ExportModal } from './ExportModal';
 import { useEditorStore } from '../../store/editorStore';
+import { ContentProfilesPanel } from '../../features/contentProfiles/ContentProfilesPanel';
 
 export const EditorLayout = () => {
   const { 
@@ -26,6 +27,7 @@ export const EditorLayout = () => {
   } = useEditorStore();
   const currentProject = useEditorStore(state => state.currentProject);
   const [showBridgeMonitor, setShowBridgeMonitor] = React.useState(false);
+  const [showContentProfiles, setShowContentProfiles] = React.useState(false);
   
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -114,10 +116,14 @@ export const EditorLayout = () => {
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       {showExportModal && <ExportModal />}
       <div className="editor-layout">
+        {showContentProfiles && <ContentProfilesPanel onClose={() => setShowContentProfiles(false)} />}
         {showBridgeMonitor && <BrowserBridgeMonitor onClose={() => setShowBridgeMonitor(false)} />}
         {currentProject ? (
           <>
-            <Navbar onOpenBridgeMonitor={() => setShowBridgeMonitor(true)} />
+            <Navbar
+              onOpenBridgeMonitor={() => setShowBridgeMonitor(true)}
+              onOpenContentProfiles={() => setShowContentProfiles(true)}
+            />
             <div className="workspace">
               <MediaPool />
               <PreviewWindow />
@@ -126,7 +132,7 @@ export const EditorLayout = () => {
             <TimelinePanel />
           </>
         ) : (
-          <ProjectGate />
+          <ProjectGate onOpenContentProfiles={() => setShowContentProfiles(true)} />
         )}
       </div>
     </DndContext>

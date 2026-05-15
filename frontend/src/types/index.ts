@@ -1,5 +1,14 @@
 export type MediaType = 'audio' | 'visual' | 'text';
 
+export type PlatformTarget =
+  | 'youtube'
+  | 'youtube_shorts'
+  | 'facebook_page'
+  | 'facebook_reels'
+  | 'tiktok'
+  | 'instagram_reels'
+  | 'multi_platform';
+
 export type MediaAsset = {
   id: string;
   file: File;
@@ -487,6 +496,13 @@ export type ProjectSummary = {
   projectFilePath: string;
   createdAt: string;
   updatedAt: string;
+  contentProfileId: string | null;
+  targetPlatform: PlatformTarget | null;
+  contentGoal: string;
+  videoType: string;
+  plannedTitle: string;
+  plannedDescription: string;
+  scriptId: string | null;
 };
 
 export type ProjectDetail = ProjectSummary & {

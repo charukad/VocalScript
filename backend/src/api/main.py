@@ -16,6 +16,8 @@ from backend.src.infrastructure.faster_whisper_service import FasterWhisperServi
 from backend.src.infrastructure.local_llm_service import LocalLLMService
 from backend.src.domain.services.export_orchestrator import ExportOrchestrator, generate_srt
 from backend.src.domain.services.browser_bridge_service import BrowserBridgeService
+from backend.src.domain.services.content_profile_service import ContentProfileService
+from backend.src.domain.services.content_studio_service import ContentStudioService
 from backend.src.domain.services.animation_planner_service import AnimationPlannerService
 from backend.src.domain.services.generation_queue_service import GenerationQueueService
 from backend.src.domain.services.project_service import ProjectService
@@ -23,6 +25,8 @@ from backend.src.domain.services.sqlite_store import SQLiteStore
 from backend.src.domain.services.storyboard_service import StoryboardService
 from backend.src.api.animation import build_animation_router
 from backend.src.api.browser_bridge import build_browser_bridge_router
+from backend.src.api.content_profiles import build_content_profiles_router
+from backend.src.api.content_studio import build_content_studio_router
 from backend.src.api.generation import build_generation_router
 from backend.src.api.projects import build_projects_router
 from backend.src.config import settings
@@ -50,6 +54,8 @@ registry_database_path = settings.projects.database_path or str(Path(settings.pr
 legacy_database_path = str(Path(settings.projects.projects_dir) / "neuralscribe.db")
 sqlite_store = SQLiteStore(registry_database_path, legacy_database_path=legacy_database_path)
 project_service = ProjectService(settings.projects.projects_dir, store=sqlite_store)
+content_profile_service = ContentProfileService(sqlite_store)
+content_studio_service = ContentStudioService(sqlite_store)
 generation_queue_service = GenerationQueueService(
     settings.browser_bridge.generated_media_dir,
     projects_dir=settings.projects.projects_dir,
@@ -59,6 +65,8 @@ browser_bridge_service = BrowserBridgeService(str(Path(settings.projects.project
 app.include_router(build_generation_router(storyboard_service, whisper_engine, generation_queue_service, browser_bridge_service))
 app.include_router(build_animation_router(animation_planner_service, whisper_engine, generation_queue_service))
 app.include_router(build_projects_router(project_service))
+app.include_router(build_content_profiles_router(content_profile_service))
+app.include_router(build_content_studio_router(content_profile_service, content_studio_service))
 app.include_router(build_browser_bridge_router(browser_bridge_service, settings.browser_bridge.session_token))
 
 def _format_vtt_timestamp(seconds: float) -> str:

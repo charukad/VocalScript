@@ -1,6 +1,7 @@
 import json
 import re
 import shutil
+import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any, BinaryIO, Dict, List, Optional
@@ -18,7 +19,18 @@ class ProjectService:
         if self.store:
             self._bootstrap_database_from_project_files()
 
-    def create_project(self, name: str, parent_directory: Optional[str] = None) -> ProjectDetail:
+    def create_project(
+        self,
+        name: str,
+        parent_directory: Optional[str] = None,
+        content_profile_id: Optional[str] = None,
+        target_platform: Optional[str] = None,
+        content_goal: str = "",
+        video_type: str = "",
+        planned_title: str = "",
+        planned_description: str = "",
+        script_id: Optional[str] = None,
+    ) -> ProjectDetail:
         project_id = f"project-{uuid.uuid4().hex[:12]}"
         now = utc_now_iso()
         project_dir = self._new_project_dir(project_id, name, parent_directory)
@@ -30,6 +42,13 @@ class ProjectService:
             projectFilePath=str(project_dir / "project.json"),
             createdAt=now,
             updatedAt=now,
+            contentProfileId=content_profile_id,
+            targetPlatform=target_platform,
+            contentGoal=content_goal,
+            videoType=video_type,
+            plannedTitle=planned_title,
+            plannedDescription=planned_description,
+            scriptId=script_id,
             state={},
         )
         self._write_project(project)
@@ -49,7 +68,7 @@ class ProjectService:
             project = self._read_project_file(project_file)
             if project:
                 if self.store:
-                    self.store.upsert_project(project)
+                    self._try_upsert_project(project)
                 projects_by_id[project.id] = self._summary(project)
         return sorted(projects_by_id.values(), key=lambda project: project.updated_at, reverse=True)
 
@@ -63,7 +82,7 @@ class ProjectService:
             return None
         project = self._read_project_file(project_file)
         if project and self.store:
-            self.store.upsert_project(project)
+            self._try_upsert_project(project)
         return project
 
     def load_project_from_path(self, path: str) -> Optional[ProjectDetail]:
@@ -104,16 +123,36 @@ class ProjectService:
         self._register_project(normalized)
         return normalized
 
-    def save_project(self, project_id: str, name: Optional[str], state: Dict[str, Any]) -> Optional[ProjectDetail]:
+    def save_project(
+        self,
+        project_id: str,
+        name: Optional[str],
+        state: Dict[str, Any],
+        metadata_updates: Optional[Dict[str, Any]] = None,
+    ) -> Optional[ProjectDetail]:
         existing = self.get_project(project_id)
         if not existing:
             return None
+        metadata_updates = metadata_updates or {}
+        project_updates: Dict[str, Any] = {
+            "name": self._clean_name(name or existing.name),
+            "updated_at": utc_now_iso(),
+            "state": self._sanitize_state(state),
+        }
+        metadata_field_map = {
+            "content_profile_id": "content_profile_id",
+            "target_platform": "target_platform",
+            "content_goal": "content_goal",
+            "video_type": "video_type",
+            "planned_title": "planned_title",
+            "planned_description": "planned_description",
+            "script_id": "script_id",
+        }
+        for request_field, model_field in metadata_field_map.items():
+            if request_field in metadata_updates:
+                project_updates[model_field] = metadata_updates[request_field]
         project = existing.model_copy(
-            update={
-                "name": self._clean_name(name or existing.name),
-                "updated_at": utc_now_iso(),
-                "state": self._sanitize_state(state),
-            }
+            update=project_updates
         )
         self._write_project(project)
         self._register_project(project)
@@ -213,7 +252,7 @@ class ProjectService:
                 changed = True
         if changed:
             merged_project = project.model_copy(update={"state": merged_state})
-            self.store.upsert_project(merged_project)
+            self._try_upsert_project(merged_project)
             return merged_project
         return project
 
@@ -226,6 +265,13 @@ class ProjectService:
             projectFilePath=project.project_file_path,
             createdAt=project.created_at,
             updatedAt=project.updated_at,
+            contentProfileId=project.content_profile_id,
+            targetPlatform=project.target_platform,
+            contentGoal=project.content_goal,
+            videoType=project.video_type,
+            plannedTitle=project.planned_title,
+            plannedDescription=project.planned_description,
+            scriptId=project.script_id,
         )
 
     def _new_project_dir(self, project_id: str, name: str, parent_directory: Optional[str]) -> Path:
@@ -279,7 +325,7 @@ class ProjectService:
                 continue
             project = self._read_project_file(project_file)
             if project:
-                self.store.upsert_project(project)
+                self._try_upsert_project(project)
 
     def _read_project_database(self, project_dir: Path) -> Optional[ProjectDetail]:
         if not self.store:
@@ -288,6 +334,15 @@ class ProjectService:
         if not database_path.exists():
             return None
         return self.store.get_project_from_database_path(database_path)
+
+    def _try_upsert_project(self, project: ProjectDetail) -> bool:
+        if not self.store:
+            return False
+        try:
+            self.store.upsert_project(project)
+            return True
+        except sqlite3.OperationalError:
+            return False
 
     def _sanitize_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(state, dict):
@@ -305,6 +360,13 @@ class ProjectService:
                     "projectFilePath",
                     "createdAt",
                     "updatedAt",
+                    "contentProfileId",
+                    "targetPlatform",
+                    "contentGoal",
+                    "videoType",
+                    "plannedTitle",
+                    "plannedDescription",
+                    "scriptId",
                 )
                 if project.get(key) is not None
             }

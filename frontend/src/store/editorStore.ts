@@ -19,6 +19,7 @@ import type {
   KeyframeProperty,
   ProjectDetail,
   ProjectSummary,
+  PlatformTarget,
   StoryboardScene,
   StoryboardSettings,
   TranscriptSlice,
@@ -216,6 +217,13 @@ const projectSummary = (project: ProjectSummary | ProjectDetail): ProjectSummary
   projectFilePath: project.projectFilePath,
   createdAt: project.createdAt,
   updatedAt: project.updatedAt,
+  contentProfileId: project.contentProfileId ?? null,
+  targetPlatform: project.targetPlatform ?? null,
+  contentGoal: project.contentGoal ?? '',
+  videoType: project.videoType ?? '',
+  plannedTitle: project.plannedTitle ?? '',
+  plannedDescription: project.plannedDescription ?? '',
+  scriptId: project.scriptId ?? null,
 });
 
 const loadProjectPointer = (): ProjectSummary | null => {
@@ -291,12 +299,25 @@ export type EditorState = {
   currentProject: ProjectSummary | null;
   projectName: string;
   projectDirectory: string;
+  projectContentProfileId: string | null;
+  projectTargetPlatform: PlatformTarget | null;
+  projectContentGoal: string;
+  projectVideoType: string;
+  projectPlannedTitle: string;
+  projectPlannedDescription: string;
+  projectScriptId: string | null;
   availableProjects: ProjectSummary[];
   projectStatus: string | null;
   isSavingProject: boolean;
   isLoadingProjects: boolean;
   setProjectName: (name: string) => void;
   setProjectDirectory: (directory: string) => void;
+  setProjectContentProfileId: (profileId: string | null) => void;
+  setProjectTargetPlatform: (platform: PlatformTarget | null) => void;
+  setProjectContentGoal: (contentGoal: string) => void;
+  setProjectVideoType: (videoType: string) => void;
+  setProjectPlannedTitle: (plannedTitle: string) => void;
+  setProjectPlannedDescription: (plannedDescription: string) => void;
   chooseProjectFolder: () => Promise<void>;
   createProject: () => Promise<ProjectSummary | null>;
   refreshProjects: () => Promise<void>;
@@ -445,6 +466,32 @@ const buildProjectSnapshot = (state: EditorState): Record<string, unknown> => ({
   currentAnimationBatchId: state.currentAnimationBatchId,
 });
 
+const projectMetadata = (state: Pick<
+  EditorState,
+  | 'projectContentProfileId'
+  | 'projectTargetPlatform'
+  | 'projectContentGoal'
+  | 'projectVideoType'
+  | 'projectPlannedTitle'
+  | 'projectPlannedDescription'
+  | 'projectScriptId'
+>) => ({
+  contentProfileId: state.projectContentProfileId,
+  targetPlatform: state.projectTargetPlatform,
+  contentGoal: state.projectContentGoal,
+  videoType: state.projectVideoType,
+  plannedTitle: state.projectPlannedTitle,
+  plannedDescription: state.projectPlannedDescription,
+  scriptId: state.projectScriptId,
+});
+
+const targetPlatformAspectRatio = (platform: PlatformTarget | null): ExportSettings['aspectRatio'] | null => {
+  if (!platform) return null;
+  if (['youtube_shorts', 'facebook_reels', 'tiktok', 'instagram_reels'].includes(platform)) return '9:16';
+  if (platform === 'youtube' || platform === 'facebook_page') return '16:9';
+  return null;
+};
+
 const persistProjectSnapshot = async (state: EditorState): Promise<ProjectSummary> => {
   const name = state.projectName.trim() || DEFAULT_PROJECT_NAME;
   const project = state.currentProject ? projectSummary(state.currentProject) : null;
@@ -455,7 +502,7 @@ const persistProjectSnapshot = async (state: EditorState): Promise<ProjectSummar
     ...state,
     currentProject: project,
     projectName: name,
-  })));
+  }), projectMetadata(state)));
   rememberProjectPointer(savedProject);
   return savedProject;
 };
@@ -1063,6 +1110,13 @@ const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<
     currentProject: summary,
     projectName: summary.name,
     projectDirectory: summary.folderPath,
+    projectContentProfileId: summary.contentProfileId,
+    projectTargetPlatform: summary.targetPlatform,
+    projectContentGoal: summary.contentGoal,
+    projectVideoType: summary.videoType,
+    projectPlannedTitle: summary.plannedTitle,
+    projectPlannedDescription: summary.plannedDescription,
+    projectScriptId: summary.scriptId,
     projectStatus: `Loaded project: ${summary.name}`,
     assets: restoredAssets,
     tracks,
@@ -1535,12 +1589,52 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   currentProject: null,
   projectName: DEFAULT_PROJECT_NAME,
   projectDirectory: '',
+  projectContentProfileId: null,
+  projectTargetPlatform: null,
+  projectContentGoal: '',
+  projectVideoType: '',
+  projectPlannedTitle: '',
+  projectPlannedDescription: '',
+  projectScriptId: null,
   availableProjects: rememberedProject ? [rememberedProject] : [],
   projectStatus: 'Create or load a project to start.',
   isSavingProject: false,
   isLoadingProjects: false,
   setProjectName: (name) => set({ projectName: name }),
   setProjectDirectory: (directory) => set({ projectDirectory: directory }),
+  setProjectContentProfileId: (projectContentProfileId) => {
+    set({ projectContentProfileId });
+    if (get().currentProject) scheduleProjectAutosave(get);
+  },
+  setProjectTargetPlatform: (projectTargetPlatform) => {
+    set(state => {
+      const aspectRatio = targetPlatformAspectRatio(projectTargetPlatform);
+      return {
+        projectTargetPlatform,
+        ...(aspectRatio ? {
+          exportSettings: { ...state.exportSettings, aspectRatio },
+          storyboardSettings: { ...state.storyboardSettings, aspectRatio },
+        } : {}),
+      };
+    });
+    if (get().currentProject) scheduleProjectAutosave(get);
+  },
+  setProjectContentGoal: (projectContentGoal) => {
+    set({ projectContentGoal });
+    if (get().currentProject) scheduleProjectAutosave(get);
+  },
+  setProjectVideoType: (projectVideoType) => {
+    set({ projectVideoType });
+    if (get().currentProject) scheduleProjectAutosave(get);
+  },
+  setProjectPlannedTitle: (projectPlannedTitle) => {
+    set({ projectPlannedTitle });
+    if (get().currentProject) scheduleProjectAutosave(get);
+  },
+  setProjectPlannedDescription: (projectPlannedDescription) => {
+    set({ projectPlannedDescription });
+    if (get().currentProject) scheduleProjectAutosave(get);
+  },
   chooseProjectFolder: async () => {
     set({ isLoadingProjects: true, projectStatus: 'Waiting for directory selection...' } as Partial<EditorState>);
     try {
@@ -1567,12 +1661,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     set({ isSavingProject: true, projectStatus: 'Creating project...' } as Partial<EditorState>);
     try {
-      const project = projectSummary(await createProjectRecord(name, parentDirectory));
+      const project = projectSummary(await createProjectRecord(
+        name,
+        parentDirectory,
+        projectMetadata(state),
+      ));
       rememberProjectPointer(project);
       set({
         currentProject: project,
         projectName: project.name,
         projectDirectory: project.folderPath,
+        projectContentProfileId: project.contentProfileId,
+        projectTargetPlatform: project.targetPlatform,
+        projectContentGoal: project.contentGoal,
+        projectVideoType: project.videoType,
+        projectPlannedTitle: project.plannedTitle,
+        projectPlannedDescription: project.plannedDescription,
+        projectScriptId: project.scriptId,
         availableProjects: [project, ...state.availableProjects.filter(existing => existing.id !== project.id)],
         projectStatus: `Project created: ${project.folderPath}`,
         assets: [],
@@ -1659,6 +1764,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       currentProject: null,
       projectName: DEFAULT_PROJECT_NAME,
       projectDirectory: '',
+      projectContentProfileId: null,
+      projectTargetPlatform: null,
+      projectContentGoal: '',
+      projectVideoType: '',
+      projectPlannedTitle: '',
+      projectPlannedDescription: '',
+      projectScriptId: null,
       projectStatus: 'Choose a directory and create a project to start.',
       assets: [],
       tracks: makeDefaultTracks(),

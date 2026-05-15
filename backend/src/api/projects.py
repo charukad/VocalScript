@@ -20,7 +20,17 @@ def build_projects_router(project_service: ProjectService) -> APIRouter:
 
     @router.post("", response_model=ProjectDetail)
     async def create_project(request: ProjectCreateRequest):
-        return project_service.create_project(request.name, request.parent_directory)
+        return project_service.create_project(
+            request.name,
+            request.parent_directory,
+            content_profile_id=request.content_profile_id,
+            target_platform=request.target_platform,
+            content_goal=request.content_goal,
+            video_type=request.video_type,
+            planned_title=request.planned_title,
+            planned_description=request.planned_description,
+            script_id=request.script_id,
+        )
 
     @router.get("", response_model=ProjectListResponse)
     async def list_projects():
@@ -66,7 +76,12 @@ def build_projects_router(project_service: ProjectService) -> APIRouter:
 
     @router.put("/{project_id}", response_model=ProjectDetail)
     async def save_project(project_id: str, request: ProjectSaveRequest):
-        project = project_service.save_project(project_id, request.name, request.state)
+        project = project_service.save_project(
+            project_id,
+            request.name,
+            request.state,
+            metadata_updates=request.model_dump(exclude_unset=True),
+        )
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         return project

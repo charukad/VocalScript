@@ -17,6 +17,7 @@ import type {
   ProviderName,
   GenerationJob,
   GenerationJobStatus,
+  PlatformTarget,
   BridgeDebugEvent,
   BridgeAdapterTestRecord,
   BridgeWorkerSnapshot,
@@ -128,6 +129,16 @@ type ClearGenerationHistoryOptions = {
 };
 
 export type ProjectSaveState = Record<string, unknown>;
+
+export type ProjectMetadataInput = {
+  contentProfileId?: string | null;
+  targetPlatform?: PlatformTarget | null;
+  contentGoal?: string;
+  videoType?: string;
+  plannedTitle?: string;
+  plannedDescription?: string;
+  scriptId?: string | null;
+};
 
 export type ProjectListResponse = {
   projects: ProjectSummary[];
@@ -1003,12 +1014,13 @@ export const listGeneratedMediaAssets = async (
 export const createProjectRecord = async (
   name: string,
   parentDirectory?: string | null,
+  metadata: ProjectMetadataInput = {},
   signal?: AbortSignal
 ): Promise<ProjectDetail> => {
   const response = await fetch(`${API_BASE_URL}/api/projects`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, parentDirectory }),
+    body: JSON.stringify({ name, parentDirectory, ...metadata }),
     signal,
   });
 
@@ -1087,12 +1099,13 @@ export const saveProjectRecord = async (
   projectId: string,
   name: string,
   state: ProjectSaveState,
+  metadata: ProjectMetadataInput = {},
   signal?: AbortSignal
 ): Promise<ProjectDetail> => {
   const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, state }),
+    body: JSON.stringify({ name, state, ...metadata }),
     signal,
   });
 

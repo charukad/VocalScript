@@ -1,27 +1,48 @@
 import React from 'react';
 import { useEditorStore } from '../../store/editorStore';
+import { useContentProfileStore } from '../../features/contentProfiles/contentProfileStore';
+import { PLATFORM_OPTIONS } from '../../features/contentProfiles/types';
 
-export const ProjectGate = () => {
+type ProjectGateProps = {
+  onOpenContentProfiles?: () => void;
+};
+
+export const ProjectGate = ({ onOpenContentProfiles }: ProjectGateProps) => {
   const {
     projectName,
     projectDirectory,
+    projectContentProfileId,
+    projectTargetPlatform,
+    projectContentGoal,
+    projectVideoType,
+    projectPlannedTitle,
     availableProjects,
     projectStatus,
     isSavingProject,
     isLoadingProjects,
     setProjectName,
     setProjectDirectory,
+    setProjectContentProfileId,
+    setProjectTargetPlatform,
+    setProjectContentGoal,
+    setProjectVideoType,
+    setProjectPlannedTitle,
     chooseProjectFolder,
     createProject,
     refreshProjects,
     loadProject,
     loadProjectFromPath,
   } = useEditorStore();
+  const { profiles, loadProfiles } = useContentProfileStore();
   const [loadPath, setLoadPath] = React.useState('');
 
   React.useEffect(() => {
     void refreshProjects();
   }, [refreshProjects]);
+
+  React.useEffect(() => {
+    void loadProfiles();
+  }, [loadProfiles]);
 
   return (
     <div className="project-gate">
@@ -36,7 +57,15 @@ export const ProjectGate = () => {
             </svg>
             NeuralScribe
           </div>
-          <span>{projectStatus}</span>
+          <div className="project-gate-header-actions">
+            <span>{projectStatus}</span>
+            <button className="btn-secondary" onClick={() => window.open('/#content-studio', '_blank', 'noopener,noreferrer')}>
+              Content Studio
+            </button>
+            <button className="btn-secondary" onClick={onOpenContentProfiles}>
+              Content Profiles
+            </button>
+          </div>
         </div>
 
         <div className="project-gate-grid">
@@ -62,6 +91,54 @@ export const ProjectGate = () => {
                   Choose
                 </button>
               </div>
+            </label>
+            <label>
+              Content Profile
+              <select
+                value={projectContentProfileId ?? ''}
+                onChange={event => setProjectContentProfileId(event.target.value || null)}
+              >
+                <option value="">No profile</option>
+                {profiles.map(profile => (
+                  <option key={profile.id} value={profile.id}>{profile.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Target Platform
+              <select
+                value={projectTargetPlatform ?? ''}
+                onChange={event => setProjectTargetPlatform((event.target.value || null) as typeof projectTargetPlatform)}
+              >
+                <option value="">Unset</option>
+                {PLATFORM_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Content Goal
+              <input
+                value={projectContentGoal}
+                onChange={event => setProjectContentGoal(event.target.value)}
+                placeholder="Reach new creators"
+              />
+            </label>
+            <label>
+              Video Type
+              <input
+                value={projectVideoType}
+                onChange={event => setProjectVideoType(event.target.value)}
+                placeholder="Short explainer"
+              />
+            </label>
+            <label>
+              Planned Title
+              <input
+                value={projectPlannedTitle}
+                onChange={event => setProjectPlannedTitle(event.target.value)}
+                placeholder="Optional working title"
+              />
             </label>
             <button
               className="btn-primary project-gate-action"

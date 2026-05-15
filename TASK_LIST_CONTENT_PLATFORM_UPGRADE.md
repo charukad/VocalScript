@@ -23,9 +23,9 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 ## Phase Overview
 
 - `[x]` Phase 0: Repository Inspection and Safety
-- `[ ]` Phase 1: Content Profile Data Model and Backend API
-- `[ ]` Phase 2: Content Profile Frontend UI
-- `[ ]` Phase 3: Connect Projects to Content Profiles
+- `[x]` Phase 1: Content Profile Data Model and Backend API
+- `[x]` Phase 2: Content Profile Frontend UI
+- `[x]` Phase 3: Connect Projects to Content Profiles
 - `[ ]` Phase 4: Content Studio MVP
 - `[ ]` Phase 5: Viral Scoring and Script Analysis
 - `[ ]` Phase 6: Agent System MVP
@@ -88,52 +88,52 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 
 ## Phase 1: Content Profile Data Model and Backend API
 
-- `[ ]` Define platform target types and `ContentProfile` request/response models.
-- `[ ]` Add registry/project database tables for content profiles and avatar metadata.
-- `[ ]` Add migration-safe initialization for new profile tables.
-- `[ ]` Add content profile service methods for create, list, get, update, archive/delete.
-- `[ ]` Add profile avatar/file-reference support with safe local storage rules.
-- `[ ]` Add `/api/content-profiles` CRUD router and register it in `main.py`.
-- `[ ]` Add validation/defaults for required fields, tone/style, and selected platforms.
-- `[ ]` Add focused verification coverage for create/list/update/archive persistence.
+- `[x]` Define platform target types and `ContentProfile` request/response models.
+- `[x]` Add registry database tables for content profiles and avatar metadata.
+- `[x]` Add migration-safe initialization for new profile tables.
+- `[x]` Add content profile service methods for create, list, get, update, archive/delete.
+- `[x]` Add profile avatar/file-reference support with safe local storage rules.
+- `[x]` Add `/api/content-profiles` CRUD router and register it in `main.py`.
+- `[x]` Add validation/defaults for required fields, tone/style, and selected platforms.
+- `[x]` Add focused verification coverage for create/list/update/archive persistence.
 
 ### Phase 1 Acceptance Checks
 
-- `[ ]` Profiles can be created, listed, updated, and archived safely.
-- `[ ]` Profile data persists across backend restarts.
-- `[ ]` Avatar/reference behavior is defined and does not break local-first storage.
+- `[x]` Profiles can be created, listed, updated, and archived safely.
+- `[x]` Profile data persists across backend restarts.
+- `[x]` Avatar/reference behavior is defined and does not break local-first storage.
 
 ## Phase 2: Content Profile Frontend UI
 
-- `[ ]` Add `frontend/src/features/contentProfiles/` feature module.
-- `[ ]` Add content profile frontend types and API helpers.
-- `[ ]` Add Zustand store or local feature state that follows existing project/editor patterns.
-- `[ ]` Build profile list UI.
-- `[ ]` Build create/edit form with platform selector and avatar input.
-- `[ ]` Build profile detail view.
-- `[ ]` Add navigation entry into the existing app shell/editor.
-- `[ ]` Add loading, empty, save, and error states.
+- `[x]` Add `frontend/src/features/contentProfiles/` feature module.
+- `[x]` Add content profile frontend types and API helpers.
+- `[x]` Add Zustand store or local feature state that follows existing project/editor patterns.
+- `[x]` Build profile list UI.
+- `[x]` Build create/edit form with platform selector and avatar input.
+- `[x]` Build profile detail view.
+- `[x]` Add navigation entry into the existing app shell/editor.
+- `[x]` Add loading, empty, save, and error states.
 
 ### Phase 2 Acceptance Checks
 
-- `[ ]` Users can create and edit profiles from the UI.
-- `[ ]` Users can select multiple target platforms.
-- `[ ]` Existing editor workflows remain usable.
+- `[x]` Users can create and edit profiles from the UI.
+- `[x]` Users can select multiple target platforms.
+- `[x]` Existing editor workflows remain usable.
 
 ## Phase 3: Connect Projects to Content Profiles
 
-- `[ ]` Extend project models with optional `contentProfileId`, `targetPlatform`, `contentGoal`, `videoType`, `plannedTitle`, `plannedDescription`, and optional `scriptId`.
-- `[ ]` Extend project save/load serialization while preserving existing projects with missing fields.
-- `[ ]` Update project creation/editing UI to select an optional content profile.
-- `[ ]` Show the connected profile in the editor shell.
-- `[ ]` Apply platform defaults for aspect ratio/export preset/caption safe area/script assumptions.
-- `[ ]` Add migration/default behavior for legacy projects.
+- `[x]` Extend project models with optional `contentProfileId`, `targetPlatform`, `contentGoal`, `videoType`, `plannedTitle`, `plannedDescription`, and optional `scriptId`.
+- `[x]` Extend project save/load serialization while preserving existing projects with missing fields.
+- `[x]` Update project creation/editing UI to select an optional content profile.
+- `[x]` Show the connected profile in the editor shell.
+- `[x]` Apply currently available platform defaults for aspect ratio/export orientation; defer caption safe area/script assumptions until those systems exist.
+- `[x]` Add migration/default behavior for legacy projects.
 
 ### Phase 3 Acceptance Checks
 
-- `[ ]` Projects can connect to profiles and persist the link.
-- `[ ]` Legacy projects still open cleanly.
-- `[ ]` Short-form platform selection can apply vertical defaults where appropriate.
+- `[x]` Projects can connect to profiles and persist the link.
+- `[x]` Legacy projects still open cleanly.
+- `[x]` Short-form platform selection can apply vertical defaults where appropriate.
 
 ## Phase 4: Content Studio MVP
 
