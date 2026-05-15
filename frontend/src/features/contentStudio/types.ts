@@ -42,6 +42,7 @@ export type Script = {
   ideaId: string | null;
   finalVersionId: string | null;
   status: ScriptStatus;
+  latestAnalysis?: ScriptAnalysis | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -52,6 +53,7 @@ export type ScriptInput = {
   ideaId?: string | null;
   finalVersionId?: string | null;
   status?: ScriptStatus;
+  latestAnalysis?: ScriptAnalysis | null;
 };
 
 export type ScriptVersion = {
@@ -91,4 +93,38 @@ export type NarrationLine = {
 export type ScriptDetail = Script & {
   versions: ScriptVersion[];
   narrationLines: NarrationLine[];
+};
+
+export type ViralPotentialScore = {
+  total: number;
+  hook: number;
+  retention: number;
+  clarity: number;
+  emotion: number;
+  shareability: number;
+  platformFit: number;
+  notes: string[];
+};
+
+export type ScriptAnalysis = {
+  estimatedViralPotential: ViralPotentialScore;
+  hookStrength: string;
+  retentionRisk: string;
+  clarity: string;
+  pacing: string;
+  curiosityGap: string;
+  emotionalPull: string;
+  shareability: string;
+  callToAction: string;
+  platformFit: string;
+  estimatedDurationSeconds: number;
+  improvements: string[];
+  usedLlmMode: string;
+};
+
+export type ScriptRewrite = {
+  rewrittenScript: string;
+  rationale: string[];
+  analysis: ScriptAnalysis;
+  usedLlmMode: string;
 };

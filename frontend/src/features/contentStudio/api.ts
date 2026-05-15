@@ -5,6 +5,8 @@ import type {
   Script,
   ScriptDetail,
   ScriptInput,
+  ScriptAnalysis,
+  ScriptRewrite,
   ScriptVersionInput,
 } from './types';
 
@@ -153,5 +155,33 @@ export const splitScriptIntoLines = async (
     signal,
   });
   if (!response.ok) throw await formatApiError(response, 'Could not split script into narration lines');
+  return response.json();
+};
+
+export const analyzeScript = async (
+  script: string,
+  signal?: AbortSignal,
+): Promise<ScriptAnalysis> => {
+  const response = await fetch(`${API_BASE_URL}/api/viral/analyze-script`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ script }),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not analyze script');
+  return response.json();
+};
+
+export const rewriteScriptForVirality = async (
+  script: string,
+  signal?: AbortSignal,
+): Promise<ScriptRewrite> => {
+  const response = await fetch(`${API_BASE_URL}/api/viral/rewrite-script`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ script }),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not rewrite script');
   return response.json();
 };

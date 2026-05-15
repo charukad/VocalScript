@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { analyzeScript, rewriteScriptForVirality } from './api';
 import { useContentStudioStore } from './contentStudioStore';
-import type { ScriptInput, ScriptVersionInput } from './types';
+import type { ScriptAnalysis, ScriptInput, ScriptRewrite, ScriptVersionInput } from './types';
 
 type ScriptLabTabProps = {
   profileId: string;
@@ -21,6 +22,10 @@ export const ScriptLabTab = ({ profileId }: ScriptLabTabProps) => {
   const [newScript, setNewScript] = useState<ScriptInput>({ title: '', content: '' });
   const [draftTitle, setDraftTitle] = useState('');
   const [draftContent, setDraftContent] = useState('');
+  const [analysis, setAnalysis] = useState<ScriptAnalysis | null>(null);
+  const [rewrite, setRewrite] = useState<ScriptRewrite | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [versionDraft, setVersionDraft] = useState<ScriptVersionInput>({
     label: '',
     content: '',
@@ -30,6 +35,9 @@ export const ScriptLabTab = ({ profileId }: ScriptLabTabProps) => {
   useEffect(() => {
     setDraftTitle(selectedScript?.title ?? '');
     setDraftContent(selectedScript?.content ?? '');
+    setAnalysis(selectedScript?.latestAnalysis ?? null);
+    setRewrite(null);
+    setAnalysisError(null);
   }, [selectedScript]);
 
   const handleCreateScript = async () => {
@@ -51,6 +59,50 @@ export const ScriptLabTab = ({ profileId }: ScriptLabTabProps) => {
       selectAsFinal: versionDraft.selectAsFinal,
     });
     setVersionDraft({ label: '', content: '', selectAsFinal: false });
+  };
+
+  const handleAnalyze = async () => {
+    if (!draftContent.trim()) return;
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+    try {
+      const nextAnalysis = await analyzeScript(draftContent);
+      setAnalysis(nextAnalysis);
+      if (selectedScript) {
+        await updateScript(selectedScript.id, { latestAnalysis: nextAnalysis });
+      }
+    } catch (error) {
+      setAnalysisError(error instanceof Error ? error.message : 'Could not analyze script');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleRewrite = async () => {
+    if (!draftContent.trim()) return;
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+    try {
+      const nextRewrite = await rewriteScriptForVirality(draftContent);
+      setRewrite(nextRewrite);
+      setAnalysis(nextRewrite.analysis);
+      if (selectedScript) {
+        await updateScript(selectedScript.id, { latestAnalysis: nextRewrite.analysis });
+      }
+    } catch (error) {
+      setAnalysisError(error instanceof Error ? error.message : 'Could not rewrite script');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleSaveRewrite = async () => {
+    if (!selectedScript || !rewrite) return;
+    await addVersion(selectedScript.id, {
+      label: 'Viral rewrite',
+      content: rewrite.rewrittenScript,
+      selectAsFinal: false,
+    });
   };
 
   return (
@@ -116,7 +168,48 @@ export const ScriptLabTab = ({ profileId }: ScriptLabTabProps) => {
               <button className="btn-secondary" onClick={() => void splitLines(selectedScript.id)} disabled={isSaving}>
                 Split Into Lines
               </button>
+              <button className="btn-secondary" onClick={() => void handleAnalyze()} disabled={isAnalyzing || !draftContent.trim()}>
+                {isAnalyzing ? 'Working...' : 'Analyze'}
+              </button>
+              <button className="btn-secondary" onClick={() => void handleRewrite()} disabled={isAnalyzing || !draftContent.trim()}>
+                Rewrite
+              </button>
             </div>
+
+            {analysisError && <div className="content-profile-error">{analysisError}</div>}
+
+            {analysis && (
+              <div className="studio-subsection">
+                <h3>Estimated Viral Potential</h3>
+                <div className="studio-score-grid">
+                  <strong>{analysis.estimatedViralPotential.total}</strong>
+                  <span>Hook {analysis.estimatedViralPotential.hook}</span>
+                  <span>Retention {analysis.estimatedViralPotential.retention}</span>
+                  <span>Clarity {analysis.estimatedViralPotential.clarity}</span>
+                  <span>Emotion {analysis.estimatedViralPotential.emotion}</span>
+                  <span>Shareability {analysis.estimatedViralPotential.shareability}</span>
+                </div>
+                <div className="studio-analysis-meta">
+                  <span>{analysis.estimatedDurationSeconds}s est.</span>
+                  <span>{analysis.hookStrength} hook</span>
+                  <span>{analysis.retentionRisk} retention risk</span>
+                  <span>{analysis.usedLlmMode}</span>
+                </div>
+                <ul className="studio-note-list">
+                  {analysis.improvements.map(item => <li key={item}>{item}</li>)}
+                </ul>
+              </div>
+            )}
+
+            {rewrite && (
+              <div className="studio-subsection">
+                <h3>Rewrite Candidate</h3>
+                <textarea rows={6} value={rewrite.rewrittenScript} readOnly />
+                <button className="btn-primary" onClick={() => void handleSaveRewrite()} disabled={isSaving}>
+                  Save As Version
+                </button>
+              </div>
+            )}
 
             <div className="studio-subsection">
               <h3>New Version</h3>

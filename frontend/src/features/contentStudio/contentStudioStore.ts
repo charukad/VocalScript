@@ -49,6 +49,7 @@ const mergeScriptSummary = (scripts: Script[], detail: ScriptDetail): Script[] =
     ideaId: detail.ideaId,
     finalVersionId: detail.finalVersionId,
     status: detail.status,
+    latestAnalysis: detail.latestAnalysis ?? null,
     createdAt: detail.createdAt,
     updatedAt: detail.updatedAt,
   };

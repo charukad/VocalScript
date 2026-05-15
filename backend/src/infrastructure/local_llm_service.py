@@ -75,6 +75,12 @@ class LocalLLMService:
 
         return self._run_animation_llm_with_timeout(mode, request_llm)
 
+    def analyze_script_json(self, prompt: str) -> Optional[str]:
+        return self._generate_structured_json(prompt, temperature=0.2)
+
+    def rewrite_script_json(self, prompt: str) -> Optional[str]:
+        return self._generate_structured_json(prompt, temperature=0.35)
+
     def rewrite_generation_prompt(self, job: GenerationJob) -> str:
         mode = self.settings.mode.lower().strip()
         fallback = self._rule_based_prompt_rewrite(job)
@@ -115,6 +121,91 @@ class LocalLLMService:
 
         rewritten = self._extract_rewritten_prompt(response_text)
         return rewritten or fallback
+
+    def _generate_structured_json(self, prompt: str, temperature: float) -> Optional[str]:
+        mode = self.settings.mode.lower().strip()
+        if mode in ("", "rule_based", "off", "none"):
+            return None
+        if mode == "ollama":
+            payload = {
+                "model": self.settings.ollama_model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": temperature},
+            }
+            data = self._post_json(f"{self.settings.ollama_url.rstrip('/')}/api/generate", payload)
+            response = data.get("response")
+            return response if isinstance(response, str) else None
+        if mode == "openrouter":
+            if not self.settings.openrouter_api_key:
+                logger.warning("OpenRouter mode is enabled but NEURALSCRIBE_OPENROUTER_API_KEY is not set.")
+                return None
+            payload: Dict[str, Any] = {
+                "model": self.settings.openrouter_model,
+                "temperature": temperature,
+                "messages": [
+                    {"role": "system", "content": "Return strict JSON only. No prose, no markdown."},
+                    {"role": "user", "content": prompt},
+                ],
+            }
+            if self.settings.openrouter_reasoning:
+                payload["reasoning"] = {"enabled": True}
+            data = self._post_json(
+                f"{self.settings.openrouter_url.rstrip('/')}/chat/completions",
+                payload,
+                api_key=self.settings.openrouter_api_key,
+                extra_headers={
+                    "HTTP-Referer": self.settings.openrouter_site_url,
+                    "X-Title": self.settings.openrouter_app_name,
+                },
+            )
+            choices = data.get("choices")
+            if isinstance(choices, list) and choices:
+                content = choices[0].get("message", {}).get("content")
+                return content if isinstance(content, str) else None
+            return None
+        if mode == "gemini":
+            if not self.settings.gemini_api_key:
+                logger.warning("Gemini mode is enabled but GEMINI_API_KEY is not set.")
+                return None
+            try:
+                from google import genai
+            except ImportError:
+                logger.warning("Gemini mode requires the google-genai package. Install backend requirements again.")
+                return None
+            try:
+                client = genai.Client(api_key=self.settings.gemini_api_key)
+                response = client.models.generate_content(
+                    model=self.settings.gemini_model,
+                    contents=prompt,
+                    config={
+                        "temperature": temperature,
+                        "response_mime_type": "application/json",
+                    },
+                )
+                return response.text if isinstance(response.text, str) else None
+            except Exception as exc:
+                logger.warning("Gemini structured generation failed: %s", exc)
+                return None
+        if mode in ("lm_studio", "openai_compatible", "local_server"):
+            payload = {
+                "model": self.settings.openai_compatible_model,
+                "temperature": temperature,
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {"role": "system", "content": "Return strict JSON only. No prose, no markdown."},
+                    {"role": "user", "content": prompt},
+                ],
+            }
+            data = self._post_json(f"{self.settings.openai_compatible_url.rstrip('/')}/chat/completions", payload)
+            choices = data.get("choices")
+            if isinstance(choices, list) and choices:
+                content = choices[0].get("message", {}).get("content")
+                return content if isinstance(content, str) else None
+            return None
+        logger.warning("Unknown local LLM mode '%s'. Falling back to rule-based structured generation.", mode)
+        return None
 
     def _generate_with_ollama(self, request: StoryboardRequest) -> Optional[str]:
         payload = {

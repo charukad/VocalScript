@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import Field, field_validator
 
@@ -96,6 +96,7 @@ class ScriptUpdateRequest(ApiModel):
     idea_id: Optional[str] = Field(default=None, alias="ideaId")
     final_version_id: Optional[str] = Field(default=None, alias="finalVersionId")
     status: Optional[ScriptStatus] = None
+    latest_analysis: Optional[Dict[str, Any]] = Field(default=None, alias="latestAnalysis")
 
     @field_validator("title")
     @classmethod
@@ -116,6 +117,7 @@ class Script(ApiModel):
     idea_id: Optional[str] = Field(default=None, alias="ideaId")
     final_version_id: Optional[str] = Field(default=None, alias="finalVersionId")
     status: ScriptStatus = "draft"
+    latest_analysis: Optional[Dict[str, Any]] = Field(default=None, alias="latestAnalysis")
     created_at: str = Field(alias="createdAt")
     updated_at: str = Field(alias="updatedAt")
 

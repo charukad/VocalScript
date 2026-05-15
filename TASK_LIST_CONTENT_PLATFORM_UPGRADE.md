@@ -26,8 +26,8 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Phase 1: Content Profile Data Model and Backend API
 - `[x]` Phase 2: Content Profile Frontend UI
 - `[x]` Phase 3: Connect Projects to Content Profiles
-- `[ ]` Phase 4: Content Studio MVP
-- `[ ]` Phase 5: Viral Scoring and Script Analysis
+- `[x]` Phase 4: Content Studio MVP
+- `[x]` Phase 5: Viral Scoring and Script Analysis
 - `[ ]` Phase 6: Agent System MVP
 - `[ ]` Phase 7: Storyboard and Viral Visual Planner Upgrade
 - `[ ]` Phase 8: Narration Line System
@@ -47,6 +47,7 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Confirm old `chrome/extentions/...` folders are reference material only.
 - `[x]` Create this upgrade task list as the implementation source of record.
 - `[x]` Verify the existing frontend/backend still build or start before feature work begins.
+- `[x]` Harden startup discovery so remembered projects outside the writable workspace do not prevent the backend from starting.
 
 ### Phase 0 Acceptance Checks
 
@@ -54,6 +55,7 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Existing app baseline is verified before feature implementation.
 - `[x]` No old `chrome/extentions/...` material was treated as active product code.
 - `[x]` No large product code changes were made during inspection.
+- `[x]` Registered read-only legacy projects no longer block application startup.
 
 ## Likely Existing Files To Change
 
@@ -137,37 +139,37 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 
 ## Phase 4: Content Studio MVP
 
-- `[ ]` Create `frontend/src/features/contentStudio/` route/view shell.
-- `[ ]` Add selected profile context and profile switcher.
-- `[ ]` Add tabs for Ideas, Script Lab, Storyboard, Voice, Analytics, and Agents.
-- `[ ]` Add backend tables for `content_ideas`, `scripts`, `script_versions`, and `narration_lines`.
-- `[ ]` Add CRUD endpoints for ideas and scripts.
-- `[ ]` Add API for script versions and script splitting.
-- `[ ]` Build Ideas tab with saved idea workflow.
-- `[ ]` Build Script Lab with script editor, versions, and final selection.
+- `[x]` Create `frontend/src/features/contentStudio/` route/view shell.
+- `[x]` Add selected profile context and profile switcher.
+- `[x]` Add tabs for Ideas, Script Lab, Storyboard, Voice, Analytics, and Agents.
+- `[x]` Add backend tables for `content_ideas`, `scripts`, `script_versions`, and `narration_lines`.
+- `[x]` Add CRUD endpoints for ideas and scripts.
+- `[x]` Add API for script versions and script splitting.
+- `[x]` Build Ideas tab with saved idea workflow.
+- `[x]` Build Script Lab with script editor, versions, and final selection.
 
 ### Phase 4 Acceptance Checks
 
-- `[ ]` Content Studio opens independently from the editor.
-- `[ ]` Users can save ideas and scripts under a selected profile.
-- `[ ]` Users can split a script into narration lines.
+- `[x]` Content Studio opens independently from the editor.
+- `[x]` Users can save ideas and scripts under a selected profile.
+- `[x]` Users can split a script into narration lines.
 
 ## Phase 5: Viral Scoring and Script Analysis
 
-- `[ ]` Define `Estimated Viral Potential` scoring models.
-- `[ ]` Add rule-based scoring service for ideas, hooks, and scripts.
-- `[ ]` Add LLM-backed analysis path compatible with existing LLM modes.
-- `[ ]` Add rule-based fallback when no LLM is configured.
-- `[ ]` Add analyze/rewrite endpoints under `/api/viral`.
-- `[ ]` Add Script Lab UI for scores, notes, and rewrite candidates.
-- `[ ]` Save selected script versions and analysis metadata.
+- `[x]` Define `Estimated Viral Potential` scoring models.
+- `[x]` Add rule-based scoring service for ideas, hooks, and scripts.
+- `[x]` Add LLM-backed analysis path compatible with existing LLM modes.
+- `[x]` Add rule-based fallback when no LLM is configured.
+- `[x]` Add analyze/rewrite endpoints under `/api/viral`.
+- `[x]` Add Script Lab UI for scores, notes, and rewrite candidates.
+- `[x]` Save selected script versions and analysis metadata.
 
 ### Phase 5 Acceptance Checks
 
-- `[ ]` Users can analyze pasted/generated scripts.
-- `[ ]` Users can generate improved versions.
-- `[ ]` Output includes score breakdown, notes, and improvements.
-- `[ ]` Feature works without a cloud LLM.
+- `[x]` Users can analyze pasted/generated scripts.
+- `[x]` Users can generate improved versions.
+- `[x]` Output includes score breakdown, notes, and improvements.
+- `[x]` Feature works without a cloud LLM.
 
 ## Phase 6: Agent System MVP
 

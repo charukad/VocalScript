@@ -82,11 +82,12 @@ class ContentStudioTests(unittest.TestCase):
 
         updated = self.studio_service.update_script(
             script.id,
-            ScriptUpdateRequest(title="AI facts final"),
+            ScriptUpdateRequest(title="AI facts final", latestAnalysis={"score": 82}),
         )
         self.assertIsNotNone(updated)
         assert updated is not None
         self.assertEqual(updated.title, "AI facts final")
+        self.assertEqual(updated.latest_analysis, {"score": 82})
 
         lines = self.studio_service.split_script_into_lines(script.id, ScriptSplitLinesRequest())
         self.assertIsNotNone(lines)
@@ -98,6 +99,7 @@ class ContentStudioTests(unittest.TestCase):
         assert detail is not None
         self.assertEqual(len(detail.versions), 2)
         self.assertEqual([line.index for line in detail.narration_lines], [0, 1, 2])
+        self.assertEqual(detail.latest_analysis, {"score": 82})
 
 
 if __name__ == "__main__":
