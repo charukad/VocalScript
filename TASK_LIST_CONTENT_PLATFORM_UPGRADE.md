@@ -28,9 +28,9 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Phase 3: Connect Projects to Content Profiles
 - `[x]` Phase 4: Content Studio MVP
 - `[x]` Phase 5: Viral Scoring and Script Analysis
-- `[ ]` Phase 6: Agent System MVP
-- `[ ]` Phase 7: Storyboard and Viral Visual Planner Upgrade
-- `[ ]` Phase 8: Narration Line System
+- `[x]` Phase 6: Agent System MVP
+- `[x]` Phase 7: Storyboard and Viral Visual Planner Upgrade
+- `[/]` Phase 8: Narration Line System
 - `[ ]` Phase 9: Google AI Studio Audio Bridge
 - `[ ]` Phase 10: AI Timeline Builder
 - `[ ]` Phase 11: Analytics Integration Foundation
@@ -173,37 +173,37 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 
 ## Phase 6: Agent System MVP
 
-- `[ ]` Add `backend/src/agents/` package.
-- `[ ]` Create shared base agent contract and orchestrator.
-- `[ ]` Add database tables for workflow runs, agent runs, tasks, outputs, and learnings.
-- `[ ]` Implement Profile Strategy Agent.
-- `[ ]` Implement Idea Agent.
-- `[ ]` Implement Script Agent.
-- `[ ]` Implement Storyboard Agent.
-- `[ ]` Add Timeline Editor Agent placeholder contract.
-- `[ ]` Add workflow start/read/list endpoints.
-- `[ ]` Add Agent Runs UI in Content Studio with status/error/output visibility.
+- `[x]` Add `backend/src/agents/` package.
+- `[x]` Create shared base agent contract and orchestrator.
+- `[x]` Add database tables for workflow runs, agent runs, tasks, outputs, and learnings.
+- `[x]` Implement Profile Strategy Agent.
+- `[x]` Implement Idea Agent.
+- `[x]` Implement Script Agent.
+- `[x]` Implement Storyboard Agent.
+- `[x]` Add Timeline Editor Agent placeholder contract.
+- `[x]` Add workflow start/read/list endpoints.
+- `[x]` Add Agent Runs UI in Content Studio with status/error/output visibility.
 
 ### Phase 6 Acceptance Checks
 
-- `[ ]` Users can start a workflow.
-- `[ ]` Agent runs persist and are inspectable.
-- `[ ]` Failures expose useful diagnostics.
-- `[ ]` Users can approve or reuse generated outputs.
+- `[x]` Users can start a workflow.
+- `[x]` Agent runs persist and are inspectable.
+- `[x]` Failures expose useful diagnostics.
+- `[x]` Users can reuse generated outputs as reviewable draft ideas/scripts.
 
 ## Phase 7: Storyboard and Viral Visual Planner Upgrade
 
-- `[ ]` Extend storyboard scene model with goal, emotion, visual hook, motion, caption, transition, SFX, and music suggestion fields.
-- `[ ]` Extend storyboard generation and repair logic for the richer schema.
-- `[ ]` Add Viral Visual Planner output path.
-- `[ ]` Add storyboard review/edit UI for new fields.
-- `[ ]` Keep approved scenes compatible with the existing generation queue.
+- `[x]` Extend storyboard scene model with goal, emotion, visual hook, motion, caption, transition, SFX, and music suggestion fields.
+- `[x]` Extend storyboard generation and repair logic for the richer schema.
+- `[x]` Add Viral Visual Planner output path.
+- `[x]` Add storyboard review/edit UI for new fields.
+- `[x]` Keep approved scenes compatible with the existing generation queue.
 
 ### Phase 7 Acceptance Checks
 
-- `[ ]` Scripts can become structured viral storyboards.
-- `[ ]` Users can review/edit scenes before generation.
-- `[ ]` Existing media generation still works with approved scenes.
+- `[x]` Scripts can become structured viral storyboards.
+- `[x]` Users can review/edit scenes before generation.
+- `[x]` Existing media generation still works with approved scenes.
 
 ## Phase 8: Narration Line System
 

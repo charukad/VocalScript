@@ -90,6 +90,23 @@ export type NarrationLine = {
   updatedAt: string;
 };
 
+export type NarrationLineInput = {
+  text: string;
+  sceneId?: string | null;
+  index?: number;
+  voiceStyle?: string | null;
+  emotion?: string | null;
+  speed?: string | null;
+  pauseAfterSeconds?: number | null;
+};
+
+export type NarrationLineUpdateInput = Partial<NarrationLineInput> & {
+  audioAssetId?: string | null;
+  durationSeconds?: number | null;
+  status?: NarrationLineStatus;
+  error?: string | null;
+};
+
 export type ScriptDetail = Script & {
   versions: ScriptVersion[];
   narrationLines: NarrationLine[];
@@ -127,4 +144,49 @@ export type ScriptRewrite = {
   rationale: string[];
   analysis: ScriptAnalysis;
   usedLlmMode: string;
+};
+
+export type AgentRunStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type WorkflowRunStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export type AgentRun = {
+  id: string;
+  workflowRunId: string;
+  profileId: string;
+  projectId: string | null;
+  agentName: string;
+  inputJson: Record<string, unknown>;
+  outputJson: Record<string, unknown>;
+  status: AgentRunStatus;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WorkflowRun = {
+  id: string;
+  profileId: string;
+  projectId: string | null;
+  workflowType: 'content_draft';
+  inputJson: Record<string, unknown>;
+  outputJson: Record<string, unknown> & {
+    createdIdeaIds?: string[];
+    createdScriptId?: string | null;
+  };
+  status: WorkflowRunStatus;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WorkflowRunDetail = WorkflowRun & {
+  runs: AgentRun[];
+};
+
+export type AgentWorkflowStartInput = {
+  profileId: string;
+  projectId?: string | null;
+  workflowType?: 'content_draft';
+  seedPrompt?: string;
+  createDrafts?: boolean;
 };

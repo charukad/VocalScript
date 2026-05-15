@@ -175,6 +175,14 @@ export type StoryboardScene = {
   negativePrompt: string;
   style: string;
   camera: string;
+  sceneGoal: string;
+  viewerEmotion: string;
+  visualHook: string;
+  motionStyle: string;
+  captionText: string;
+  transition: string;
+  soundEffect: string;
+  musicSuggestion: string;
   status: StoryboardSceneStatus;
 };
 

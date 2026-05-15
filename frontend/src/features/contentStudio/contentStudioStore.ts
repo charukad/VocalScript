@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   archiveIdea,
   createIdea,
+  createNarrationLine,
   createScript,
   createScriptVersion,
   getScript,
@@ -9,11 +10,16 @@ import {
   listScripts,
   splitScriptIntoLines,
   updateIdea,
+  updateNarrationLine,
   updateScript,
+  regenerateNarrationLine,
 } from './api';
 import type {
   ContentIdea,
   ContentIdeaInput,
+  NarrationLine,
+  NarrationLineInput,
+  NarrationLineUpdateInput,
   Script,
   ScriptDetail,
   ScriptInput,
@@ -38,6 +44,9 @@ type ContentStudioState = {
   updateScript: (scriptId: string, input: Partial<ScriptInput>) => Promise<ScriptDetail>;
   addVersion: (scriptId: string, input: ScriptVersionInput) => Promise<ScriptDetail>;
   splitLines: (scriptId: string) => Promise<ScriptDetail>;
+  addNarrationLine: (scriptId: string, input: NarrationLineInput) => Promise<NarrationLine>;
+  updateNarrationLine: (lineId: string, input: NarrationLineUpdateInput) => Promise<NarrationLine>;
+  regenerateNarrationLine: (lineId: string) => Promise<NarrationLine>;
 };
 
 const mergeScriptSummary = (scripts: Script[], detail: ScriptDetail): Script[] => {
@@ -219,6 +228,74 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
       return updated;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not split script';
+      set({ error: message });
+      throw error;
+    } finally {
+      set({ isSaving: false });
+    }
+  },
+  addNarrationLine: async (scriptId, input) => {
+    set({ isSaving: true, error: null });
+    try {
+      const line = await createNarrationLine(scriptId, input);
+      set(state => {
+        if (!state.selectedScript || state.selectedScript.id !== scriptId) return state;
+        return {
+          selectedScript: {
+            ...state.selectedScript,
+            narrationLines: [...state.selectedScript.narrationLines, line].sort((left, right) => left.index - right.index),
+          },
+        };
+      });
+      return line;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not create narration line';
+      set({ error: message });
+      throw error;
+    } finally {
+      set({ isSaving: false });
+    }
+  },
+  updateNarrationLine: async (lineId, input) => {
+    set({ isSaving: true, error: null });
+    try {
+      const line = await updateNarrationLine(lineId, input);
+      set(state => {
+        if (!state.selectedScript || state.selectedScript.id !== line.scriptId) return state;
+        return {
+          selectedScript: {
+            ...state.selectedScript,
+            narrationLines: state.selectedScript.narrationLines
+              .map(existing => existing.id === line.id ? line : existing)
+              .sort((left, right) => left.index - right.index),
+          },
+        };
+      });
+      return line;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not update narration line';
+      set({ error: message });
+      throw error;
+    } finally {
+      set({ isSaving: false });
+    }
+  },
+  regenerateNarrationLine: async (lineId) => {
+    set({ isSaving: true, error: null });
+    try {
+      const line = await regenerateNarrationLine(lineId);
+      set(state => {
+        if (!state.selectedScript || state.selectedScript.id !== line.scriptId) return state;
+        return {
+          selectedScript: {
+            ...state.selectedScript,
+            narrationLines: state.selectedScript.narrationLines.map(existing => existing.id === line.id ? line : existing),
+          },
+        };
+      });
+      return line;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not reset narration line';
       set({ error: message });
       throw error;
     } finally {

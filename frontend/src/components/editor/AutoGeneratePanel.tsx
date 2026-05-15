@@ -62,7 +62,23 @@ const promptDetailOptions: { value: StoryboardPromptDetail; label: string }[] = 
   { value: 'detailed', label: 'Detailed' },
 ];
 
-type SceneField = keyof Pick<StoryboardScene, 'start' | 'end' | 'transcript' | 'prompt' | 'visualType' | 'camera'>;
+type SceneField = keyof Pick<
+  StoryboardScene,
+  | 'start'
+  | 'end'
+  | 'transcript'
+  | 'prompt'
+  | 'visualType'
+  | 'camera'
+  | 'sceneGoal'
+  | 'viewerEmotion'
+  | 'visualHook'
+  | 'motionStyle'
+  | 'captionText'
+  | 'transition'
+  | 'soundEffect'
+  | 'musicSuggestion'
+>;
 
 const getAssetVariantCount = (asset: GeneratedMediaAsset | undefined): number => {
   if (!asset) return 0;
@@ -667,6 +683,82 @@ export const AutoGeneratePanel = () => {
                     onChange={event => updateScene(scene.id, 'prompt', event.target.value)}
                   />
                 </label>
+
+                <div className="auto-row-2">
+                  <label className="auto-field">
+                    <span>Scene Goal</span>
+                    <input
+                      value={scene.sceneGoal}
+                      onChange={event => updateScene(scene.id, 'sceneGoal', event.target.value)}
+                    />
+                  </label>
+                  <label className="auto-field">
+                    <span>Viewer Emotion</span>
+                    <input
+                      value={scene.viewerEmotion}
+                      onChange={event => updateScene(scene.id, 'viewerEmotion', event.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <label className="auto-field">
+                  <span>Visual Hook</span>
+                  <input
+                    value={scene.visualHook}
+                    onChange={event => updateScene(scene.id, 'visualHook', event.target.value)}
+                  />
+                </label>
+
+                <div className="auto-row-2">
+                  <label className="auto-field">
+                    <span>Camera</span>
+                    <input
+                      value={scene.camera}
+                      onChange={event => updateScene(scene.id, 'camera', event.target.value)}
+                    />
+                  </label>
+                  <label className="auto-field">
+                    <span>Motion Style</span>
+                    <input
+                      value={scene.motionStyle}
+                      onChange={event => updateScene(scene.id, 'motionStyle', event.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <div className="auto-row-2">
+                  <label className="auto-field">
+                    <span>Caption Text</span>
+                    <input
+                      value={scene.captionText}
+                      onChange={event => updateScene(scene.id, 'captionText', event.target.value)}
+                    />
+                  </label>
+                  <label className="auto-field">
+                    <span>Transition</span>
+                    <input
+                      value={scene.transition}
+                      onChange={event => updateScene(scene.id, 'transition', event.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <div className="auto-row-2">
+                  <label className="auto-field">
+                    <span>Sound Effect</span>
+                    <input
+                      value={scene.soundEffect}
+                      onChange={event => updateScene(scene.id, 'soundEffect', event.target.value)}
+                    />
+                  </label>
+                  <label className="auto-field">
+                    <span>Music Suggestion</span>
+                    <input
+                      value={scene.musicSuggestion}
+                      onChange={event => updateScene(scene.id, 'musicSuggestion', event.target.value)}
+                    />
+                  </label>
+                </div>
 
                 <label className="auto-field">
                   <span>Transcript - {formatSeconds(scene.start)} - {formatSeconds(scene.end)}</span>

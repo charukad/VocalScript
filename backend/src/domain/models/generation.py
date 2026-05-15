@@ -83,6 +83,14 @@ class StoryboardScene(ApiModel):
     )
     style: str = "cinematic realistic"
     camera: str = "static"
+    scene_goal: str = Field(default="", alias="sceneGoal")
+    viewer_emotion: str = Field(default="", alias="viewerEmotion")
+    visual_hook: str = Field(default="", alias="visualHook")
+    motion_style: str = Field(default="", alias="motionStyle")
+    caption_text: str = Field(default="", alias="captionText")
+    transition: str = "cut"
+    sound_effect: str = Field(default="", alias="soundEffect")
+    music_suggestion: str = Field(default="", alias="musicSuggestion")
     status: StoryboardSceneStatus = "draft"
 
 

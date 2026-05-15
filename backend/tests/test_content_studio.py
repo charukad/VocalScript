@@ -6,6 +6,8 @@ from backend.src.domain.models.content_profile import ContentProfileCreateReques
 from backend.src.domain.models.content_studio import (
     ContentIdeaCreateRequest,
     ContentIdeaUpdateRequest,
+    NarrationLineCreateRequest,
+    NarrationLineUpdateRequest,
     ScriptCreateRequest,
     ScriptSplitLinesRequest,
     ScriptUpdateRequest,
@@ -100,6 +102,37 @@ class ContentStudioTests(unittest.TestCase):
         self.assertEqual(len(detail.versions), 2)
         self.assertEqual([line.index for line in detail.narration_lines], [0, 1, 2])
         self.assertEqual(detail.latest_analysis, {"score": 82})
+
+    def test_narration_lines_can_be_created_updated_and_reset(self) -> None:
+        script = self.studio_service.create_script(
+            self.profile.id,
+            ScriptCreateRequest(title="Voice draft", content="Opening line."),
+        )
+        line = self.studio_service.create_narration_line(
+            script.id,
+            NarrationLineCreateRequest(
+                text="Custom line",
+                voiceStyle="energetic narrator",
+                emotion="curious",
+            ),
+        )
+        self.assertIsNotNone(line)
+        assert line is not None
+        updated = self.studio_service.update_narration_line(
+            line.id,
+            NarrationLineUpdateRequest(status="done", audioAssetId="asset-1", durationSeconds=1.25),
+        )
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.status, "done")
+        self.assertEqual(updated.audio_asset_id, "asset-1")
+
+        reset = self.studio_service.regenerate_narration_line(line.id)
+        self.assertIsNotNone(reset)
+        assert reset is not None
+        self.assertEqual(reset.status, "pending")
+        self.assertIsNone(reset.audio_asset_id)
+        self.assertIsNone(reset.duration_seconds)
 
 
 if __name__ == "__main__":

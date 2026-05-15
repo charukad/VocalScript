@@ -7,6 +7,8 @@ from backend.src.domain.models.content_studio import (
     ContentIdeaCreateRequest,
     ContentIdeaUpdateRequest,
     NarrationLine,
+    NarrationLineCreateRequest,
+    NarrationLineUpdateRequest,
     Script,
     ScriptCreateRequest,
     ScriptDetail,
@@ -167,6 +169,70 @@ class ContentStudioService:
         ]
         self.store.replace_narration_lines(script_id, narration_lines)
         return narration_lines
+
+    def list_narration_lines(self, script_id: str) -> Optional[List[NarrationLine]]:
+        if not self.store.get_script(script_id):
+            return None
+        return self.store.list_narration_lines(script_id)
+
+    def create_narration_line(
+        self,
+        script_id: str,
+        request: NarrationLineCreateRequest,
+    ) -> Optional[NarrationLine]:
+        if not self.store.get_script(script_id):
+            return None
+        existing = self.store.list_narration_lines(script_id)
+        now = utc_now_iso()
+        line = NarrationLine(
+            id=f"narration-line-{uuid.uuid4().hex[:12]}",
+            scriptId=script_id,
+            sceneId=request.scene_id,
+            index=request.index if request.index is not None else len(existing),
+            text=request.text,
+            voiceStyle=request.voice_style,
+            emotion=request.emotion,
+            speed=request.speed,
+            pauseAfterSeconds=request.pause_after_seconds,
+            status="pending",
+            createdAt=now,
+            updatedAt=now,
+        )
+        self.store.upsert_narration_line(line)
+        return line
+
+    def update_narration_line(
+        self,
+        line_id: str,
+        request: NarrationLineUpdateRequest,
+    ) -> Optional[NarrationLine]:
+        existing = self.store.get_narration_line(line_id)
+        if not existing:
+            return None
+        line = existing.model_copy(
+            update={
+                **request.model_dump(by_alias=False, exclude_unset=True),
+                "updated_at": utc_now_iso(),
+            }
+        )
+        self.store.upsert_narration_line(line)
+        return line
+
+    def regenerate_narration_line(self, line_id: str) -> Optional[NarrationLine]:
+        existing = self.store.get_narration_line(line_id)
+        if not existing:
+            return None
+        line = existing.model_copy(
+            update={
+                "status": "pending",
+                "error": None,
+                "audio_asset_id": None,
+                "duration_seconds": None,
+                "updated_at": utc_now_iso(),
+            }
+        )
+        self.store.upsert_narration_line(line)
+        return line
 
     def _split_text(self, text: str) -> List[str]:
         if not text:

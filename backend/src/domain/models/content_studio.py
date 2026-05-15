@@ -173,6 +173,48 @@ class NarrationLine(ApiModel):
     updated_at: str = Field(alias="updatedAt")
 
 
+class NarrationLineCreateRequest(ApiModel):
+    text: str
+    scene_id: Optional[str] = Field(default=None, alias="sceneId")
+    index: Optional[int] = None
+    voice_style: Optional[str] = Field(default=None, alias="voiceStyle")
+    emotion: Optional[str] = None
+    speed: Optional[str] = None
+    pause_after_seconds: Optional[float] = Field(default=None, alias="pauseAfterSeconds")
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Narration line text is required")
+        return cleaned
+
+
+class NarrationLineUpdateRequest(ApiModel):
+    text: Optional[str] = None
+    scene_id: Optional[str] = Field(default=None, alias="sceneId")
+    index: Optional[int] = None
+    voice_style: Optional[str] = Field(default=None, alias="voiceStyle")
+    emotion: Optional[str] = None
+    speed: Optional[str] = None
+    pause_after_seconds: Optional[float] = Field(default=None, alias="pauseAfterSeconds")
+    audio_asset_id: Optional[str] = Field(default=None, alias="audioAssetId")
+    duration_seconds: Optional[float] = Field(default=None, alias="durationSeconds")
+    status: Optional[NarrationLineStatus] = None
+    error: Optional[str] = None
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Narration line text is required")
+        return cleaned
+
+
 class ScriptSplitLinesRequest(ApiModel):
     text: Optional[str] = None
 

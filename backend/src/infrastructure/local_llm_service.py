@@ -472,11 +472,14 @@ Create a timed visual storyboard for an auto-generated video.
 
 Rules:
 - Return JSON with a top-level "scenes" array.
-- Each scene must include start, end, transcript, visualType, prompt, negativePrompt, style, camera.
+- Each scene must include start, end, transcript, visualType, prompt, negativePrompt, style, camera, sceneGoal, viewerEmotion, visualHook, motionStyle, captionText, transition, soundEffect, musicSuggestion.
 - Scene count density: {request.scene_density}.
 - Video/image mix: about {video_mix}% of scenes should be video and the rest image.
 - Motion intensity for video scenes: {request.motion_intensity}.
 - Prompt detail level: {request.prompt_detail}.
+- Use strong opening-frame intent in the first 3 seconds.
+- Prefer scene changes every 2-4 seconds for short-form pacing when the transcript allows it.
+- Captions should be short, mobile-readable overlays; prompts must still describe visuals only.
 - Keep scene timings inside the transcript segment timings when provided.
 - Prompts must describe visuals only. Do not ask for subtitles or readable on-screen text.
 - Style target: {request.style}

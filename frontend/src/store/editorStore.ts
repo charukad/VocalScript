@@ -722,6 +722,14 @@ const normalizeStoryboardScenes = (
           ? 'subtle slow push-in'
           : 'slow cinematic push-in'
       : 'static'),
+    sceneGoal: scene.sceneGoal || (index === 0 ? 'Hook attention immediately' : 'Advance the story and maintain retention'),
+    viewerEmotion: scene.viewerEmotion || (index === 0 ? 'curiosity' : 'engagement'),
+    visualHook: scene.visualHook || '',
+    motionStyle: scene.motionStyle || (scene.visualType === 'video' ? 'steady cinematic movement' : 'static composition'),
+    captionText: scene.captionText || '',
+    transition: scene.transition || 'cut',
+    soundEffect: scene.soundEffect || '',
+    musicSuggestion: scene.musicSuggestion || '',
     status: scene.status || 'draft',
   }));
 };
@@ -2550,6 +2558,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         negativePrompt: 'low quality, blurry, distorted, watermark, readable text',
         style: state.storyboardSettings.style,
         camera: state.storyboardSettings.visualType === 'video' ? 'slow cinematic push-in' : 'static',
+        sceneGoal: previous ? 'Advance the story and maintain retention' : 'Hook attention immediately',
+        viewerEmotion: previous ? 'engagement' : 'curiosity',
+        visualHook: '',
+        motionStyle: state.storyboardSettings.visualType === 'video' ? 'steady cinematic movement' : 'static composition',
+        captionText: '',
+        transition: 'cut',
+        soundEffect: '',
+        musicSuggestion: '',
         status: 'draft',
       };
       return {

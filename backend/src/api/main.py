@@ -24,6 +24,7 @@ from backend.src.domain.services.project_service import ProjectService
 from backend.src.domain.services.sqlite_store import SQLiteStore
 from backend.src.domain.services.storyboard_service import StoryboardService
 from backend.src.domain.services.viral_scoring_service import ViralScoringService
+from backend.src.agents.orchestrator import AgentOrchestrator
 from backend.src.api.animation import build_animation_router
 from backend.src.api.browser_bridge import build_browser_bridge_router
 from backend.src.api.content_profiles import build_content_profiles_router
@@ -31,6 +32,7 @@ from backend.src.api.content_studio import build_content_studio_router
 from backend.src.api.generation import build_generation_router
 from backend.src.api.projects import build_projects_router
 from backend.src.api.viral import build_viral_router
+from backend.src.api.agents import build_agents_router
 from backend.src.config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -59,6 +61,13 @@ project_service = ProjectService(settings.projects.projects_dir, store=sqlite_st
 content_profile_service = ContentProfileService(sqlite_store)
 content_studio_service = ContentStudioService(sqlite_store)
 viral_scoring_service = ViralScoringService(local_llm_service)
+agent_orchestrator = AgentOrchestrator(
+    sqlite_store,
+    content_profile_service,
+    content_studio_service,
+    storyboard_service,
+    viral_scoring_service,
+)
 generation_queue_service = GenerationQueueService(
     settings.browser_bridge.generated_media_dir,
     projects_dir=settings.projects.projects_dir,
@@ -71,6 +80,7 @@ app.include_router(build_projects_router(project_service))
 app.include_router(build_content_profiles_router(content_profile_service))
 app.include_router(build_content_studio_router(content_profile_service, content_studio_service))
 app.include_router(build_viral_router(viral_scoring_service))
+app.include_router(build_agents_router(agent_orchestrator))
 app.include_router(build_browser_bridge_router(browser_bridge_service, settings.browser_bridge.session_token))
 
 def _format_vtt_timestamp(seconds: float) -> str:

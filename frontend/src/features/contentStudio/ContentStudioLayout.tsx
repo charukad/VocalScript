@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useContentProfileStore } from '../contentProfiles/contentProfileStore';
 import { IdeasTab } from './IdeasTab';
 import { ScriptLabTab } from './ScriptLabTab';
+import { AgentsTab } from './AgentsTab';
+import { VoiceTab } from './VoiceTab';
 import { useContentStudioStore } from './contentStudioStore';
 
 type StudioTab = 'ideas' | 'script_lab' | 'storyboard' | 'voice' | 'analytics' | 'agents';
@@ -71,7 +73,9 @@ export const ContentStudioLayout = () => {
             {isLoading && <div className="studio-empty studio-empty-large">Loading studio workspace...</div>}
             {!isLoading && activeTab === 'ideas' && <IdeasTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'script_lab' && <ScriptLabTab profileId={selectedProfileId} />}
-            {!isLoading && ['storyboard', 'voice', 'analytics', 'agents'].includes(activeTab) && (
+            {!isLoading && activeTab === 'voice' && <VoiceTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'agents' && <AgentsTab profileId={selectedProfileId} />}
+            {!isLoading && ['storyboard', 'analytics'].includes(activeTab) && (
               <div className="studio-empty studio-empty-large">{tabs.find(tab => tab.id === activeTab)?.label} is ready for the next phase.</div>
             )}
           </>

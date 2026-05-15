@@ -212,6 +212,14 @@ class StoryboardService:
             negativePrompt="low quality, blurry, distorted, watermark, subtitles, readable text",
             style=style,
             camera=self._camera_for_visual_type(visual_type, motion_intensity),
+            sceneGoal=self._scene_goal(index),
+            viewerEmotion=self._viewer_emotion(index),
+            visualHook=self._visual_hook(index, clean_text),
+            motionStyle=self._motion_style(visual_type, motion_intensity),
+            captionText=self._caption_excerpt(clean_text),
+            transition="cut",
+            soundEffect=self._sound_effect(index),
+            musicSuggestion="subtle upbeat bed",
             status="draft",
         )
 
@@ -227,17 +235,18 @@ class StoryboardService:
         prompt = str(raw_scene.get("prompt") or "").strip()
         if not transcript:
             transcript = self._transcript_for_time(request.segments, start, end) or request.transcript[:220]
+        default_scene = self._scene_from_group(
+            index,
+            start,
+            end,
+            transcript,
+            request.preferred_visual_type,
+            request.style,
+            request.motion_intensity,
+            request.prompt_detail,
+        )
         if not prompt:
-            prompt = self._scene_from_group(
-                index,
-                start,
-                end,
-                transcript,
-                request.preferred_visual_type,
-                request.style,
-                request.motion_intensity,
-                request.prompt_detail,
-            ).prompt
+            prompt = default_scene.prompt
 
         return {
             "id": str(raw_scene.get("id") or f"scene-{index:03d}"),
@@ -252,6 +261,14 @@ class StoryboardService:
                 raw_scene.get("visualType") or raw_scene.get("visual_type") or request.preferred_visual_type,
                 request.motion_intensity,
             ),
+            "sceneGoal": raw_scene.get("sceneGoal") or raw_scene.get("scene_goal") or default_scene.scene_goal,
+            "viewerEmotion": raw_scene.get("viewerEmotion") or raw_scene.get("viewer_emotion") or default_scene.viewer_emotion,
+            "visualHook": raw_scene.get("visualHook") or raw_scene.get("visual_hook") or default_scene.visual_hook,
+            "motionStyle": raw_scene.get("motionStyle") or raw_scene.get("motion_style") or default_scene.motion_style,
+            "captionText": raw_scene.get("captionText") or raw_scene.get("caption_text") or default_scene.caption_text,
+            "transition": raw_scene.get("transition") or default_scene.transition,
+            "soundEffect": raw_scene.get("soundEffect") or raw_scene.get("sound_effect") or default_scene.sound_effect,
+            "musicSuggestion": raw_scene.get("musicSuggestion") or raw_scene.get("music_suggestion") or default_scene.music_suggestion,
             "status": raw_scene.get("status") or "draft",
         }
 
@@ -302,6 +319,7 @@ class StoryboardService:
                         "visual_type": visual_type,
                         "prompt": prompt,
                         "camera": self._camera_for_visual_type(visual_type, request.motion_intensity),
+                        "motion_style": self._motion_style(visual_type, request.motion_intensity),
                     }
                 )
             )
@@ -355,6 +373,37 @@ class StoryboardService:
         if "no readable text" in clean.lower():
             return clean
         return f"{clean.rstrip('.')}. {suffix}"
+
+    def _scene_goal(self, index: int) -> str:
+        if index == 1:
+            return "Hook attention immediately"
+        return "Advance the story and maintain retention"
+
+    def _viewer_emotion(self, index: int) -> str:
+        if index == 1:
+            return "curiosity"
+        return "engagement"
+
+    def _visual_hook(self, index: int, transcript: str) -> str:
+        subject = self._prompt_subject(transcript)
+        if index == 1:
+            return f"Pattern-interrupt opening focused on {subject}"
+        return f"Clear subject-led visual beat for {subject}"
+
+    def _motion_style(self, visual_type: GeneratedMediaType, motion_intensity: str) -> str:
+        if visual_type == "image":
+            return "static composition"
+        if motion_intensity == "dynamic":
+            return "fast push-in with energetic movement"
+        if motion_intensity == "subtle":
+            return "gentle push-in"
+        return "steady cinematic movement"
+
+    def _caption_excerpt(self, transcript: str) -> str:
+        return " ".join(transcript.split()[:10])
+
+    def _sound_effect(self, index: int) -> str:
+        return "whoosh" if index == 1 else ""
 
     def _duration_from_request(self, request: StoryboardRequest) -> float:
         if request.segments:

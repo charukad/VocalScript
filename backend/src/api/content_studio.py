@@ -5,7 +5,10 @@ from backend.src.domain.models.content_studio import (
     ContentIdeaCreateRequest,
     ContentIdeaListResponse,
     ContentIdeaUpdateRequest,
+    NarrationLine,
+    NarrationLineCreateRequest,
     NarrationLineListResponse,
+    NarrationLineUpdateRequest,
     ScriptCreateRequest,
     ScriptDetail,
     ScriptListResponse,
@@ -95,5 +98,33 @@ def build_content_studio_router(
         if lines is None:
             raise HTTPException(status_code=404, detail="Script not found")
         return NarrationLineListResponse(lines=lines)
+
+    @router.get("/api/scripts/{script_id}/narration-lines", response_model=NarrationLineListResponse)
+    async def list_narration_lines(script_id: str):
+        lines = content_studio_service.list_narration_lines(script_id)
+        if lines is None:
+            raise HTTPException(status_code=404, detail="Script not found")
+        return NarrationLineListResponse(lines=lines)
+
+    @router.post("/api/scripts/{script_id}/narration-lines", response_model=NarrationLine)
+    async def create_narration_line(script_id: str, request: NarrationLineCreateRequest):
+        line = content_studio_service.create_narration_line(script_id, request)
+        if not line:
+            raise HTTPException(status_code=404, detail="Script not found")
+        return line
+
+    @router.put("/api/narration-lines/{line_id}", response_model=NarrationLine)
+    async def update_narration_line(line_id: str, request: NarrationLineUpdateRequest):
+        line = content_studio_service.update_narration_line(line_id, request)
+        if not line:
+            raise HTTPException(status_code=404, detail="Narration line not found")
+        return line
+
+    @router.post("/api/narration-lines/{line_id}/regenerate", response_model=NarrationLine)
+    async def regenerate_narration_line(line_id: str):
+        line = content_studio_service.regenerate_narration_line(line_id)
+        if not line:
+            raise HTTPException(status_code=404, detail="Narration line not found")
+        return line
 
     return router

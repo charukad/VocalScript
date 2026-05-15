@@ -15,6 +15,7 @@ from backend.src.domain.models.generation import (
 )
 from backend.src.domain.models.content_profile import ContentProfile
 from backend.src.domain.models.content_studio import ContentIdea, NarrationLine, Script, ScriptVersion
+from backend.src.domain.models.agent import AgentRun, WorkflowRun
 from backend.src.domain.models.project import ProjectDetail, ProjectSummary
 
 
@@ -229,6 +230,83 @@ class SQLiteStore:
                 CREATE INDEX IF NOT EXISTS idx_narration_lines_script_order
                     ON narration_lines(script_id, order_index ASC);
 
+                CREATE TABLE IF NOT EXISTS workflow_runs (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    project_id TEXT,
+                    workflow_type TEXT NOT NULL,
+                    input_json TEXT NOT NULL,
+                    output_json TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL,
+                    error_message TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    workflow_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_workflow_runs_profile_updated
+                    ON workflow_runs(profile_id, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS agent_runs (
+                    id TEXT PRIMARY KEY,
+                    workflow_run_id TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    project_id TEXT,
+                    agent_name TEXT NOT NULL,
+                    input_json TEXT NOT NULL,
+                    output_json TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL,
+                    error_message TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    run_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_agent_runs_profile_updated
+                    ON agent_runs(profile_id, updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_agent_runs_workflow_order
+                    ON agent_runs(workflow_run_id, created_at ASC);
+
+                CREATE TABLE IF NOT EXISTS agent_tasks (
+                    id TEXT PRIMARY KEY,
+                    workflow_run_id TEXT NOT NULL,
+                    agent_run_id TEXT,
+                    task_name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    input_json TEXT NOT NULL DEFAULT '{}',
+                    output_json TEXT NOT NULL DEFAULT '{}',
+                    error_message TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS agent_outputs (
+                    id TEXT PRIMARY KEY,
+                    workflow_run_id TEXT NOT NULL,
+                    agent_run_id TEXT,
+                    output_type TEXT NOT NULL,
+                    output_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS profile_learnings (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    learning_type TEXT NOT NULL,
+                    learning_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS content_performance_rules (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    rule_key TEXT NOT NULL,
+                    rule_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
                 VALUES (1, CURRENT_TIMESTAMP);
 
@@ -237,6 +315,9 @@ class SQLiteStore:
 
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
                 VALUES (3, CURRENT_TIMESTAMP);
+
+                INSERT OR IGNORE INTO schema_migrations(version, applied_at)
+                VALUES (4, CURRENT_TIMESTAMP);
                 """
             )
             self._ensure_columns(
@@ -815,6 +896,61 @@ class SQLiteStore:
                     ),
                 )
 
+    def upsert_narration_line(self, line: NarrationLine) -> None:
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO narration_lines (
+                    id, script_id, scene_id, order_index, text, voice_style, emotion,
+                    speed, pause_after_seconds, audio_asset_id, duration_seconds,
+                    status, error, created_at, updated_at, line_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    script_id = excluded.script_id,
+                    scene_id = excluded.scene_id,
+                    order_index = excluded.order_index,
+                    text = excluded.text,
+                    voice_style = excluded.voice_style,
+                    emotion = excluded.emotion,
+                    speed = excluded.speed,
+                    pause_after_seconds = excluded.pause_after_seconds,
+                    audio_asset_id = excluded.audio_asset_id,
+                    duration_seconds = excluded.duration_seconds,
+                    status = excluded.status,
+                    error = excluded.error,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    line_json = excluded.line_json
+                """,
+                (
+                    line.id,
+                    line.script_id,
+                    line.scene_id,
+                    line.index,
+                    line.text,
+                    line.voice_style,
+                    line.emotion,
+                    line.speed,
+                    line.pause_after_seconds,
+                    line.audio_asset_id,
+                    line.duration_seconds,
+                    line.status,
+                    line.error,
+                    line.created_at,
+                    line.updated_at,
+                    _json_dumps(line.model_dump(by_alias=True)),
+                ),
+            )
+
+    def get_narration_line(self, line_id: str) -> Optional[NarrationLine]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute(
+                "SELECT line_json FROM narration_lines WHERE id = ?",
+                (line_id,),
+            ).fetchone()
+        return self._narration_line_from_json(row["line_json"]) if row else None
+
     def list_narration_lines(self, script_id: str) -> List[NarrationLine]:
         with self._lock, self._registry_connect() as connection:
             rows = connection.execute(
@@ -826,6 +962,119 @@ class SQLiteStore:
                 (script_id,),
             ).fetchall()
         return [line for row in rows if (line := self._narration_line_from_json(row["line_json"]))]
+
+    def upsert_workflow_run(self, workflow: WorkflowRun) -> None:
+        payload = workflow.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO workflow_runs (
+                    id, profile_id, project_id, workflow_type, input_json, output_json,
+                    status, error_message, created_at, updated_at, workflow_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    project_id = excluded.project_id,
+                    workflow_type = excluded.workflow_type,
+                    input_json = excluded.input_json,
+                    output_json = excluded.output_json,
+                    status = excluded.status,
+                    error_message = excluded.error_message,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    workflow_json = excluded.workflow_json
+                """,
+                (
+                    workflow.id,
+                    workflow.profile_id,
+                    workflow.project_id,
+                    workflow.workflow_type,
+                    _json_dumps(workflow.input_json),
+                    _json_dumps(workflow.output_json),
+                    workflow.status,
+                    workflow.error_message,
+                    workflow.created_at,
+                    workflow.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_workflow_run(self, workflow_id: str) -> Optional[WorkflowRun]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute(
+                "SELECT workflow_json FROM workflow_runs WHERE id = ?",
+                (workflow_id,),
+            ).fetchone()
+        return self._workflow_run_from_json(row["workflow_json"]) if row else None
+
+    def upsert_agent_run(self, run: AgentRun) -> None:
+        payload = run.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO agent_runs (
+                    id, workflow_run_id, profile_id, project_id, agent_name, input_json,
+                    output_json, status, error_message, created_at, updated_at, run_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    workflow_run_id = excluded.workflow_run_id,
+                    profile_id = excluded.profile_id,
+                    project_id = excluded.project_id,
+                    agent_name = excluded.agent_name,
+                    input_json = excluded.input_json,
+                    output_json = excluded.output_json,
+                    status = excluded.status,
+                    error_message = excluded.error_message,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    run_json = excluded.run_json
+                """,
+                (
+                    run.id,
+                    run.workflow_run_id,
+                    run.profile_id,
+                    run.project_id,
+                    run.agent_name,
+                    _json_dumps(run.input_json),
+                    _json_dumps(run.output_json),
+                    run.status,
+                    run.error_message,
+                    run.created_at,
+                    run.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def list_agent_runs(
+        self,
+        profile_id: Optional[str] = None,
+        workflow_run_id: Optional[str] = None,
+    ) -> List[AgentRun]:
+        where: List[str] = []
+        params: List[Any] = []
+        if profile_id:
+            where.append("profile_id = ?")
+            params.append(profile_id)
+        if workflow_run_id:
+            where.append("workflow_run_id = ?")
+            params.append(workflow_run_id)
+        query = "SELECT run_json FROM agent_runs"
+        if where:
+            query += f" WHERE {' AND '.join(where)}"
+        query += " ORDER BY created_at DESC, updated_at DESC"
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        runs = [run for row in rows if (run := self._agent_run_from_json(row["run_json"]))]
+        if workflow_run_id:
+            return list(reversed(runs))
+        return runs
+
+    def get_agent_run(self, run_id: str) -> Optional[AgentRun]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute("SELECT run_json FROM agent_runs WHERE id = ?", (run_id,)).fetchone()
+        return self._agent_run_from_json(row["run_json"]) if row else None
 
     def get_project(self, project_id: str) -> Optional[ProjectDetail]:
         row = self._registry_project_row(project_id)
@@ -1917,6 +2166,18 @@ class SQLiteStore:
     def _narration_line_from_json(self, raw: str) -> Optional[NarrationLine]:
         try:
             return NarrationLine(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _workflow_run_from_json(self, raw: str) -> Optional[WorkflowRun]:
+        try:
+            return WorkflowRun(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _agent_run_from_json(self, raw: str) -> Optional[AgentRun]:
+        try:
+            return AgentRun(**_json_loads(raw, {}))
         except ValueError:
             return None
 

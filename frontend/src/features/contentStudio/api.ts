@@ -1,13 +1,18 @@
 import type {
   ContentIdea,
   ContentIdeaInput,
+  AgentRun,
+  AgentWorkflowStartInput,
   NarrationLine,
+  NarrationLineInput,
+  NarrationLineUpdateInput,
   Script,
   ScriptDetail,
   ScriptInput,
   ScriptAnalysis,
   ScriptRewrite,
   ScriptVersionInput,
+  WorkflowRunDetail,
 } from './types';
 
 const API_BASE_URL = 'http://localhost:8000';
@@ -22,6 +27,10 @@ type ScriptListResponse = {
 
 type NarrationLineListResponse = {
   lines: NarrationLine[];
+};
+
+type AgentRunListResponse = {
+  runs: AgentRun[];
 };
 
 const formatApiError = async (response: Response, fallback: string): Promise<Error> => {
@@ -158,6 +167,57 @@ export const splitScriptIntoLines = async (
   return response.json();
 };
 
+export const listNarrationLines = async (
+  scriptId: string,
+  signal?: AbortSignal,
+): Promise<NarrationLineListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/scripts/${scriptId}/narration-lines`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load narration lines');
+  return response.json();
+};
+
+export const createNarrationLine = async (
+  scriptId: string,
+  input: NarrationLineInput,
+  signal?: AbortSignal,
+): Promise<NarrationLine> => {
+  const response = await fetch(`${API_BASE_URL}/api/scripts/${scriptId}/narration-lines`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not create narration line');
+  return response.json();
+};
+
+export const updateNarrationLine = async (
+  lineId: string,
+  input: NarrationLineUpdateInput,
+  signal?: AbortSignal,
+): Promise<NarrationLine> => {
+  const response = await fetch(`${API_BASE_URL}/api/narration-lines/${lineId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not update narration line');
+  return response.json();
+};
+
+export const regenerateNarrationLine = async (
+  lineId: string,
+  signal?: AbortSignal,
+): Promise<NarrationLine> => {
+  const response = await fetch(`${API_BASE_URL}/api/narration-lines/${lineId}/regenerate`, {
+    method: 'POST',
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not reset narration line');
+  return response.json();
+};
+
 export const analyzeScript = async (
   script: string,
   signal?: AbortSignal,
@@ -183,5 +243,37 @@ export const rewriteScriptForVirality = async (
     signal,
   });
   if (!response.ok) throw await formatApiError(response, 'Could not rewrite script');
+  return response.json();
+};
+
+export const startAgentWorkflow = async (
+  input: AgentWorkflowStartInput,
+  signal?: AbortSignal,
+): Promise<WorkflowRunDetail> => {
+  const response = await fetch(`${API_BASE_URL}/api/agents/workflows/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not start agent workflow');
+  return response.json();
+};
+
+export const getAgentWorkflow = async (
+  workflowId: string,
+  signal?: AbortSignal,
+): Promise<WorkflowRunDetail> => {
+  const response = await fetch(`${API_BASE_URL}/api/agents/workflows/${workflowId}`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load agent workflow');
+  return response.json();
+};
+
+export const listAgentRuns = async (
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<AgentRunListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/agents/runs?profileId=${profileId}`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load agent runs');
   return response.json();
 };
