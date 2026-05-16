@@ -70,6 +70,60 @@ export type ContentTrendInput = {
   status?: ContentTrendStatus;
 };
 
+export type CompetitorContentStatus = 'active' | 'archived';
+
+export type CompetitorContent = {
+  id: string;
+  profileId: string;
+  competitorName: string;
+  platform: PlatformTarget;
+  title: string;
+  contentUrl: string | null;
+  publishedAt: string | null;
+  topic: string;
+  hook: string;
+  format: string;
+  videoLengthSeconds: number | null;
+  views: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  notes: string;
+  status: CompetitorContentStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CompetitorContentInput = {
+  competitorName: string;
+  platform: PlatformTarget;
+  title: string;
+  contentUrl?: string | null;
+  publishedAt?: string | null;
+  topic?: string;
+  hook?: string;
+  format?: string;
+  videoLengthSeconds?: number | null;
+  views?: number;
+  likes?: number;
+  comments?: number;
+  shares?: number;
+  notes?: string;
+  status?: CompetitorContentStatus;
+};
+
+export type CompetitorAnalysisSummary = {
+  competitorCount: number;
+  contentCount: number;
+  averageViews: number;
+  averageEngagementRate: number;
+  topCompetitor: string | null;
+  topTopic: string | null;
+  strongestHook: string | null;
+  averageVideoLengthSeconds: number | null;
+  recommendations: string[];
+};
+
 export type Script = {
   id: string;
   profileId: string;

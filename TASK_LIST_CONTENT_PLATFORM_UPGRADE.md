@@ -35,7 +35,7 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Phase 10: AI Timeline Builder
 - `[x]` Phase 11: Analytics Integration Foundation
 - `[x]` Phase 12: Analytics Agent and Learning Agent
-- `[ ]` Phase 13: Advanced Creator Features
+- `[/]` Phase 13: Advanced Creator Features
 
 ## Phase 0: Repository Inspection and Safety
 
@@ -289,7 +289,7 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 
 ## Phase 13: Advanced Creator Features
 
-- `[ ]` Competitor content analyzer.
+- `[x]` Competitor content analyzer with manual local observations and summary insights.
 - `[ ]` Trend radar with external data sources.
 - `[ ]` Thumbnail/title generator.
 - `[ ]` Auto caption designer.

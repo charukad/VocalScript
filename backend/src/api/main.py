@@ -18,6 +18,7 @@ from backend.src.domain.services.export_orchestrator import ExportOrchestrator, 
 from backend.src.domain.services.browser_bridge_service import BrowserBridgeService
 from backend.src.domain.services.content_profile_service import ContentProfileService
 from backend.src.domain.services.content_studio_service import ContentStudioService
+from backend.src.domain.services.competitor_service import CompetitorService
 from backend.src.domain.services.animation_planner_service import AnimationPlannerService
 from backend.src.domain.services.analytics_service import AnalyticsService
 from backend.src.domain.services.generation_queue_service import GenerationQueueService
@@ -32,6 +33,7 @@ from backend.src.api.analytics import build_analytics_router
 from backend.src.api.browser_bridge import build_browser_bridge_router
 from backend.src.api.content_profiles import build_content_profiles_router
 from backend.src.api.content_studio import build_content_studio_router
+from backend.src.api.competitors import build_competitors_router
 from backend.src.api.generation import build_generation_router
 from backend.src.api.projects import build_projects_router
 from backend.src.api.viral import build_viral_router
@@ -63,6 +65,7 @@ sqlite_store = SQLiteStore(registry_database_path, legacy_database_path=legacy_d
 project_service = ProjectService(settings.projects.projects_dir, store=sqlite_store)
 content_profile_service = ContentProfileService(sqlite_store)
 content_studio_service = ContentStudioService(sqlite_store)
+competitor_service = CompetitorService(sqlite_store)
 viral_scoring_service = ViralScoringService(local_llm_service)
 timeline_builder_service = TimelineBuilderService()
 analytics_service = AnalyticsService(sqlite_store, content_profile_service)
@@ -96,6 +99,7 @@ app.include_router(build_content_studio_router(
     generation_queue_service,
     timeline_builder_service,
 ))
+app.include_router(build_competitors_router(content_profile_service, competitor_service))
 app.include_router(build_analytics_router(content_profile_service, analytics_service))
 app.include_router(build_viral_router(viral_scoring_service))
 app.include_router(build_agents_router(agent_orchestrator))

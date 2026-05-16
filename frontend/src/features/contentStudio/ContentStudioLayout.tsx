@@ -7,13 +7,15 @@ import { VoiceTab } from './VoiceTab';
 import { StoryboardTab } from './StoryboardTab';
 import { AnalyticsTab } from './AnalyticsTab';
 import { TrendingTopicsTab } from './TrendingTopicsTab';
+import { CompetitorsTab } from './CompetitorsTab';
 import { useContentStudioStore } from './contentStudioStore';
 
-type StudioTab = 'ideas' | 'trending_topics' | 'script_lab' | 'storyboard' | 'voice' | 'analytics' | 'agents';
+type StudioTab = 'ideas' | 'trending_topics' | 'competitors' | 'script_lab' | 'storyboard' | 'voice' | 'analytics' | 'agents';
 
 const tabs: { id: StudioTab; label: string }[] = [
   { id: 'ideas', label: 'Ideas' },
   { id: 'trending_topics', label: 'Trending Topics' },
+  { id: 'competitors', label: 'Competitors' },
   { id: 'script_lab', label: 'Script Lab' },
   { id: 'storyboard', label: 'Storyboard' },
   { id: 'voice', label: 'Voice' },
@@ -77,6 +79,7 @@ export const ContentStudioLayout = () => {
             {isLoading && <div className="studio-empty studio-empty-large">Loading studio workspace...</div>}
             {!isLoading && activeTab === 'ideas' && <IdeasTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'trending_topics' && <TrendingTopicsTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'competitors' && <CompetitorsTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'script_lab' && <ScriptLabTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'storyboard' && <StoryboardTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'voice' && <VoiceTab profileId={selectedProfileId} />}

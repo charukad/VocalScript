@@ -3,6 +3,9 @@ import type {
   ContentIdeaInput,
   ContentTrend,
   ContentTrendInput,
+  CompetitorAnalysisSummary,
+  CompetitorContent,
+  CompetitorContentInput,
   AgentRun,
   AgentWorkflowStartInput,
   AnalyticsConnection,
@@ -58,6 +61,10 @@ type ContentPerformanceListResponse = {
 
 type ProfileLearningListResponse = {
   learnings: ProfileLearning[];
+};
+
+type CompetitorContentListResponse = {
+  items: CompetitorContent[];
 };
 
 const formatApiError = async (response: Response, fallback: string): Promise<Error> => {
@@ -177,6 +184,66 @@ export const archiveTrend = async (
     signal,
   });
   if (!response.ok) throw await formatApiError(response, 'Could not archive trend');
+  return response.json();
+};
+
+export const listCompetitorContent = async (
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<CompetitorContentListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/competitor-content`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load competitor content');
+  return response.json();
+};
+
+export const createCompetitorContent = async (
+  profileId: string,
+  input: CompetitorContentInput,
+  signal?: AbortSignal,
+): Promise<CompetitorContent> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/competitor-content`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not create competitor content');
+  return response.json();
+};
+
+export const updateCompetitorContent = async (
+  itemId: string,
+  input: Partial<CompetitorContentInput>,
+  signal?: AbortSignal,
+): Promise<CompetitorContent> => {
+  const response = await fetch(`${API_BASE_URL}/api/competitor-content/${itemId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not update competitor content');
+  return response.json();
+};
+
+export const archiveCompetitorContent = async (
+  itemId: string,
+  signal?: AbortSignal,
+): Promise<CompetitorContent> => {
+  const response = await fetch(`${API_BASE_URL}/api/competitor-content/${itemId}`, {
+    method: 'DELETE',
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not archive competitor content');
+  return response.json();
+};
+
+export const getCompetitorSummary = async (
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<CompetitorAnalysisSummary> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/competitor-content/summary`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not summarize competitor content');
   return response.json();
 };
 

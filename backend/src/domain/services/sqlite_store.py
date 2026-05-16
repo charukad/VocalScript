@@ -21,6 +21,7 @@ from backend.src.domain.models.analytics import (
     ContentPerformance,
     ProfileLearning,
 )
+from backend.src.domain.models.competitor import CompetitorContent
 from backend.src.domain.models.content_profile import ContentProfile
 from backend.src.domain.models.content_studio import ContentIdea, ContentTrend, NarrationLine, Script, ScriptVersion
 from backend.src.domain.models.agent import AgentRun, WorkflowRun
@@ -409,6 +410,32 @@ class SQLiteStore:
 
                 CREATE INDEX IF NOT EXISTS idx_content_performance_profile
                     ON content_performance(profile_id, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS competitor_content (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    competitor_name TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    content_url TEXT,
+                    published_at TEXT,
+                    topic TEXT NOT NULL DEFAULT '',
+                    hook TEXT NOT NULL DEFAULT '',
+                    format TEXT NOT NULL DEFAULT '',
+                    video_length_seconds REAL,
+                    views INTEGER NOT NULL DEFAULT 0,
+                    likes INTEGER NOT NULL DEFAULT 0,
+                    comments INTEGER NOT NULL DEFAULT 0,
+                    shares INTEGER NOT NULL DEFAULT 0,
+                    notes TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    content_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_competitor_content_profile
+                    ON competitor_content(profile_id, status, updated_at DESC);
 
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
                 VALUES (1, CURRENT_TIMESTAMP);
@@ -1455,6 +1482,85 @@ class SQLiteStore:
             performance
             for row in rows
             if (performance := self._content_performance_from_json(row["performance_json"]))
+        ]
+
+    def upsert_competitor_content(self, item: CompetitorContent) -> None:
+        payload = item.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO competitor_content (
+                    id, profile_id, competitor_name, platform, title, content_url, published_at,
+                    topic, hook, format, video_length_seconds, views, likes, comments, shares,
+                    notes, status, created_at, updated_at, content_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    competitor_name = excluded.competitor_name,
+                    platform = excluded.platform,
+                    title = excluded.title,
+                    content_url = excluded.content_url,
+                    published_at = excluded.published_at,
+                    topic = excluded.topic,
+                    hook = excluded.hook,
+                    format = excluded.format,
+                    video_length_seconds = excluded.video_length_seconds,
+                    views = excluded.views,
+                    likes = excluded.likes,
+                    comments = excluded.comments,
+                    shares = excluded.shares,
+                    notes = excluded.notes,
+                    status = excluded.status,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    content_json = excluded.content_json
+                """,
+                (
+                    item.id,
+                    item.profile_id,
+                    item.competitor_name,
+                    item.platform,
+                    item.title,
+                    item.content_url,
+                    item.published_at,
+                    item.topic,
+                    item.hook,
+                    item.format,
+                    item.video_length_seconds,
+                    item.views,
+                    item.likes,
+                    item.comments,
+                    item.shares,
+                    item.notes,
+                    item.status,
+                    item.created_at,
+                    item.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_competitor_content(self, item_id: str) -> Optional[CompetitorContent]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute(
+                "SELECT content_json FROM competitor_content WHERE id = ?",
+                (item_id,),
+            ).fetchone()
+        return self._competitor_content_from_json(row["content_json"]) if row else None
+
+    def list_competitor_content(self, profile_id: str, include_archived: bool = False) -> List[CompetitorContent]:
+        query = "SELECT content_json FROM competitor_content WHERE profile_id = ?"
+        params: list[Any] = [profile_id]
+        if not include_archived:
+            query += " AND status <> ?"
+            params.append("archived")
+        query += " ORDER BY updated_at DESC, created_at DESC"
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            item
+            for row in rows
+            if (item := self._competitor_content_from_json(row["content_json"]))
         ]
 
     def replace_profile_learnings(self, profile_id: str, learnings: List[ProfileLearning]) -> None:
@@ -2655,6 +2761,12 @@ class SQLiteStore:
     def _content_performance_from_json(self, raw: str) -> Optional[ContentPerformance]:
         try:
             return ContentPerformance(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _competitor_content_from_json(self, raw: str) -> Optional[CompetitorContent]:
+        try:
+            return CompetitorContent(**_json_loads(raw, {}))
         except ValueError:
             return None
 
