@@ -16,13 +16,19 @@ from backend.src.domain.models.content_studio import (
     ScriptUpdateRequest,
     ScriptVersionCreateRequest,
 )
+from backend.src.domain.models.generation import (
+    GenerationJobListResponse,
+    VoiceGenerationJobCreateRequest,
+)
 from backend.src.domain.services.content_profile_service import ContentProfileService
 from backend.src.domain.services.content_studio_service import ContentStudioService
+from backend.src.domain.services.generation_queue_service import GenerationQueueService
 
 
 def build_content_studio_router(
     content_profile_service: ContentProfileService,
     content_studio_service: ContentStudioService,
+    generation_queue_service: GenerationQueueService,
 ) -> APIRouter:
     router = APIRouter(tags=["content-studio"])
 
@@ -126,5 +132,27 @@ def build_content_studio_router(
         if not line:
             raise HTTPException(status_code=404, detail="Narration line not found")
         return line
+
+    @router.post("/api/scripts/{script_id}/voice-jobs", response_model=GenerationJobListResponse)
+    async def create_voice_jobs(script_id: str, request: VoiceGenerationJobCreateRequest):
+        script = content_studio_service.get_script_detail(script_id)
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+        if request.mode == "line_by_line" and not script.narration_lines:
+            raise HTTPException(status_code=400, detail="Narration lines are required for line-by-line voice jobs")
+        jobs = generation_queue_service.create_voice_jobs(
+            script_id=script.id,
+            script_text=script.content,
+            narration_lines=script.narration_lines,
+            provider=request.provider,
+            mode=request.mode,
+            batch_id=request.batch_id,
+            project_id=request.project_id,
+            project_name=request.project_name,
+            voice_style=request.voice_style,
+        )
+        if not jobs:
+            raise HTTPException(status_code=400, detail="No voice jobs were created")
+        return GenerationJobListResponse(jobs=jobs, batchId=jobs[0].batch_id)
 
     return router

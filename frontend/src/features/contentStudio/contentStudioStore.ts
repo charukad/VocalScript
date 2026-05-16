@@ -5,6 +5,7 @@ import {
   createNarrationLine,
   createScript,
   createScriptVersion,
+  createVoiceJobs,
   getScript,
   listIdeas,
   listScripts,
@@ -24,6 +25,8 @@ import type {
   ScriptDetail,
   ScriptInput,
   ScriptVersionInput,
+  VoiceJobBatch,
+  VoiceJobCreateInput,
 } from './types';
 
 type ContentStudioState = {
@@ -32,6 +35,7 @@ type ContentStudioState = {
   scripts: Script[];
   selectedScriptId: string | null;
   selectedScript: ScriptDetail | null;
+  voiceJobs: VoiceJobBatch | null;
   isLoading: boolean;
   isSaving: boolean;
   error: string | null;
@@ -47,6 +51,7 @@ type ContentStudioState = {
   addNarrationLine: (scriptId: string, input: NarrationLineInput) => Promise<NarrationLine>;
   updateNarrationLine: (lineId: string, input: NarrationLineUpdateInput) => Promise<NarrationLine>;
   regenerateNarrationLine: (lineId: string) => Promise<NarrationLine>;
+  queueVoiceJobs: (scriptId: string, input: VoiceJobCreateInput) => Promise<VoiceJobBatch>;
 };
 
 const mergeScriptSummary = (scripts: Script[], detail: ScriptDetail): Script[] => {
@@ -74,6 +79,7 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
   scripts: [],
   selectedScriptId: null,
   selectedScript: null,
+  voiceJobs: null,
   isLoading: false,
   isSaving: false,
   error: null,
@@ -85,6 +91,7 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
         scripts: [],
         selectedScriptId: null,
         selectedScript: null,
+        voiceJobs: null,
         error: null,
       });
       return;
@@ -102,6 +109,7 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
         scripts: scriptResponse.scripts,
         selectedScriptId: selectedScript?.id ?? null,
         selectedScript,
+        voiceJobs: null,
       });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : 'Could not load Content Studio data' });
@@ -158,6 +166,7 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
         scripts: mergeScriptSummary(state.scripts, detail),
         selectedScriptId: detail.id,
         selectedScript: detail,
+        voiceJobs: null,
       }));
       return detail;
     } catch (error) {
@@ -172,7 +181,7 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const detail = await getScript(scriptId);
-      set({ selectedScriptId: detail.id, selectedScript: detail });
+      set({ selectedScriptId: detail.id, selectedScript: detail, voiceJobs: null });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : 'Could not load script' });
     } finally {
@@ -296,6 +305,20 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
       return line;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not reset narration line';
+      set({ error: message });
+      throw error;
+    } finally {
+      set({ isSaving: false });
+    }
+  },
+  queueVoiceJobs: async (scriptId, input) => {
+    set({ isSaving: true, error: null });
+    try {
+      const voiceJobs = await createVoiceJobs(scriptId, input);
+      set({ voiceJobs });
+      return voiceJobs;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not create voice jobs';
       set({ error: message });
       throw error;
     } finally {

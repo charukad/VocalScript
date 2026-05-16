@@ -30,8 +30,8 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Phase 5: Viral Scoring and Script Analysis
 - `[x]` Phase 6: Agent System MVP
 - `[x]` Phase 7: Storyboard and Viral Visual Planner Upgrade
-- `[/]` Phase 8: Narration Line System
-- `[ ]` Phase 9: Google AI Studio Audio Bridge
+- `[x]` Phase 8: Narration Line System
+- `[/]` Phase 9: Google AI Studio Audio Bridge
 - `[ ]` Phase 10: AI Timeline Builder
 - `[ ]` Phase 11: Analytics Integration Foundation
 - `[ ]` Phase 12: Analytics Agent and Learning Agent
@@ -207,29 +207,29 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 
 ## Phase 8: Narration Line System
 
-- `[ ]` Add narration line model/table with status, emotion, speed, pause, and audio asset fields.
-- `[ ]` Add APIs to list/create/update/regenerate narration lines.
-- `[ ]` Add script-to-lines splitting logic.
-- `[ ]` Add Voice/Narration UI for line review and status tracking.
-- `[ ]` Support editing one line without rebuilding the whole script.
+- `[x]` Add narration line model/table with status, emotion, speed, pause, and audio asset fields.
+- `[x]` Add APIs to list/create/update/regenerate narration lines.
+- `[x]` Add script-to-lines splitting logic.
+- `[x]` Add Voice/Narration UI for line review and status tracking.
+- `[x]` Support editing one line without rebuilding the whole script.
 
 ### Phase 8 Acceptance Checks
 
-- `[ ]` Scripts can be split into editable narration lines.
-- `[ ]` Each line has independent generation state.
-- `[ ]` Narration lines can later receive audio assets.
+- `[x]` Scripts can be split into editable narration lines.
+- `[x]` Each line has independent generation state.
+- `[x]` Narration lines can later receive audio assets.
 
 ## Phase 9: Google AI Studio Audio Bridge
 
-- `[ ]` Inspect whether Google AI Studio belongs inside the existing bridge or a separate extension.
-- `[ ]` Generalize provider/job modeling for audio/voice jobs.
-- `[ ]` Add voice job creation and result storage endpoints.
-- `[ ]` Extend bridge protocol/capabilities for voice generation.
-- `[ ]` Add Google AI Studio provider adapter/content script.
-- `[ ]` Support `full_script` generation mode.
-- `[ ]` Support preferred `line_by_line` generation mode.
-- `[ ]` Add audio result reporting and backend import flow.
-- `[ ]` Add frontend voice job status UI.
+- `[x]` Inspect whether Google AI Studio belongs inside the existing bridge or a separate extension.
+- `[x]` Generalize provider/job modeling for audio/voice jobs.
+- `[x]` Add voice job creation and result storage endpoints.
+- `[x]` Extend bridge protocol/capabilities for voice generation.
+- `[/]` Add Google AI Studio provider adapter/content script.
+- `[/]` Support `full_script` generation mode.
+- `[/]` Support preferred `line_by_line` generation mode.
+- `[/]` Add audio result reporting and backend import flow.
+- `[/]` Add frontend voice job status UI.
 - `[ ]` Auto-import completed narration audio and optionally place clips on the timeline.
 
 ### Phase 9 Acceptance Checks

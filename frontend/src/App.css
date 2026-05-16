@@ -1712,6 +1712,46 @@
   font: inherit;
 }
 
+.studio-voice-job-controls {
+  display: grid;
+  grid-template-columns: minmax(140px, 180px) minmax(180px, 1fr) auto;
+  gap: 0.5rem;
+  align-items: end;
+}
+
+.studio-voice-job-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--surface-2);
+}
+
+.studio-voice-job-summary strong {
+  color: var(--text-highlight);
+  font-size: 0.8rem;
+}
+
+.studio-voice-job-summary span,
+.studio-voice-job-list span {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.studio-voice-job-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.studio-voice-job-list span {
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+  background: var(--surface-3);
+}
+
 .studio-voice-line {
   display: flex;
   flex-direction: column;
@@ -2006,7 +2046,8 @@
   }
 
   .studio-voice-grid,
-  .studio-voice-fields {
+  .studio-voice-fields,
+  .studio-voice-job-controls {
     grid-template-columns: 1fr;
   }
 }

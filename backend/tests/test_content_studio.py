@@ -15,6 +15,7 @@ from backend.src.domain.models.content_studio import (
 )
 from backend.src.domain.services.content_profile_service import ContentProfileService
 from backend.src.domain.services.content_studio_service import ContentStudioService
+from backend.src.domain.services.generation_queue_service import GenerationQueueService
 from backend.src.domain.services.sqlite_store import SQLiteStore
 
 
@@ -25,6 +26,7 @@ class ContentStudioTests(unittest.TestCase):
         self.store = SQLiteStore(str(self.root / "registry.db"))
         self.profile_service = ContentProfileService(self.store)
         self.studio_service = ContentStudioService(self.store)
+        self.queue_service = GenerationQueueService(str(self.root / "generated"))
         self.profile = self.profile_service.create_profile(
             ContentProfileCreateRequest(name="Daily AI Facts", platforms=["youtube_shorts"])
         )
@@ -133,6 +135,32 @@ class ContentStudioTests(unittest.TestCase):
         self.assertEqual(reset.status, "pending")
         self.assertIsNone(reset.audio_asset_id)
         self.assertIsNone(reset.duration_seconds)
+
+    def test_voice_jobs_can_be_created_from_narration_lines(self) -> None:
+        script = self.studio_service.create_script(
+            self.profile.id,
+            ScriptCreateRequest(title="Voice draft", content="Opening line. Payoff line."),
+        )
+        lines = self.studio_service.split_script_into_lines(script.id, ScriptSplitLinesRequest())
+        self.assertIsNotNone(lines)
+        assert lines is not None
+
+        jobs = self.queue_service.create_voice_jobs(
+            script_id=script.id,
+            script_text=script.content,
+            narration_lines=lines,
+            mode="line_by_line",
+            voice_style="energetic narrator",
+        )
+
+        self.assertEqual(len(jobs), 2)
+        self.assertTrue(all(job.provider == "google_ai_studio" for job in jobs))
+        self.assertTrue(all(job.media_type == "audio" for job in jobs))
+        self.assertEqual(
+            [job.metadata["narrationLineId"] for job in jobs],
+            [line.id for line in lines],
+        )
+        self.assertTrue(all(job.metadata["flow"] == "voice_generation" for job in jobs))
 
 
 if __name__ == "__main__":

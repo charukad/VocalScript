@@ -29,13 +29,23 @@
         "providers/meta-content.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://aistudio.google.com/*"
+      ],
+      "js": [
+        "providers/google-ai-studio-content.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "host_permissions": [
     "http://127.0.0.1/*",
     "ws://127.0.0.1/*",
     "https://www.meta.ai/*",
-    "https://grok.com/*"
+    "https://grok.com/*",
+    "https://aistudio.google.com/*"
   ],
   "side_panel": {
     "default_path": "sidepanel.html"

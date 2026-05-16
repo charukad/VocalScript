@@ -59,7 +59,7 @@ const queueStatuses: GenerationJobStatus[] = [
 
 const failedQueueStatuses: GenerationJobStatus[] = ['failed', 'manual_action_required', 'canceled'];
 const finishedQueueStatuses: GenerationJobStatus[] = ['completed', 'failed', 'manual_action_required', 'canceled'];
-const bridgeProviders: ProviderName[] = ['meta', 'grok'];
+const bridgeProviders: ProviderName[] = ['meta', 'grok', 'google_ai_studio'];
 const runnableBridgeProviders: ProviderName[] = ['meta'];
 
 const statusLabel = (status: BridgeWorkerSnapshot['status']) => status.replaceAll('_', ' ');
@@ -93,7 +93,9 @@ const providerCanRunWithWorkers = (
   const capability = worker.capabilities.find(item => item.provider === provider);
   if (!capability) return !requireExtend;
   if (requireExtend) return capability.canExtendVideo;
-  return mediaType === 'video' ? capability.canGenerateVideo : capability.canGenerateImage;
+  if (mediaType === 'video') return capability.canGenerateVideo;
+  if (mediaType === 'audio') return capability.canGenerateAudio;
+  return capability.canGenerateImage;
 });
 
 const formatTime = (value: string | null | undefined): string => {
@@ -116,6 +118,7 @@ const capabilityText = (capability: ProviderCapability): string => {
   const enabled = [
     capability.canGenerateImage ? 'image' : '',
     capability.canGenerateVideo ? 'video' : '',
+    capability.canGenerateAudio ? 'audio' : '',
     capability.canExtendVideo ? 'extend' : '',
     capability.supportsVariants ? 'variants' : '',
   ].filter(Boolean);

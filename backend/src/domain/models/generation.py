@@ -3,8 +3,8 @@ from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-ProviderName = Literal["meta", "grok"]
-GeneratedMediaType = Literal["image", "video"]
+ProviderName = Literal["meta", "grok", "google_ai_studio"]
+GeneratedMediaType = Literal["image", "video", "audio"]
 GenerationAspectRatio = Literal["16:9", "9:16", "1:1", "4:5"]
 StoryboardSceneDensity = Literal["low", "medium", "high", "extra_high"]
 StoryboardMotionIntensity = Literal["subtle", "balanced", "dynamic"]
@@ -151,6 +151,18 @@ class GenerationJobCreateRequest(ApiModel):
     project_name: Optional[str] = Field(default=None, alias="projectName")
 
 
+VoiceGenerationMode = Literal["full_script", "line_by_line"]
+
+
+class VoiceGenerationJobCreateRequest(ApiModel):
+    mode: VoiceGenerationMode = Field(default="line_by_line")
+    provider: ProviderName = "google_ai_studio"
+    project_id: Optional[str] = Field(default=None, alias="projectId")
+    project_name: Optional[str] = Field(default=None, alias="projectName")
+    batch_id: Optional[str] = Field(default=None, alias="batchId")
+    voice_style: Optional[str] = Field(default=None, alias="voiceStyle")
+
+
 class GenerationJobListResponse(ApiModel):
     jobs: List[GenerationJob]
     batch_id: Optional[str] = Field(default=None, alias="batchId")
@@ -241,6 +253,7 @@ class ProviderCapability(ApiModel):
     provider: ProviderName
     can_generate_image: bool = Field(default=True, alias="canGenerateImage")
     can_generate_video: bool = Field(default=True, alias="canGenerateVideo")
+    can_generate_audio: bool = Field(default=False, alias="canGenerateAudio")
     can_extend_video: bool = Field(default=False, alias="canExtendVideo")
     supports_variants: bool = Field(default=True, alias="supportsVariants")
     supports_upload: bool = Field(default=True, alias="supportsUpload")

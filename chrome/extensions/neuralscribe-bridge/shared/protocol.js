@@ -3,11 +3,13 @@ export const BRIDGE_PROTOCOL_VERSION = "0.1.0";
 export const PROVIDERS = Object.freeze({
   META: "meta",
   GROK: "grok",
+  GOOGLE_AI_STUDIO: "google_ai_studio",
 });
 
 export const MEDIA_TYPES = Object.freeze({
   IMAGE: "image",
   VIDEO: "video",
+  AUDIO: "audio",
 });
 
 export const MESSAGE_TYPES = Object.freeze({
@@ -56,6 +58,7 @@ export function createProviderCapabilities(providers) {
     provider,
     canGenerateImage: provider === PROVIDERS.META || provider === PROVIDERS.GROK,
     canGenerateVideo: provider === PROVIDERS.META || provider === PROVIDERS.GROK,
+    canGenerateAudio: provider === PROVIDERS.GOOGLE_AI_STUDIO,
     canExtendVideo: false,
     supportsVariants: provider === PROVIDERS.META,
     supportsUpload: true,

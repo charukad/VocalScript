@@ -21,6 +21,7 @@ from backend.src.domain.models.generation import (
     ProviderName,
     StoryboardScene,
 )
+from backend.src.domain.models.content_studio import NarrationLine
 from backend.src.domain.services.sqlite_store import SQLiteStore
 
 
@@ -103,6 +104,79 @@ class GenerationQueueService:
                     "sceneCamera": scene.camera,
                     "sceneTranscript": scene.transcript,
                 },
+            )
+            self._jobs[job_id] = job
+            self._job_order.append(job_id)
+            jobs.append(job)
+        self._save_state()
+        return jobs
+
+    def create_voice_jobs(
+        self,
+        script_id: str,
+        script_text: str,
+        narration_lines: List[NarrationLine],
+        provider: ProviderName = "google_ai_studio",
+        mode: str = "line_by_line",
+        batch_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        project_name: Optional[str] = None,
+        voice_style: Optional[str] = None,
+    ) -> List[GenerationJob]:
+        resolved_batch_id = batch_id or f"voice-batch-{uuid.uuid4().hex[:12]}"
+        jobs: List[GenerationJob] = []
+        if mode == "full_script":
+            candidates = [{
+                "scene_id": script_id,
+                "prompt": script_text.strip(),
+                "metadata": {
+                    "voiceMode": mode,
+                    "lineCount": str(len(narration_lines)),
+                },
+            }]
+        else:
+            candidates = [
+                {
+                    "scene_id": line.id,
+                    "prompt": line.text,
+                    "metadata": {
+                        "voiceMode": mode,
+                        "narrationLineId": line.id,
+                        "lineIndex": str(line.index),
+                        **({"sceneId": line.scene_id} if line.scene_id else {}),
+                        **({"emotion": line.emotion} if line.emotion else {}),
+                        **({"speed": line.speed} if line.speed else {}),
+                        **({"pauseAfterSeconds": str(line.pause_after_seconds)} if line.pause_after_seconds is not None else {}),
+                    },
+                }
+                for line in narration_lines
+            ]
+
+        for candidate in candidates:
+            if not candidate["prompt"]:
+                continue
+            job_id = f"job-{uuid.uuid4().hex[:12]}"
+            metadata = {
+                "batchId": resolved_batch_id,
+                "flow": "voice_generation",
+                "jobType": "voice_generation",
+                "scriptId": script_id,
+                **({"projectId": project_id} if project_id else {}),
+                **({"projectName": project_name} if project_name else {}),
+                **({"voiceStyle": voice_style} if voice_style else {}),
+                **candidate["metadata"],
+            }
+            job = GenerationJob(
+                id=job_id,
+                batchId=resolved_batch_id,
+                projectId=project_id,
+                sceneId=candidate["scene_id"],
+                provider=provider,
+                mediaType="audio",
+                prompt=candidate["prompt"],
+                negativePrompt="",
+                status="queued",
+                metadata=metadata,
             )
             self._jobs[job_id] = job
             self._job_order.append(job_id)
@@ -1097,7 +1171,11 @@ class GenerationQueueService:
         return files
 
     def _default_extension(self, media_type: GeneratedMediaType) -> str:
-        return "mp4" if media_type == "video" else "png"
+        if media_type == "video":
+            return "mp4"
+        if media_type == "audio":
+            return "mp3"
+        return "png"
 
     def _normalize_variants(
         self,
@@ -1153,6 +1231,8 @@ class GenerationQueueService:
             return "video"
         if content_type.startswith("image/"):
             return "image"
+        if content_type.startswith("audio/"):
+            return "audio"
         return None
 
     def _remote_filename(

@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS = {
   chromeProfileLabel: "",
   projectId: "",
   metaUrl: "https://www.meta.ai/create",
+  googleAiStudioUrl: "https://aistudio.google.com/generate-speech",
   claimIntervalMs: 5000,
   providerDelayMs: 12000,
   jobTimeoutMs: 180000,
@@ -72,6 +73,10 @@ const PROVIDER_ADAPTERS = {
   [PROVIDERS.META]: {
     claimProvider: PROVIDERS.META,
     run: runMetaJob,
+  },
+  [PROVIDERS.GOOGLE_AI_STUDIO]: {
+    claimProvider: PROVIDERS.GOOGLE_AI_STUDIO,
+    run: runGoogleAiStudioJob,
   },
 };
 
@@ -157,6 +162,7 @@ function sanitizeSettings(settings) {
     chromeProfileLabel: String(settings.chromeProfileLabel || "").trim(),
     projectId: String(settings.projectId || "").trim(),
     metaUrl: String(settings.metaUrl || DEFAULT_SETTINGS.metaUrl).trim(),
+    googleAiStudioUrl: String(settings.googleAiStudioUrl || DEFAULT_SETTINGS.googleAiStudioUrl).trim(),
     claimIntervalMs: Number(settings.claimIntervalMs || DEFAULT_SETTINGS.claimIntervalMs),
     providerDelayMs: Number(settings.providerDelayMs || DEFAULT_SETTINGS.providerDelayMs),
     jobTimeoutMs: Number(settings.jobTimeoutMs || DEFAULT_SETTINGS.jobTimeoutMs),
@@ -516,11 +522,12 @@ async function handleJobLoopAlarm() {
   jobLoopActive = Boolean(stored[STORAGE_KEYS.jobLoopActive]);
   const autoResumeAt = Number(stored[STORAGE_KEYS.providerAutoResumeAt] || 0);
   if (!jobLoopActive && autoResumeAt > 0 && autoResumeAt <= Date.now()) {
+    const settings = await getSettings();
     jobLoopActive = true;
     await chrome.storage.local.set({ [STORAGE_KEYS.jobLoopActive]: true });
     await chrome.storage.local.remove(STORAGE_KEYS.providerAutoResumeAt);
     await reportDebugEvent("provider_auto_resume", "Worker resumed automatically after cooldown", {
-      provider: "meta",
+      provider: activeProviderFromSettings(settings),
       level: "info",
     });
   }
@@ -644,10 +651,10 @@ async function claimAndRunNextJob() {
       return { delayMs: Math.max(settings.providerDelayMs, settings.claimIntervalMs) };
     }
     const failureReason = classifyProviderIssue(error.message);
-    await updateJobStatus(settings, job.id, "failed", error.message, { provider: "meta", providerFailureReason: failureReason });
+    await updateJobStatus(settings, job.id, "failed", error.message, { provider, providerFailureReason: failureReason });
     await captureFailureScreenshot(settings, job, error).catch((screenshotError) => {
       reportDebugEvent("failure_screenshot_skipped", screenshotError.message, {
-        provider: "meta",
+        provider,
         jobId: job.id,
         level: "warning",
       });
@@ -735,7 +742,7 @@ async function markProviderDelay(settings, options = {}) {
       await chrome.alarms.clear(JOB_LOOP_ALARM);
       await chrome.alarms.create(JOB_LOOP_ALARM, { when: Date.now() + delayMs + 1000 });
       await reportDebugEvent("provider_auto_pause", `Paused worker after ${failureStreak} provider failures`, {
-        provider: "meta",
+        provider: activeProviderFromSettings(settings),
         level: "warning",
         metadata: { failureStreak: String(failureStreak), reason },
       });
@@ -748,6 +755,10 @@ async function markProviderDelay(settings, options = {}) {
   }
   await chrome.storage.local.set({ [STORAGE_KEYS.providerAvailableAt]: Date.now() + delayMs });
   return { delayMs, failureStreak, autoPaused };
+}
+
+function activeProviderFromSettings(settings) {
+  return settings.providers.find((name) => PROVIDER_ADAPTERS[name]) || PROVIDERS.META;
 }
 
 function classifyProviderIssue(message = "") {
@@ -799,8 +810,10 @@ async function captureFailureScreenshot(settings, job, error) {
   if (!lastProviderTabId) throw new Error("No provider tab available for screenshot");
   const tab = await chrome.tabs.get(lastProviderTabId);
   const url = String(tab.url || "");
-  if (!tab.windowId || !url.includes("meta.ai")) {
-    throw new Error("Skipped screenshot because provider tab is not a Meta page");
+  const provider = job.provider || activeProviderFromSettings(settings);
+  const expectedHost = provider === PROVIDERS.GOOGLE_AI_STUDIO ? "aistudio.google.com" : "meta.ai";
+  if (!tab.windowId || !url.includes(expectedHost)) {
+    throw new Error(`Skipped screenshot because provider tab is not a ${provider} page`);
   }
   if (/login|password|captcha|checkpoint|payment/i.test(url)) {
     throw new Error("Skipped screenshot because provider page may contain sensitive login or captcha content");
@@ -813,7 +826,7 @@ async function captureFailureScreenshot(settings, job, error) {
   const workerId = await getWorkerId();
   formData.append("workerId", workerId);
   formData.append("jobId", job.id);
-  formData.append("provider", "meta");
+  formData.append("provider", provider);
   formData.append("reason", `Failed ${formatJobLabel(job)}: ${error.message}`);
   formData.append("metadata", JSON.stringify({
     providerPageUrl: url,
@@ -828,7 +841,7 @@ async function captureFailureScreenshot(settings, job, error) {
   if (!response.ok) throw new Error(`Failure screenshot upload failed: ${await responseText(response)}`);
   const result = await response.json();
   await reportDebugEvent("failure_screenshot_uploaded", "Failure screenshot uploaded", {
-    provider: "meta",
+    provider,
     jobId: job.id,
     level: "error",
     metadata: { screenshotUrl: result.screenshotUrl || "" },
@@ -936,6 +949,38 @@ async function runMetaJob(job, settings) {
   return response.result;
 }
 
+async function runGoogleAiStudioJob(job, settings) {
+  await reportDebugEvent("provider_tab_opening", `Opening Google AI Studio for ${formatJobLabel(job)}`, {
+    provider: "google_ai_studio",
+    jobId: job.id,
+    metadata: { promptLength: String((job.prompt || "").length), mediaType: job.mediaType || "audio" },
+  });
+  const tab = await findOrOpenProviderTab(settings.googleAiStudioUrl, "*://aistudio.google.com/*");
+  lastProviderTabId = tab.id || null;
+  await waitForTabReady(tab.id);
+  await ensureGoogleAiStudioContentScript(tab.id);
+  const response = await sendTabMessage(tab.id, {
+    type: "provider.google_ai_studio.runJob",
+    job,
+    options: {
+      timeoutMs: settings.jobTimeoutMs,
+      httpBaseUrl: settings.httpBaseUrl,
+    },
+  });
+  if (!response?.ok) {
+    throw new Error(response?.error || "Google AI Studio provider adapter failed");
+  }
+  await reportDebugEvent("provider_job_completed", "Google AI Studio returned audio", {
+    provider: "google_ai_studio",
+    jobId: job.id,
+    metadata: {
+      providerPageUrl: response.result?.metadata?.providerPageUrl || "",
+      narrationLineId: response.result?.metadata?.narrationLineId || "",
+    },
+  });
+  return response.result;
+}
+
 function isPromptMissingError(error) {
   return /prompt input|prompt box|textbox|contenteditable/i.test(error?.message || "");
 }
@@ -979,17 +1024,26 @@ async function runMetaExtendVideoJob(job, settings) {
 
 async function runProviderHealthCheck(settings, includeAdapterTest = false) {
   const workerId = await getWorkerId();
+  const provider = settings.providers.find((name) => PROVIDER_ADAPTERS[name]) || PROVIDERS.META;
   try {
-    const tab = await findOrOpenProviderTab(settings.metaUrl, "*://*.meta.ai/*");
+    const tab = provider === PROVIDERS.GOOGLE_AI_STUDIO
+      ? await findOrOpenProviderTab(settings.googleAiStudioUrl, "*://aistudio.google.com/*")
+      : await findOrOpenProviderTab(settings.metaUrl, "*://*.meta.ai/*");
     lastProviderTabId = tab.id || null;
     await waitForTabReady(tab.id);
-    await ensureMetaContentScript(tab.id);
+    if (provider === PROVIDERS.GOOGLE_AI_STUDIO) {
+      await ensureGoogleAiStudioContentScript(tab.id);
+    } else {
+      await ensureMetaContentScript(tab.id);
+    }
     const response = await sendTabMessage(tab.id, {
-      type: "provider.meta.healthCheck",
+      type: provider === PROVIDERS.GOOGLE_AI_STUDIO
+        ? "provider.google_ai_studio.healthCheck"
+        : "provider.meta.healthCheck",
       options: { includeAdapterTest },
     });
     if (!response?.ok) {
-      throw new Error(response?.error || "Meta health check failed");
+      throw new Error(response?.error || `${provider} health check failed`);
     }
     return {
       health: [response.health],
@@ -998,7 +1052,7 @@ async function runProviderHealthCheck(settings, includeAdapterTest = false) {
   } catch (error) {
     return {
       health: [{
-        provider: "meta",
+        provider,
         status: "error",
         checkedAt: new Date().toISOString(),
         pageUrl: "",
@@ -1011,7 +1065,7 @@ async function runProviderHealthCheck(settings, includeAdapterTest = false) {
         canExtendVideo: false,
         metadata: { workerId },
       }],
-      capabilities: createProviderCapabilities([PROVIDERS.META]),
+      capabilities: createProviderCapabilities([provider]),
     };
   }
 }
@@ -1111,6 +1165,17 @@ async function ensureMetaContentScript(tabId) {
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ["providers/meta-content.js"],
+    });
+  }
+}
+
+async function ensureGoogleAiStudioContentScript(tabId) {
+  try {
+    await sendTabMessage(tabId, { type: "provider.google_ai_studio.ping" });
+  } catch {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["providers/google-ai-studio-content.js"],
     });
   }
 }

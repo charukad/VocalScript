@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useContentStudioStore } from './contentStudioStore';
-import type { NarrationLineInput, NarrationLineUpdateInput } from './types';
+import type { NarrationLineInput, NarrationLineUpdateInput, VoiceGenerationMode } from './types';
 
 type VoiceTabProps = {
   profileId: string;
@@ -11,14 +11,18 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
     scripts,
     selectedScriptId,
     selectedScript,
+    voiceJobs,
     isSaving,
     selectScript,
     splitLines,
     addNarrationLine,
     updateNarrationLine,
     regenerateNarrationLine,
+    queueVoiceJobs,
   } = useContentStudioStore();
   const [newLineText, setNewLineText] = useState('');
+  const [voiceMode, setVoiceMode] = useState<VoiceGenerationMode>('line_by_line');
+  const [voiceStyle, setVoiceStyle] = useState('');
   const [drafts, setDrafts] = useState<Record<string, NarrationLineUpdateInput>>({});
 
   useEffect(() => {
@@ -46,6 +50,15 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
 
   const handleSaveLine = async (lineId: string) => {
     await updateNarrationLine(lineId, drafts[lineId] ?? {});
+  };
+
+  const handleQueueVoiceJobs = async () => {
+    if (!selectedScript) return;
+    await queueVoiceJobs(selectedScript.id, {
+      mode: voiceMode,
+      provider: 'google_ai_studio',
+      voiceStyle: voiceStyle || null,
+    });
   };
 
   return (
@@ -82,6 +95,41 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
                 Split Current Script
               </button>
             </div>
+            <div className="studio-voice-job-controls">
+              <label>
+                Mode
+                <select value={voiceMode} onChange={event => setVoiceMode(event.target.value as VoiceGenerationMode)}>
+                  <option value="line_by_line">Line by line</option>
+                  <option value="full_script">Full script</option>
+                </select>
+              </label>
+              <label>
+                Default Voice Style
+                <input
+                  value={voiceStyle}
+                  onChange={event => setVoiceStyle(event.target.value)}
+                  placeholder="Energetic narrator"
+                />
+              </label>
+              <button
+                className="btn-primary"
+                onClick={() => void handleQueueVoiceJobs()}
+                disabled={isSaving || (voiceMode === 'line_by_line' && lines.length === 0)}
+              >
+                Queue Voice Jobs
+              </button>
+            </div>
+            {voiceJobs && (
+              <div className="studio-voice-job-summary">
+                <strong>{voiceJobs.jobs.length} queued</strong>
+                <span>{voiceJobs.batchId ?? 'new batch'}</span>
+                <div className="studio-voice-job-list">
+                  {voiceJobs.jobs.map(job => (
+                    <span key={job.id}>{job.sceneId}: {job.status}</span>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="studio-add-line-row">
               <input
                 value={newLineText}

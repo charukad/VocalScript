@@ -141,9 +141,9 @@ export type CaptionSegment = {
   text: string;
 };
 
-export type ProviderName = 'meta' | 'grok';
+export type ProviderName = 'meta' | 'grok' | 'google_ai_studio';
 
-export type GeneratedMediaType = 'image' | 'video';
+export type GeneratedMediaType = 'image' | 'video' | 'audio';
 export type GenerationAspectRatio = '16:9' | '9:16' | '1:1' | '4:5';
 export type StoryboardSceneDensity = 'low' | 'medium' | 'high' | 'extra_high';
 export type StoryboardMotionIntensity = 'subtle' | 'balanced' | 'dynamic';
@@ -422,6 +422,7 @@ export type ProviderCapability = {
   provider: ProviderName;
   canGenerateImage: boolean;
   canGenerateVideo: boolean;
+  canGenerateAudio: boolean;
   canExtendVideo: boolean;
   supportsVariants: boolean;
   supportsUpload: boolean;

@@ -1,4 +1,4 @@
-import type { PlatformTarget } from '../../types';
+import type { GenerationJob, PlatformTarget } from '../../types';
 
 export type ContentIdeaStatus = 'draft' | 'selected' | 'converted_to_script' | 'archived';
 export type ScriptStatus = 'draft' | 'final' | 'archived';
@@ -105,6 +105,22 @@ export type NarrationLineUpdateInput = Partial<NarrationLineInput> & {
   durationSeconds?: number | null;
   status?: NarrationLineStatus;
   error?: string | null;
+};
+
+export type VoiceGenerationMode = 'full_script' | 'line_by_line';
+
+export type VoiceJobCreateInput = {
+  mode: VoiceGenerationMode;
+  provider?: 'google_ai_studio';
+  projectId?: string | null;
+  projectName?: string | null;
+  batchId?: string | null;
+  voiceStyle?: string | null;
+};
+
+export type VoiceJobBatch = {
+  jobs: GenerationJob[];
+  batchId?: string | null;
 };
 
 export type ScriptDetail = Script & {

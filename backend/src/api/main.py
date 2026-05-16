@@ -78,7 +78,7 @@ app.include_router(build_generation_router(storyboard_service, whisper_engine, g
 app.include_router(build_animation_router(animation_planner_service, whisper_engine, generation_queue_service))
 app.include_router(build_projects_router(project_service))
 app.include_router(build_content_profiles_router(content_profile_service))
-app.include_router(build_content_studio_router(content_profile_service, content_studio_service))
+app.include_router(build_content_studio_router(content_profile_service, content_studio_service, generation_queue_service))
 app.include_router(build_viral_router(viral_scoring_service))
 app.include_router(build_agents_router(agent_orchestrator))
 app.include_router(build_browser_bridge_router(browser_bridge_service, settings.browser_bridge.session_token))

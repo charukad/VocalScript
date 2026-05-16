@@ -12,6 +12,8 @@ import type {
   ScriptAnalysis,
   ScriptRewrite,
   ScriptVersionInput,
+  VoiceJobBatch,
+  VoiceJobCreateInput,
   WorkflowRunDetail,
 } from './types';
 
@@ -215,6 +217,21 @@ export const regenerateNarrationLine = async (
     signal,
   });
   if (!response.ok) throw await formatApiError(response, 'Could not reset narration line');
+  return response.json();
+};
+
+export const createVoiceJobs = async (
+  scriptId: string,
+  input: VoiceJobCreateInput,
+  signal?: AbortSignal,
+): Promise<VoiceJobBatch> => {
+  const response = await fetch(`${API_BASE_URL}/api/scripts/${scriptId}/voice-jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not create voice jobs');
   return response.json();
 };
 
