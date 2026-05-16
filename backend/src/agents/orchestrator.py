@@ -2,7 +2,9 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from backend.src.agents.base_agent import BaseAgent
+from backend.src.agents.analytics_agent import AnalyticsAgent
 from backend.src.agents.idea_agent import IdeaAgent
+from backend.src.agents.learning_agent import LearningAgent
 from backend.src.agents.profile_strategy_agent import ProfileStrategyAgent
 from backend.src.agents.script_agent import ScriptAgent
 from backend.src.agents.storyboard_agent import StoryboardAgent
@@ -21,6 +23,7 @@ from backend.src.domain.models.project import utc_now_iso
 from backend.src.domain.models.viral import IdeaScoreRequest, ScriptAnalysisRequest
 from backend.src.domain.services.content_profile_service import ContentProfileService
 from backend.src.domain.services.content_studio_service import ContentStudioService
+from backend.src.domain.services.analytics_service import AnalyticsService
 from backend.src.domain.services.sqlite_store import SQLiteStore
 from backend.src.domain.services.storyboard_service import StoryboardService
 from backend.src.domain.services.viral_scoring_service import ViralScoringService
@@ -32,19 +35,25 @@ class AgentOrchestrator:
         store: SQLiteStore,
         content_profile_service: ContentProfileService,
         content_studio_service: ContentStudioService,
+        analytics_service: AnalyticsService,
         storyboard_service: StoryboardService,
         viral_scoring_service: ViralScoringService,
     ):
         self.store = store
         self.content_profile_service = content_profile_service
         self.content_studio_service = content_studio_service
+        self.analytics_service = analytics_service
         self.viral_scoring_service = viral_scoring_service
-        self.agents: List[BaseAgent] = [
+        self.content_draft_agents: List[BaseAgent] = [
             ProfileStrategyAgent(),
             IdeaAgent(),
             ScriptAgent(),
             StoryboardAgent(storyboard_service),
             TimelineAgent(),
+        ]
+        self.analytics_learning_agents: List[BaseAgent] = [
+            AnalyticsAgent(),
+            LearningAgent(),
         ]
 
     def start_workflow(self, request: AgentWorkflowStartRequest) -> Optional[WorkflowRunDetail]:
@@ -69,13 +78,23 @@ class AgentOrchestrator:
         state: Dict[str, Any] = {
             "profile": profile.model_dump(by_alias=True),
             "seedPrompt": request.seed_prompt,
+            "profileRules": [
+                rule.model_dump(by_alias=True)
+                for rule in self.analytics_service.list_profile_rules(profile.id)
+            ],
         }
+        agents = self._agents_for_workflow(request.workflow_type)
+        if request.workflow_type == "analytics_learning":
+            state["performance"] = [
+                performance.model_dump(by_alias=True)
+                for performance in self.analytics_service.list_performance(profile.id)
+            ]
         created_idea_ids: List[str] = []
         created_script_id: Optional[str] = None
         runs: List[AgentRun] = []
 
         try:
-            for agent in self.agents:
+            for agent in agents:
                 run = self._start_agent_run(workflow, agent, state)
                 runs.append(run)
                 output = agent.run(state)
@@ -97,17 +116,36 @@ class AgentOrchestrator:
                 if agent.name == "script_agent" and request.create_drafts:
                     created_script_id = self._create_draft_script(profile.id, output["script"], created_idea_ids)
                     state["createdScriptId"] = created_script_id
+                if agent.name == "learning_agent":
+                    learnings = self.analytics_service.replace_learning_bundle(
+                        profile.id,
+                        output.get("learnings", []),
+                        output.get("rules", []),
+                    )
+                    state["storedLearnings"] = [
+                        learning.model_dump(by_alias=True)
+                        for learning in learnings
+                    ]
 
             workflow = workflow.model_copy(
                 update={
                     "output_json": {
-                        "strategy": state.get("strategy"),
-                        "ideas": state.get("ideas", []),
-                        "script": state.get("script"),
-                        "storyboard": state.get("storyboard"),
-                        "timelineDraft": state.get("timelineDraft"),
-                        "createdIdeaIds": created_idea_ids,
-                        "createdScriptId": created_script_id,
+                    **(
+                        {
+                            "strategy": state.get("strategy"),
+                            "ideas": state.get("ideas", []),
+                            "script": state.get("script"),
+                            "storyboard": state.get("storyboard"),
+                            "timelineDraft": state.get("timelineDraft"),
+                            "createdIdeaIds": created_idea_ids,
+                            "createdScriptId": created_script_id,
+                        }
+                        if request.workflow_type == "content_draft"
+                        else {
+                            "performanceSummary": state.get("performanceSummary"),
+                            "learnings": state.get("storedLearnings", []),
+                        }
+                    ),
                     },
                     "status": "completed",
                     "updated_at": utc_now_iso(),
@@ -236,10 +274,17 @@ class AgentOrchestrator:
 
     def _agent_input_snapshot(self, agent_name: str, state: Dict[str, Any]) -> Dict[str, Any]:
         keys_by_agent = {
-            "profile_strategy_agent": ("profile", "seedPrompt"),
+            "profile_strategy_agent": ("profile", "seedPrompt", "profileRules"),
             "idea_agent": ("profile", "strategy"),
             "script_agent": ("profile", "strategy", "ideas"),
             "storyboard_agent": ("profile", "script"),
             "timeline_agent": ("script", "storyboard"),
+            "analytics_agent": ("profile", "performance"),
+            "learning_agent": ("profile", "performance", "performanceSummary"),
         }
         return {key: state.get(key) for key in keys_by_agent.get(agent_name, tuple())}
+
+    def _agents_for_workflow(self, workflow_type: str) -> List[BaseAgent]:
+        if workflow_type == "analytics_learning":
+            return self.analytics_learning_agents
+        return self.content_draft_agents

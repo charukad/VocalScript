@@ -1692,6 +1692,118 @@
   align-items: start;
 }
 
+.studio-storyboard-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.studio-storyboard-main {
+  min-width: 0;
+}
+
+.studio-draft-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.studio-draft-summary span {
+  padding: 0.18rem 0.42rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.studio-draft-lanes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.studio-draft-lanes > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.studio-draft-item {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.35rem 0.5rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.studio-draft-item strong {
+  color: var(--text-highlight);
+  font-size: 0.74rem;
+}
+
+.studio-draft-item span {
+  justify-self: end;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.studio-draft-item p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.studio-analytics-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.studio-analytics-main {
+  min-width: 0;
+}
+
+.studio-analytics-connection,
+.studio-analytics-performance {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.studio-analytics-connection strong,
+.studio-analytics-performance strong {
+  color: var(--text-highlight);
+  font-size: 0.78rem;
+  text-transform: capitalize;
+}
+
+.studio-analytics-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.studio-analytics-performance div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.studio-analytics-performance span,
+.studio-analytics-performance p {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.studio-analytics-performance p {
+  margin: 0;
+}
+
 .studio-voice-main {
   min-width: 0;
 }
@@ -2045,7 +2157,11 @@
     grid-template-columns: 1fr;
   }
 
+  .studio-storyboard-grid,
+  .studio-analytics-grid,
   .studio-voice-grid,
+  .studio-draft-lanes,
+  .studio-analytics-form-grid,
   .studio-voice-fields,
   .studio-voice-job-controls {
     grid-template-columns: 1fr;

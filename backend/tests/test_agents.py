@@ -5,7 +5,9 @@ from pathlib import Path
 from backend.src.agents.orchestrator import AgentOrchestrator
 from backend.src.config import LocalLLMSettings
 from backend.src.domain.models.agent import AgentWorkflowStartRequest
+from backend.src.domain.models.analytics import AnalyticsMetrics, ManualPerformanceImportRequest
 from backend.src.domain.models.content_profile import ContentProfileCreateRequest
+from backend.src.domain.services.analytics_service import AnalyticsService
 from backend.src.domain.services.content_profile_service import ContentProfileService
 from backend.src.domain.services.content_studio_service import ContentStudioService
 from backend.src.domain.services.sqlite_store import SQLiteStore
@@ -21,11 +23,13 @@ class AgentWorkflowTests(unittest.TestCase):
         self.store = SQLiteStore(str(self.root / "registry.db"))
         self.profile_service = ContentProfileService(self.store)
         self.studio_service = ContentStudioService(self.store)
+        self.analytics_service = AnalyticsService(self.store, self.profile_service)
         local_llm = LocalLLMService(LocalLLMSettings(mode="rule_based"))
         self.orchestrator = AgentOrchestrator(
             self.store,
             self.profile_service,
             self.studio_service,
+            self.analytics_service,
             StoryboardService(local_llm),
             ViralScoringService(local_llm),
         )
@@ -75,6 +79,58 @@ class AgentWorkflowTests(unittest.TestCase):
             AgentWorkflowStartRequest(profileId="profile-missing")
         )
         self.assertIsNone(workflow)
+
+    def test_analytics_learning_workflow_persists_rules_for_future_strategy(self) -> None:
+        self.analytics_service.import_manual_performance(
+            self.profile.id,
+            ManualPerformanceImportRequest(
+                platform="youtube_shorts",
+                title="Short curiosity hook",
+                videoLengthSeconds=42,
+                hookType="curiosity",
+                metrics=AnalyticsMetrics(views=1400, audienceRetentionPercent=78),
+            ),
+        )
+        self.analytics_service.import_manual_performance(
+            self.profile.id,
+            ManualPerformanceImportRequest(
+                platform="youtube_shorts",
+                title="Long explanation hook",
+                videoLengthSeconds=61,
+                hookType="explanation",
+                metrics=AnalyticsMetrics(views=800, audienceRetentionPercent=51),
+            ),
+        )
+
+        workflow = self.orchestrator.start_workflow(
+            AgentWorkflowStartRequest(
+                profileId=self.profile.id,
+                workflowType="analytics_learning",
+                createDrafts=False,
+            )
+        )
+        self.assertIsNotNone(workflow)
+        assert workflow is not None
+        self.assertEqual(workflow.status, "completed")
+        self.assertEqual([run.agent_name for run in workflow.runs], [
+            "analytics_agent",
+            "learning_agent",
+        ])
+        self.assertTrue(workflow.output_json["learnings"])
+        self.assertEqual(
+            [rule.rule_key for rule in self.analytics_service.list_profile_rules(self.profile.id)],
+            ["preferred_duration_range", "preferred_hook_type"],
+        )
+
+        next_workflow = self.orchestrator.start_workflow(
+            AgentWorkflowStartRequest(profileId=self.profile.id, seedPrompt="AI myths")
+        )
+        self.assertIsNotNone(next_workflow)
+        assert next_workflow is not None
+        strategy = next_workflow.output_json["strategy"]
+        self.assertEqual(strategy["hookDirection"], "curiosity")
+        self.assertEqual(strategy["targetDurationSeconds"], 42)
+        self.assertIn("preferred_duration_range", strategy["appliedLearnings"])
 
 
 if __name__ == "__main__":

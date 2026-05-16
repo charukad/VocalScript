@@ -22,6 +22,7 @@ import type {
   PlatformTarget,
   StoryboardScene,
   StoryboardSettings,
+  TimelineDraft,
   TranscriptSlice,
 } from '../types';
 import { getMediaDuration, generateThumbnail, generateWaveform, generateFilmstrip, extractAudioSegment } from '../lib/utils/media';
@@ -421,6 +422,7 @@ export type EditorState = {
   importGenerationVariant: (jobId: string, variantUrl?: string) => Promise<void>;
   importCompletedGenerationMedia: () => Promise<void>;
   importCompletedVoiceMedia: (jobs: GenerationJob[], autoPlaceOnTimeline?: boolean) => Promise<void>;
+  applyTimelineDraft: (draft: TimelineDraft, voiceJobs?: GenerationJob[]) => Promise<void>;
 
   // Auto Animate Video
   animationSettings: AnimationSettings;
@@ -3347,6 +3349,139 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       selectedClipId: preparedClips[0]?.id ?? state.selectedClipId,
     }));
     if (get().currentProject) void get().saveProject();
+  },
+
+  applyTimelineDraft: async (draft, voiceJobs = []) => {
+    const draftVoiceJobIds = new Set(
+      draft.audioClips
+        .map(clip => clip.sourceJobId)
+        .filter((jobId): jobId is string => Boolean(jobId))
+    );
+    const completedVoiceJobs = voiceJobs.filter(job =>
+      draftVoiceJobIds.has(job.id)
+      && job.mediaType === 'audio'
+      && job.status === 'completed'
+    );
+    await get().importCompletedVoiceMedia(completedVoiceJobs, false);
+    await get().importCompletedGenerationMedia();
+
+    const state = get();
+    let tracks = [...state.tracks];
+    let audioTrack = tracks.find(track => track.type === 'audio');
+    if (!audioTrack && draft.audioClips.some(clip => Boolean(clip.audioAssetId))) {
+      audioTrack = makeTrack(tracks, 'audio');
+      tracks = [...tracks, audioTrack];
+    }
+    let textTrack = tracks.find(track => track.type === 'text');
+    if (!textTrack && draft.captionClips.length > 0) {
+      textTrack = makeTrack(tracks, 'text');
+      tracks = [...tracks, textTrack];
+    }
+
+    const audioDraftByJobId = new Map(
+      draft.audioClips
+        .filter(clip => clip.sourceJobId)
+        .map(clip => [clip.sourceJobId as string, clip])
+    );
+    const visualDraftBySceneId = new Map(draft.visualClips.map(clip => [clip.sceneId, clip]));
+    const jobById = new Map(voiceJobs.map(job => [job.id, job]));
+    const existingAudioJobIds = new Set<string>();
+    const captionAssetPrefix = `timeline-caption-${draft.scriptId}-`;
+
+    const repositionedClips = state.clips
+      .filter(clip => !clip.assetId.startsWith(captionAssetPrefix))
+      .map(clip => {
+        if (clip.type === 'audio' && clip.generation?.jobId) {
+          const planned = audioDraftByJobId.get(clip.generation.jobId);
+          if (planned && audioTrack) {
+            existingAudioJobIds.add(clip.generation.jobId);
+            return {
+              ...clip,
+              trackId: audioTrack.id,
+              startTime: planned.start,
+              duration: planned.duration,
+            };
+          }
+        }
+        if (clip.type === 'visual' && clip.generation?.sceneId) {
+          const planned = visualDraftBySceneId.get(clip.generation.sceneId);
+          if (planned) {
+            return {
+              ...clip,
+              startTime: planned.start,
+              duration: planned.duration,
+            };
+          }
+        }
+        return clip;
+      });
+
+    const newAudioClips = audioTrack
+      ? draft.audioClips.flatMap(clip => {
+          const job = clip.sourceJobId ? jobById.get(clip.sourceJobId) : null;
+          const asset = clip.audioAssetId
+            ? state.assets.find(candidate => candidate.id === clip.audioAssetId)
+            : null;
+          if (!job || !asset || existingAudioJobIds.has(job.id)) return [];
+          return [{
+            id: makeId(),
+            assetId: asset.id,
+            trackId: audioTrack!.id,
+            file: asset.file,
+            type: 'audio' as const,
+            duration: Math.max(0.1, clip.duration),
+            startTime: clip.start,
+            mediaOffset: 0,
+            transform: { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false },
+            color: { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 },
+            audio: { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 },
+            generation: generatedMetadata(generatedMediaAssetFromJob(job)),
+          }];
+        })
+      : [];
+
+    const captions = draft.captionClips.map((clip, index) => ({
+      id: clip.id,
+      index: index + 1,
+      start: clip.start,
+      end: clip.end,
+      text: clip.text,
+    }));
+    const captionClips = textTrack
+      ? draft.captionClips.map(clip => ({
+          id: makeId(),
+          assetId: `${captionAssetPrefix}${clip.sourceLineId}`,
+          trackId: textTrack!.id,
+          file: new File([], 'timeline-caption.txt', { type: 'text/plain' }),
+          type: 'text' as const,
+          duration: Math.max(0.1, clip.duration),
+          startTime: clip.start,
+          mediaOffset: 0,
+          audio: { volume: 0, mute: true, fadeIn: 0, fadeOut: 0 },
+          transform: { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false },
+          textData: {
+            ...DEFAULT_TEXT_DATA,
+            content: clip.text,
+            fontSize: 42,
+            bgOpacity: 0.45,
+          },
+        }))
+      : [];
+    const srtContent = captionsToSrt(captions);
+    const vttContent = captionsToVtt(captions);
+
+    set({
+      ...withHistory(state),
+      tracks,
+      clips: [...repositionedClips, ...newAudioClips, ...captionClips],
+      selectedClipId: newAudioClips[0]?.id ?? captionClips[0]?.id ?? state.selectedClipId,
+      captions,
+      srtContent,
+      srtDownloadUrl: makeTextDownloadUrl(srtContent, 'text/plain'),
+      vttDownloadUrl: makeTextDownloadUrl(vttContent, 'text/vtt'),
+      storyboardStatus: `Applied timeline draft with ${newAudioClips.length} new audio clip${newAudioClips.length === 1 ? '' : 's'} and ${captionClips.length} caption clip${captionClips.length === 1 ? '' : 's'}.`,
+    });
+    scheduleProjectAutosave(get, 100);
   },
 
   setAnimationSettings: (settings) => {

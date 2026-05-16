@@ -32,9 +32,9 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Phase 7: Storyboard and Viral Visual Planner Upgrade
 - `[x]` Phase 8: Narration Line System
 - `[/]` Phase 9: Google AI Studio Audio Bridge
-- `[ ]` Phase 10: AI Timeline Builder
-- `[ ]` Phase 11: Analytics Integration Foundation
-- `[ ]` Phase 12: Analytics Agent and Learning Agent
+- `[x]` Phase 10: AI Timeline Builder
+- `[x]` Phase 11: Analytics Integration Foundation
+- `[x]` Phase 12: Analytics Agent and Learning Agent
 - `[ ]` Phase 13: Advanced Creator Features
 
 ## Phase 0: Repository Inspection and Safety
@@ -240,48 +240,48 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 
 ## Phase 10: AI Timeline Builder
 
-- `[ ]` Define timeline build input/output contract.
-- `[ ]` Build draft generation from script, narration, storyboard, and generated media.
-- `[ ]` Place narration clips in order.
-- `[ ]` Place visual clips aligned to storyboard timing.
-- `[ ]` Add caption/text clips from narration or final script.
-- `[ ]` Add preview/confirm flow before applying when feasible.
+- `[x]` Define timeline build input/output contract.
+- `[x]` Build draft generation from script, narration, storyboard, and generated media.
+- `[x]` Place narration clips in order.
+- `[x]` Place visual clips aligned to storyboard timing.
+- `[x]` Add caption/text clips from narration or final script.
+- `[x]` Add preview/confirm flow before applying when feasible.
 
 ### Phase 10 Acceptance Checks
 
-- `[ ]` Users can build an editable timeline draft.
-- `[ ]` Voice, captions, and visuals are arranged predictably.
-- `[ ]` Manual timeline editing remains intact.
+- `[x]` Users can build an editable timeline draft.
+- `[x]` Voice, captions, and visuals are arranged predictably.
+- `[x]` Manual timeline editing remains intact.
 
 ## Phase 11: Analytics Integration Foundation
 
-- `[ ]` Add analytics account/connection/snapshot/performance schemas.
-- `[ ]` Add per-profile connection status model.
-- `[ ]` Add manual analytics import path for MVP.
-- `[ ]` Create YouTube and Facebook integration placeholders behind safe abstractions.
-- `[ ]` Add Analytics tab views for connection state and imported metrics.
-- `[ ]` Document token-storage constraints and avoid insecure secret persistence.
+- `[x]` Add analytics account/connection/snapshot/performance schemas.
+- `[x]` Add per-profile connection status model.
+- `[x]` Add manual analytics import path for MVP.
+- `[x]` Create YouTube and Facebook integration placeholders behind safe abstractions.
+- `[x]` Add Analytics tab views for connection state and imported metrics.
+- `[x]` Document token-storage constraints and avoid insecure secret persistence.
 
 ### Phase 11 Acceptance Checks
 
-- `[ ]` Profiles can show analytics connection status.
-- `[ ]` Manual metrics can be stored and displayed.
-- `[ ]` No tokens are stored insecurely.
+- `[x]` Profiles can show analytics connection status.
+- `[x]` Manual metrics can be stored and displayed.
+- `[x]` No tokens are stored insecurely.
 
 ## Phase 12: Analytics Agent and Learning Agent
 
-- `[ ]` Implement Analytics Agent.
-- `[ ]` Implement Learning Agent.
-- `[ ]` Summarize best/worst content by profile.
-- `[ ]` Save reusable profile rules and learnings.
-- `[ ]` Feed learnings back into Profile Strategy Agent.
-- `[ ]` Surface insights in Content Studio.
+- `[x]` Implement Analytics Agent.
+- `[x]` Implement Learning Agent.
+- `[x]` Summarize best/worst content by profile.
+- `[x]` Save reusable profile rules and learnings.
+- `[x]` Feed learnings back into Profile Strategy Agent.
+- `[x]` Surface insights in Content Studio.
 
 ### Phase 12 Acceptance Checks
 
-- `[ ]` Performance summaries are generated.
-- `[ ]` Reusable rules persist per profile.
-- `[ ]` Future idea/script generation can read profile learnings.
+- `[x]` Performance summaries are generated.
+- `[x]` Reusable rules persist per profile.
+- `[x]` Future idea/script generation can read profile learnings.
 
 ## Phase 13: Advanced Creator Features
 
@@ -310,14 +310,14 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 
 ## MVP Definition Of Done
 
-- `[ ]` Users can create Content Profiles.
-- `[ ]` Projects can connect to Content Profiles.
-- `[ ]` Content Studio opens and supports ideas/scripts.
-- `[ ]` Script analysis/rewrite supports Estimated Viral Potential.
-- `[ ]` Agent workflow supports at least idea/script/storyboard preparation.
-- `[ ]` Scripts can split into narration lines.
-- `[ ]` Storyboards can be reviewed before generation.
-- `[ ]` Existing media generation can use improved storyboard prompts.
-- `[ ]` Timeline draft builder creates a basic editable draft.
-- `[ ]` Existing editor/transcription/save-load/export flows still work.
-- `[ ]` This task list stays current as implementation proceeds.
+- `[x]` Users can create Content Profiles.
+- `[x]` Projects can connect to Content Profiles.
+- `[x]` Content Studio opens and supports ideas/scripts.
+- `[x]` Script analysis/rewrite supports Estimated Viral Potential.
+- `[x]` Agent workflow supports at least idea/script/storyboard preparation.
+- `[x]` Scripts can split into narration lines.
+- `[x]` Storyboards can be reviewed before generation.
+- `[x]` Existing media generation can use improved storyboard prompts.
+- `[x]` Timeline draft builder creates a basic editable draft.
+- `[x]` Existing editor/transcription/save-load/export flows still work.
+- `[x]` This task list stays current as implementation proceeds.

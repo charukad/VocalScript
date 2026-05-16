@@ -19,13 +19,16 @@ from backend.src.domain.services.browser_bridge_service import BrowserBridgeServ
 from backend.src.domain.services.content_profile_service import ContentProfileService
 from backend.src.domain.services.content_studio_service import ContentStudioService
 from backend.src.domain.services.animation_planner_service import AnimationPlannerService
+from backend.src.domain.services.analytics_service import AnalyticsService
 from backend.src.domain.services.generation_queue_service import GenerationQueueService
 from backend.src.domain.services.project_service import ProjectService
 from backend.src.domain.services.sqlite_store import SQLiteStore
 from backend.src.domain.services.storyboard_service import StoryboardService
+from backend.src.domain.services.timeline_builder_service import TimelineBuilderService
 from backend.src.domain.services.viral_scoring_service import ViralScoringService
 from backend.src.agents.orchestrator import AgentOrchestrator
 from backend.src.api.animation import build_animation_router
+from backend.src.api.analytics import build_analytics_router
 from backend.src.api.browser_bridge import build_browser_bridge_router
 from backend.src.api.content_profiles import build_content_profiles_router
 from backend.src.api.content_studio import build_content_studio_router
@@ -61,10 +64,13 @@ project_service = ProjectService(settings.projects.projects_dir, store=sqlite_st
 content_profile_service = ContentProfileService(sqlite_store)
 content_studio_service = ContentStudioService(sqlite_store)
 viral_scoring_service = ViralScoringService(local_llm_service)
+timeline_builder_service = TimelineBuilderService()
+analytics_service = AnalyticsService(sqlite_store, content_profile_service)
 agent_orchestrator = AgentOrchestrator(
     sqlite_store,
     content_profile_service,
     content_studio_service,
+    analytics_service,
     storyboard_service,
     viral_scoring_service,
 )
@@ -84,7 +90,13 @@ app.include_router(build_generation_router(
 app.include_router(build_animation_router(animation_planner_service, whisper_engine, generation_queue_service))
 app.include_router(build_projects_router(project_service))
 app.include_router(build_content_profiles_router(content_profile_service))
-app.include_router(build_content_studio_router(content_profile_service, content_studio_service, generation_queue_service))
+app.include_router(build_content_studio_router(
+    content_profile_service,
+    content_studio_service,
+    generation_queue_service,
+    timeline_builder_service,
+))
+app.include_router(build_analytics_router(content_profile_service, analytics_service))
 app.include_router(build_viral_router(viral_scoring_service))
 app.include_router(build_agents_router(agent_orchestrator))
 app.include_router(build_browser_bridge_router(browser_bridge_service, settings.browser_bridge.session_token))

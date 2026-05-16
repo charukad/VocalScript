@@ -3,6 +3,10 @@ import type {
   ContentIdeaInput,
   AgentRun,
   AgentWorkflowStartInput,
+  AnalyticsConnection,
+  AnalyticsConnectionInput,
+  ContentPerformance,
+  ManualPerformanceInput,
   NarrationLine,
   NarrationLineInput,
   NarrationLineUpdateInput,
@@ -12,10 +16,13 @@ import type {
   ScriptAnalysis,
   ScriptRewrite,
   ScriptVersionInput,
+  ProfileLearning,
+  TimelineDraftBuildInput,
   VoiceJobBatch,
   VoiceJobCreateInput,
   WorkflowRunDetail,
 } from './types';
+import type { TimelineDraft } from '../../types';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -33,6 +40,18 @@ type NarrationLineListResponse = {
 
 type AgentRunListResponse = {
   runs: AgentRun[];
+};
+
+type AnalyticsConnectionListResponse = {
+  connections: AnalyticsConnection[];
+};
+
+type ContentPerformanceListResponse = {
+  performance: ContentPerformance[];
+};
+
+type ProfileLearningListResponse = {
+  learnings: ProfileLearning[];
 };
 
 const formatApiError = async (response: Response, fallback: string): Promise<Error> => {
@@ -241,6 +260,79 @@ export const listVoiceJobs = async (
 ): Promise<VoiceJobBatch> => {
   const response = await fetch(`${API_BASE_URL}/api/scripts/${scriptId}/voice-jobs`, { signal });
   if (!response.ok) throw await formatApiError(response, 'Could not load voice jobs');
+  return response.json();
+};
+
+export const buildTimelineDraft = async (
+  scriptId: string,
+  input: TimelineDraftBuildInput,
+  signal?: AbortSignal,
+): Promise<TimelineDraft> => {
+  const response = await fetch(`${API_BASE_URL}/api/scripts/${scriptId}/timeline-draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not build timeline draft');
+  return response.json();
+};
+
+export const listAnalyticsConnections = async (
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<AnalyticsConnectionListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/analytics/connections`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load analytics connections');
+  return response.json();
+};
+
+export const updateAnalyticsConnection = async (
+  profileId: string,
+  platform: string,
+  input: AnalyticsConnectionInput,
+  signal?: AbortSignal,
+): Promise<AnalyticsConnection> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/analytics/connections/${platform}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not save analytics connection');
+  return response.json();
+};
+
+export const importManualPerformance = async (
+  profileId: string,
+  input: ManualPerformanceInput,
+  signal?: AbortSignal,
+): Promise<ContentPerformance> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/analytics/performance/manual`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not import analytics performance');
+  return response.json();
+};
+
+export const listContentPerformance = async (
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<ContentPerformanceListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/analytics/performance`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load analytics performance');
+  return response.json();
+};
+
+export const listProfileLearnings = async (
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<ProfileLearningListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/analytics/learnings`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load profile learnings');
   return response.json();
 };
 

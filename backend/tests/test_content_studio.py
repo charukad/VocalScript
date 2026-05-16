@@ -13,10 +13,12 @@ from backend.src.domain.models.content_studio import (
     ScriptUpdateRequest,
     ScriptVersionCreateRequest,
 )
+from backend.src.domain.models.generation import GeneratedMediaAsset, StoryboardScene
 from backend.src.domain.services.content_profile_service import ContentProfileService
 from backend.src.domain.services.content_studio_service import ContentStudioService
 from backend.src.domain.services.generation_queue_service import GenerationQueueService
 from backend.src.domain.services.sqlite_store import SQLiteStore
+from backend.src.domain.services.timeline_builder_service import TimelineBuilderService
 
 
 class ContentStudioTests(unittest.TestCase):
@@ -27,6 +29,7 @@ class ContentStudioTests(unittest.TestCase):
         self.profile_service = ContentProfileService(self.store)
         self.studio_service = ContentStudioService(self.store)
         self.queue_service = GenerationQueueService(str(self.root / "generated"))
+        self.timeline_builder_service = TimelineBuilderService()
         self.profile = self.profile_service.create_profile(
             ContentProfileCreateRequest(name="Daily AI Facts", platforms=["youtube_shorts"])
         )
@@ -182,6 +185,76 @@ class ContentStudioTests(unittest.TestCase):
         assert failed_sync is not None
         self.assertEqual(failed_sync.status, "failed")
         self.assertEqual(failed_sync.error, "provider failed")
+
+    def test_timeline_draft_uses_narration_storyboard_and_generated_media(self) -> None:
+        script = self.studio_service.create_script(
+            self.profile.id,
+            ScriptCreateRequest(title="Timeline draft", content="Hook line. Payoff line."),
+        )
+        lines = self.studio_service.split_script_into_lines(script.id, ScriptSplitLinesRequest())
+        self.assertIsNotNone(lines)
+        assert lines is not None
+        first = self.studio_service.update_narration_line(
+            lines[0].id,
+            NarrationLineUpdateRequest(
+                status="done",
+                audioAssetId="generated-voice-job-1",
+                durationSeconds=1.5,
+            ),
+        )
+        second = self.studio_service.update_narration_line(
+            lines[1].id,
+            NarrationLineUpdateRequest(durationSeconds=2.0, pauseAfterSeconds=0.25),
+        )
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        detail = self.studio_service.get_script_detail(script.id)
+        self.assertIsNotNone(detail)
+        assert detail is not None
+
+        scenes = [
+            StoryboardScene(
+                id="scene-001",
+                start=0.0,
+                end=1.5,
+                transcript="Hook line.",
+                prompt="opening visual",
+                captionText="Hook line.",
+            ),
+            StoryboardScene(
+                id="scene-002",
+                start=1.5,
+                end=3.5,
+                transcript="Payoff line.",
+                prompt="payoff visual",
+                captionText="Payoff line.",
+            ),
+        ]
+        assets = [
+            GeneratedMediaAsset(
+                jobId="visual-job-1",
+                batchId="batch-1",
+                sceneId="scene-001",
+                provider="meta",
+                mediaType="image",
+                status="completed",
+                resultUrl="/api/generation/media/scene-001.png",
+                prompt="opening visual",
+                start=0.0,
+                end=1.5,
+                duration=1.5,
+            ),
+        ]
+
+        draft = self.timeline_builder_service.build_draft(detail, scenes, assets)
+
+        self.assertEqual([clip.start for clip in draft.audio_clips], [0.0, 1.5])
+        self.assertEqual([clip.asset_available for clip in draft.audio_clips], [True, False])
+        self.assertEqual([clip.asset_available for clip in draft.visual_clips], [True, False])
+        self.assertEqual([clip.text for clip in draft.caption_clips], ["Hook line.", "Payoff line."])
+        self.assertEqual(draft.estimated_duration_seconds, 3.5)
+        self.assertIn("1 narration line(s) do not have generated audio yet.", draft.warnings)
+        self.assertIn("1 storyboard scene(s) do not have generated media yet.", draft.warnings)
 
 
 if __name__ == "__main__":

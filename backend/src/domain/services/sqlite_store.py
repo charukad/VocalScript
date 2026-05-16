@@ -13,6 +13,14 @@ from backend.src.domain.models.generation import (
     GenerationMediaVariant,
     ProviderName,
 )
+from backend.src.domain.models.analytics import (
+    AnalyticsAccount,
+    AnalyticsConnection,
+    AnalyticsSnapshot,
+    ContentPerformanceRule,
+    ContentPerformance,
+    ProfileLearning,
+)
 from backend.src.domain.models.content_profile import ContentProfile
 from backend.src.domain.models.content_studio import ContentIdea, NarrationLine, Script, ScriptVersion
 from backend.src.domain.models.agent import AgentRun, WorkflowRun
@@ -307,6 +315,80 @@ class SQLiteStore:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS analytics_accounts (
+                    id TEXT PRIMARY KEY,
+                    platform TEXT NOT NULL,
+                    external_account_id TEXT,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    token_reference TEXT,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    account_json TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS analytics_connections (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    account_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'not_connected',
+                    external_account_id TEXT,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    scopes_json TEXT NOT NULL DEFAULT '[]',
+                    token_reference TEXT,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    connection_json TEXT NOT NULL,
+                    UNIQUE(profile_id, platform)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_analytics_connections_profile
+                    ON analytics_connections(profile_id, platform);
+
+                CREATE TABLE IF NOT EXISTS analytics_snapshots (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    project_id TEXT,
+                    platform TEXT NOT NULL,
+                    external_content_id TEXT,
+                    captured_at TEXT NOT NULL,
+                    metrics_json TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    snapshot_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_analytics_snapshots_profile
+                    ON analytics_snapshots(profile_id, captured_at DESC);
+
+                CREATE TABLE IF NOT EXISTS content_performance (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    project_id TEXT,
+                    platform TEXT NOT NULL,
+                    external_content_id TEXT,
+                    title TEXT NOT NULL,
+                    published_at TEXT,
+                    posting_time TEXT,
+                    video_length_seconds REAL,
+                    hook_type TEXT NOT NULL DEFAULT '',
+                    caption_style TEXT NOT NULL DEFAULT '',
+                    voice_style TEXT NOT NULL DEFAULT '',
+                    visual_style TEXT NOT NULL DEFAULT '',
+                    traffic_source TEXT NOT NULL DEFAULT '',
+                    metrics_json TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    performance_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_content_performance_profile
+                    ON content_performance(profile_id, updated_at DESC);
+
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
                 VALUES (1, CURRENT_TIMESTAMP);
 
@@ -318,6 +400,9 @@ class SQLiteStore:
 
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
                 VALUES (4, CURRENT_TIMESTAMP);
+
+                INSERT OR IGNORE INTO schema_migrations(version, applied_at)
+                VALUES (5, CURRENT_TIMESTAMP);
                 """
             )
             self._ensure_columns(
@@ -1075,6 +1160,297 @@ class SQLiteStore:
         with self._lock, self._registry_connect() as connection:
             row = connection.execute("SELECT run_json FROM agent_runs WHERE id = ?", (run_id,)).fetchone()
         return self._agent_run_from_json(row["run_json"]) if row else None
+
+    def upsert_analytics_account(self, account: AnalyticsAccount) -> None:
+        payload = account.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO analytics_accounts (
+                    id, platform, external_account_id, display_name, token_reference,
+                    metadata_json, created_at, updated_at, account_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    platform = excluded.platform,
+                    external_account_id = excluded.external_account_id,
+                    display_name = excluded.display_name,
+                    token_reference = excluded.token_reference,
+                    metadata_json = excluded.metadata_json,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    account_json = excluded.account_json
+                """,
+                (
+                    account.id,
+                    account.platform,
+                    account.external_account_id,
+                    account.display_name,
+                    account.token_reference,
+                    _json_dumps(account.metadata),
+                    account.created_at,
+                    account.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def upsert_analytics_connection(self, connection_model: AnalyticsConnection) -> None:
+        payload = connection_model.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO analytics_connections (
+                    id, profile_id, platform, account_id, status, external_account_id,
+                    display_name, scopes_json, token_reference, metadata_json,
+                    created_at, updated_at, connection_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(profile_id, platform) DO UPDATE SET
+                    id = excluded.id,
+                    account_id = excluded.account_id,
+                    status = excluded.status,
+                    external_account_id = excluded.external_account_id,
+                    display_name = excluded.display_name,
+                    scopes_json = excluded.scopes_json,
+                    token_reference = excluded.token_reference,
+                    metadata_json = excluded.metadata_json,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    connection_json = excluded.connection_json
+                """,
+                (
+                    connection_model.id,
+                    connection_model.profile_id,
+                    connection_model.platform,
+                    connection_model.account_id,
+                    connection_model.status,
+                    connection_model.external_account_id,
+                    connection_model.display_name,
+                    _json_dumps(connection_model.scopes),
+                    connection_model.token_reference,
+                    _json_dumps(connection_model.metadata),
+                    connection_model.created_at,
+                    connection_model.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_analytics_connection(
+        self,
+        profile_id: str,
+        platform: str,
+    ) -> Optional[AnalyticsConnection]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute(
+                """
+                SELECT connection_json FROM analytics_connections
+                WHERE profile_id = ? AND platform = ?
+                """,
+                (profile_id, platform),
+            ).fetchone()
+        return self._analytics_connection_from_json(row["connection_json"]) if row else None
+
+    def list_analytics_connections(self, profile_id: str) -> List[AnalyticsConnection]:
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT connection_json FROM analytics_connections
+                WHERE profile_id = ?
+                ORDER BY platform ASC
+                """,
+                (profile_id,),
+            ).fetchall()
+        return [
+            connection_model
+            for row in rows
+            if (connection_model := self._analytics_connection_from_json(row["connection_json"]))
+        ]
+
+    def upsert_analytics_snapshot(self, snapshot: AnalyticsSnapshot) -> None:
+        payload = snapshot.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO analytics_snapshots (
+                    id, profile_id, project_id, platform, external_content_id,
+                    captured_at, metrics_json, metadata_json, created_at, updated_at, snapshot_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    project_id = excluded.project_id,
+                    platform = excluded.platform,
+                    external_content_id = excluded.external_content_id,
+                    captured_at = excluded.captured_at,
+                    metrics_json = excluded.metrics_json,
+                    metadata_json = excluded.metadata_json,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    snapshot_json = excluded.snapshot_json
+                """,
+                (
+                    snapshot.id,
+                    snapshot.profile_id,
+                    snapshot.project_id,
+                    snapshot.platform,
+                    snapshot.external_content_id,
+                    snapshot.captured_at,
+                    _json_dumps(snapshot.metrics.model_dump(by_alias=True)),
+                    _json_dumps(snapshot.metadata),
+                    snapshot.created_at,
+                    snapshot.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def upsert_content_performance(self, performance: ContentPerformance) -> None:
+        payload = performance.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO content_performance (
+                    id, profile_id, project_id, platform, external_content_id, title,
+                    published_at, posting_time, video_length_seconds, hook_type, caption_style,
+                    voice_style, visual_style, traffic_source, metrics_json, metadata_json,
+                    created_at, updated_at, performance_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    project_id = excluded.project_id,
+                    platform = excluded.platform,
+                    external_content_id = excluded.external_content_id,
+                    title = excluded.title,
+                    published_at = excluded.published_at,
+                    posting_time = excluded.posting_time,
+                    video_length_seconds = excluded.video_length_seconds,
+                    hook_type = excluded.hook_type,
+                    caption_style = excluded.caption_style,
+                    voice_style = excluded.voice_style,
+                    visual_style = excluded.visual_style,
+                    traffic_source = excluded.traffic_source,
+                    metrics_json = excluded.metrics_json,
+                    metadata_json = excluded.metadata_json,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    performance_json = excluded.performance_json
+                """,
+                (
+                    performance.id,
+                    performance.profile_id,
+                    performance.project_id,
+                    performance.platform,
+                    performance.external_content_id,
+                    performance.title,
+                    performance.published_at,
+                    performance.posting_time,
+                    performance.video_length_seconds,
+                    performance.hook_type,
+                    performance.caption_style,
+                    performance.voice_style,
+                    performance.visual_style,
+                    performance.traffic_source,
+                    _json_dumps(performance.metrics.model_dump(by_alias=True)),
+                    _json_dumps(performance.metadata),
+                    performance.created_at,
+                    performance.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def list_content_performance(self, profile_id: str) -> List[ContentPerformance]:
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT performance_json FROM content_performance
+                WHERE profile_id = ?
+                ORDER BY updated_at DESC, created_at DESC
+                """,
+                (profile_id,),
+            ).fetchall()
+        return [
+            performance
+            for row in rows
+            if (performance := self._content_performance_from_json(row["performance_json"]))
+        ]
+
+    def replace_profile_learnings(self, profile_id: str, learnings: List[ProfileLearning]) -> None:
+        with self._lock, self._registry_connect() as connection:
+            connection.execute("DELETE FROM profile_learnings WHERE profile_id = ?", (profile_id,))
+            for learning in learnings:
+                connection.execute(
+                    """
+                    INSERT INTO profile_learnings (
+                        id, profile_id, learning_type, learning_json, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        learning.id,
+                        learning.profile_id,
+                        learning.learning_type,
+                        _json_dumps(learning.model_dump(by_alias=True)),
+                        learning.created_at,
+                        learning.updated_at,
+                    ),
+                )
+
+    def list_profile_learnings(self, profile_id: str) -> List[ProfileLearning]:
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT learning_json FROM profile_learnings
+                WHERE profile_id = ?
+                ORDER BY updated_at DESC, created_at DESC
+                """,
+                (profile_id,),
+            ).fetchall()
+        return [
+            learning
+            for row in rows
+            if (learning := self._profile_learning_from_json(row["learning_json"]))
+        ]
+
+    def replace_content_performance_rules(
+        self,
+        profile_id: str,
+        rules: List[ContentPerformanceRule],
+    ) -> None:
+        with self._lock, self._registry_connect() as connection:
+            connection.execute("DELETE FROM content_performance_rules WHERE profile_id = ?", (profile_id,))
+            for rule in rules:
+                connection.execute(
+                    """
+                    INSERT INTO content_performance_rules (
+                        id, profile_id, rule_key, rule_json, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        rule.id,
+                        rule.profile_id,
+                        rule.rule_key,
+                        _json_dumps(rule.model_dump(by_alias=True)),
+                        rule.created_at,
+                        rule.updated_at,
+                    ),
+                )
+
+    def list_content_performance_rules(self, profile_id: str) -> List[ContentPerformanceRule]:
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT rule_json FROM content_performance_rules
+                WHERE profile_id = ?
+                ORDER BY updated_at DESC, created_at DESC
+                """,
+                (profile_id,),
+            ).fetchall()
+        return [
+            rule
+            for row in rows
+            if (rule := self._content_performance_rule_from_json(row["rule_json"]))
+        ]
 
     def get_project(self, project_id: str) -> Optional[ProjectDetail]:
         row = self._registry_project_row(project_id)
@@ -2178,6 +2554,30 @@ class SQLiteStore:
     def _agent_run_from_json(self, raw: str) -> Optional[AgentRun]:
         try:
             return AgentRun(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _analytics_connection_from_json(self, raw: str) -> Optional[AnalyticsConnection]:
+        try:
+            return AnalyticsConnection(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _content_performance_from_json(self, raw: str) -> Optional[ContentPerformance]:
+        try:
+            return ContentPerformance(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _profile_learning_from_json(self, raw: str) -> Optional[ProfileLearning]:
+        try:
+            return ProfileLearning(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _content_performance_rule_from_json(self, raw: str) -> Optional[ContentPerformanceRule]:
+        try:
+            return ContentPerformanceRule(**_json_loads(raw, {}))
         except ValueError:
             return None
 

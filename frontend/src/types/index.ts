@@ -398,6 +398,45 @@ export type GeneratedMediaAsset = {
   metadata: Record<string, string>;
 };
 
+export type TimelineDraftAudioClip = {
+  narrationLineId: string;
+  sourceJobId: string | null;
+  audioAssetId: string | null;
+  text: string;
+  start: number;
+  end: number;
+  duration: number;
+  assetAvailable: boolean;
+};
+
+export type TimelineDraftVisualClip = {
+  sceneId: string;
+  sourceJobId: string | null;
+  text: string;
+  start: number;
+  end: number;
+  duration: number;
+  assetAvailable: boolean;
+};
+
+export type TimelineDraftCaptionClip = {
+  id: string;
+  sourceLineId: string;
+  text: string;
+  start: number;
+  end: number;
+  duration: number;
+};
+
+export type TimelineDraft = {
+  scriptId: string;
+  estimatedDurationSeconds: number;
+  audioClips: TimelineDraftAudioClip[];
+  visualClips: TimelineDraftVisualClip[];
+  captionClips: TimelineDraftCaptionClip[];
+  warnings: string[];
+};
+
 export type BridgeConnectionStatus =
   | 'connected'
   | 'connecting'

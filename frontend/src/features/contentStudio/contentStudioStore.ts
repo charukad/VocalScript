@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import {
   archiveIdea,
+  buildTimelineDraft,
   createIdea,
   createNarrationLine,
   createScript,
@@ -26,9 +27,11 @@ import type {
   ScriptDetail,
   ScriptInput,
   ScriptVersionInput,
+  TimelineDraftBuildInput,
   VoiceJobBatch,
   VoiceJobCreateInput,
 } from './types';
+import type { TimelineDraft } from '../../types';
 
 type ContentStudioState = {
   activeProfileId: string | null;
@@ -37,6 +40,7 @@ type ContentStudioState = {
   selectedScriptId: string | null;
   selectedScript: ScriptDetail | null;
   voiceJobs: VoiceJobBatch | null;
+  timelineDraft: TimelineDraft | null;
   isLoading: boolean;
   isSaving: boolean;
   error: string | null;
@@ -54,6 +58,7 @@ type ContentStudioState = {
   regenerateNarrationLine: (lineId: string) => Promise<NarrationLine>;
   queueVoiceJobs: (scriptId: string, input: VoiceJobCreateInput) => Promise<VoiceJobBatch>;
   refreshVoiceJobs: (scriptId: string) => Promise<VoiceJobBatch>;
+  buildTimelineDraft: (scriptId: string, input: TimelineDraftBuildInput) => Promise<TimelineDraft>;
 };
 
 const mergeScriptSummary = (scripts: Script[], detail: ScriptDetail): Script[] => {
@@ -82,6 +87,7 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
   selectedScriptId: null,
   selectedScript: null,
   voiceJobs: null,
+  timelineDraft: null,
   isLoading: false,
   isSaving: false,
   error: null,
@@ -94,6 +100,7 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
         selectedScriptId: null,
         selectedScript: null,
         voiceJobs: null,
+        timelineDraft: null,
         error: null,
       });
       return;
@@ -112,6 +119,7 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
         selectedScriptId: selectedScript?.id ?? null,
         selectedScript,
         voiceJobs: null,
+        timelineDraft: null,
       });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : 'Could not load Content Studio data' });
@@ -169,6 +177,7 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
         selectedScriptId: detail.id,
         selectedScript: detail,
         voiceJobs: null,
+        timelineDraft: null,
       }));
       return detail;
     } catch (error) {
@@ -183,7 +192,7 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const detail = await getScript(scriptId);
-      set({ selectedScriptId: detail.id, selectedScript: detail, voiceJobs: null });
+      set({ selectedScriptId: detail.id, selectedScript: detail, voiceJobs: null, timelineDraft: null });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : 'Could not load script' });
     } finally {
@@ -342,6 +351,20 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
       const message = error instanceof Error ? error.message : 'Could not load voice jobs';
       set({ error: message });
       throw error;
+    }
+  },
+  buildTimelineDraft: async (scriptId, input) => {
+    set({ isSaving: true, error: null });
+    try {
+      const timelineDraft = await buildTimelineDraft(scriptId, input);
+      set({ timelineDraft });
+      return timelineDraft;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not build timeline draft';
+      set({ error: message });
+      throw error;
+    } finally {
+      set({ isSaving: false });
     }
   },
 }));

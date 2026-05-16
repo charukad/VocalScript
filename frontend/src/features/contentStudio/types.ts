@@ -1,4 +1,9 @@
-import type { GenerationJob, PlatformTarget } from '../../types';
+import type {
+  GeneratedMediaAsset,
+  GenerationJob,
+  PlatformTarget,
+  StoryboardScene,
+} from '../../types';
 
 export type ContentIdeaStatus = 'draft' | 'selected' | 'converted_to_script' | 'archived';
 export type ScriptStatus = 'draft' | 'final' | 'archived';
@@ -123,6 +128,98 @@ export type VoiceJobBatch = {
   batchId?: string | null;
 };
 
+export type TimelineDraftBuildInput = {
+  scenes: StoryboardScene[];
+  generatedMediaAssets: GeneratedMediaAsset[];
+};
+
+export type AnalyticsConnectionStatus = 'not_connected' | 'manual_only' | 'connected' | 'error';
+
+export type AnalyticsConnection = {
+  id: string;
+  profileId: string;
+  platform: PlatformTarget;
+  accountId: string | null;
+  status: AnalyticsConnectionStatus;
+  externalAccountId: string | null;
+  displayName: string;
+  scopes: string[];
+  tokenReference: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AnalyticsConnectionInput = {
+  status: AnalyticsConnectionStatus;
+  externalAccountId?: string | null;
+  displayName?: string;
+  scopes?: string[];
+  tokenReference?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type AnalyticsMetrics = {
+  views: number;
+  impressions: number;
+  ctr: number;
+  averageViewDurationSeconds: number;
+  audienceRetentionPercent: number;
+  watchTimeMinutes: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  followersGained: number;
+};
+
+export type ContentPerformance = {
+  id: string;
+  profileId: string;
+  platform: PlatformTarget;
+  projectId: string | null;
+  externalContentId: string | null;
+  title: string;
+  publishedAt: string | null;
+  postingTime: string | null;
+  videoLengthSeconds: number | null;
+  hookType: string;
+  captionStyle: string;
+  voiceStyle: string;
+  visualStyle: string;
+  trafficSource: string;
+  metrics: AnalyticsMetrics;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProfileLearning = {
+  id: string;
+  profileId: string;
+  learningType: string;
+  summary: string;
+  data: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ManualPerformanceInput = {
+  platform: PlatformTarget;
+  projectId?: string | null;
+  externalContentId?: string | null;
+  title: string;
+  publishedAt?: string | null;
+  postingTime?: string | null;
+  videoLengthSeconds?: number | null;
+  hookType?: string;
+  captionStyle?: string;
+  voiceStyle?: string;
+  visualStyle?: string;
+  trafficSource?: string;
+  metrics: AnalyticsMetrics;
+  metadata?: Record<string, unknown>;
+};
+
 export type ScriptDetail = Script & {
   versions: ScriptVersion[];
   narrationLines: NarrationLine[];
@@ -183,7 +280,7 @@ export type WorkflowRun = {
   id: string;
   profileId: string;
   projectId: string | null;
-  workflowType: 'content_draft';
+  workflowType: 'content_draft' | 'analytics_learning';
   inputJson: Record<string, unknown>;
   outputJson: Record<string, unknown> & {
     createdIdeaIds?: string[];
@@ -202,7 +299,7 @@ export type WorkflowRunDetail = WorkflowRun & {
 export type AgentWorkflowStartInput = {
   profileId: string;
   projectId?: string | null;
-  workflowType?: 'content_draft';
+  workflowType?: 'content_draft' | 'analytics_learning';
   seedPrompt?: string;
   createDrafts?: boolean;
 };

@@ -7,7 +7,7 @@ from backend.src.domain.models.generation import ApiModel
 
 AgentRunStatus = Literal["pending", "running", "completed", "failed"]
 WorkflowRunStatus = Literal["pending", "running", "completed", "failed"]
-WorkflowType = Literal["content_draft"]
+WorkflowType = Literal["content_draft", "analytics_learning"]
 
 
 class AgentWorkflowStartRequest(ApiModel):

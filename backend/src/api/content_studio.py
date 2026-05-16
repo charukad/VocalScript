@@ -20,15 +20,18 @@ from backend.src.domain.models.generation import (
     GenerationJobListResponse,
     VoiceGenerationJobCreateRequest,
 )
+from backend.src.domain.models.timeline_builder import TimelineDraft, TimelineDraftBuildRequest
 from backend.src.domain.services.content_profile_service import ContentProfileService
 from backend.src.domain.services.content_studio_service import ContentStudioService
 from backend.src.domain.services.generation_queue_service import GenerationQueueService
+from backend.src.domain.services.timeline_builder_service import TimelineBuilderService
 
 
 def build_content_studio_router(
     content_profile_service: ContentProfileService,
     content_studio_service: ContentStudioService,
     generation_queue_service: GenerationQueueService,
+    timeline_builder_service: TimelineBuilderService,
 ) -> APIRouter:
     router = APIRouter(tags=["content-studio"])
 
@@ -168,5 +171,16 @@ def build_content_studio_router(
         for job in jobs:
             content_studio_service.sync_narration_line_from_voice_job(job)
         return GenerationJobListResponse(jobs=jobs, batchId=jobs[-1].batch_id if jobs else None)
+
+    @router.post("/api/scripts/{script_id}/timeline-draft", response_model=TimelineDraft)
+    async def build_timeline_draft(script_id: str, request: TimelineDraftBuildRequest):
+        script = content_studio_service.get_script_detail(script_id)
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+        return timeline_builder_service.build_draft(
+            script=script,
+            scenes=request.scenes,
+            generated_media_assets=request.generated_media_assets,
+        )
 
     return router
