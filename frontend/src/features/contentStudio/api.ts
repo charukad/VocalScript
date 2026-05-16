@@ -1,6 +1,8 @@
 import type {
   ContentIdea,
   ContentIdeaInput,
+  ContentTrend,
+  ContentTrendInput,
   AgentRun,
   AgentWorkflowStartInput,
   AnalyticsConnection,
@@ -32,6 +34,10 @@ type IdeaListResponse = {
 
 type ScriptListResponse = {
   scripts: Script[];
+};
+
+type TrendListResponse = {
+  trends: ContentTrend[];
 };
 
 type NarrationLineListResponse = {
@@ -108,6 +114,69 @@ export const archiveIdea = async (
     signal,
   });
   if (!response.ok) throw await formatApiError(response, 'Could not archive idea');
+  return response.json();
+};
+
+export const listTrends = async (
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<TrendListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/trends`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load trends');
+  return response.json();
+};
+
+export const createTrend = async (
+  profileId: string,
+  input: ContentTrendInput,
+  signal?: AbortSignal,
+): Promise<ContentTrend> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/trends`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not create trend');
+  return response.json();
+};
+
+export const suggestTrends = async (
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<TrendListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/trends/suggest`, {
+    method: 'POST',
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not suggest trends');
+  return response.json();
+};
+
+export const updateTrend = async (
+  trendId: string,
+  input: Partial<ContentTrendInput>,
+  signal?: AbortSignal,
+): Promise<ContentTrend> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-trends/${trendId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not update trend');
+  return response.json();
+};
+
+export const archiveTrend = async (
+  trendId: string,
+  signal?: AbortSignal,
+): Promise<ContentTrend> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-trends/${trendId}`, {
+    method: 'DELETE',
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not archive trend');
   return response.json();
 };
 

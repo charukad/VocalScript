@@ -7,6 +7,7 @@ from backend.src.domain.models.generation import ApiModel
 
 
 IdeaStatus = Literal["draft", "selected", "converted_to_script", "archived"]
+TrendStatus = Literal["active", "selected", "converted_to_idea", "archived"]
 NarrationLineStatus = Literal["pending", "generating", "done", "failed"]
 ScriptStatus = Literal["draft", "final", "archived"]
 
@@ -68,6 +69,65 @@ class ContentIdea(ContentIdeaFields):
 
 class ContentIdeaListResponse(ApiModel):
     ideas: List[ContentIdea]
+
+
+class ContentTrendFields(ApiModel):
+    topic: str
+    platform: Optional[PlatformTarget] = None
+    trend_score: Optional[int] = Field(default=None, alias="trendScore", ge=0, le=100)
+    platform_relevance: Optional[int] = Field(default=None, alias="platformRelevance", ge=0, le=100)
+    niche_relevance: Optional[int] = Field(default=None, alias="nicheRelevance", ge=0, le=100)
+    suggested_angle: str = Field(default="", alias="suggestedAngle")
+    suggested_hook: str = Field(default="", alias="suggestedHook")
+    content_idea_suggestions: List[str] = Field(default_factory=list, alias="contentIdeaSuggestions")
+    source: str = "manual"
+    status: TrendStatus = "active"
+
+    @field_validator("topic")
+    @classmethod
+    def validate_topic(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Trend topic is required")
+        return cleaned
+
+
+class ContentTrendCreateRequest(ContentTrendFields):
+    pass
+
+
+class ContentTrendUpdateRequest(ApiModel):
+    topic: Optional[str] = None
+    platform: Optional[PlatformTarget] = None
+    trend_score: Optional[int] = Field(default=None, alias="trendScore", ge=0, le=100)
+    platform_relevance: Optional[int] = Field(default=None, alias="platformRelevance", ge=0, le=100)
+    niche_relevance: Optional[int] = Field(default=None, alias="nicheRelevance", ge=0, le=100)
+    suggested_angle: Optional[str] = Field(default=None, alias="suggestedAngle")
+    suggested_hook: Optional[str] = Field(default=None, alias="suggestedHook")
+    content_idea_suggestions: Optional[List[str]] = Field(default=None, alias="contentIdeaSuggestions")
+    source: Optional[str] = None
+    status: Optional[TrendStatus] = None
+
+    @field_validator("topic")
+    @classmethod
+    def validate_topic(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Trend topic is required")
+        return cleaned
+
+
+class ContentTrend(ContentTrendFields):
+    id: str
+    profile_id: str = Field(alias="profileId")
+    created_at: str = Field(alias="createdAt")
+    updated_at: str = Field(alias="updatedAt")
+
+
+class ContentTrendListResponse(ApiModel):
+    trends: List[ContentTrend]
 
 
 class ScriptFields(ApiModel):

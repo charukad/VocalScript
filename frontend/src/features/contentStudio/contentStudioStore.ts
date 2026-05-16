@@ -1,25 +1,32 @@
 import { create } from 'zustand';
 import {
   archiveIdea,
+  archiveTrend,
   buildTimelineDraft,
   createIdea,
   createNarrationLine,
   createScript,
   createScriptVersion,
+  createTrend,
   createVoiceJobs,
   getScript,
   listIdeas,
+  listTrends,
   listVoiceJobs,
   listScripts,
   splitScriptIntoLines,
+  suggestTrends,
   updateIdea,
   updateNarrationLine,
   updateScript,
+  updateTrend,
   regenerateNarrationLine,
 } from './api';
 import type {
   ContentIdea,
   ContentIdeaInput,
+  ContentTrend,
+  ContentTrendInput,
   NarrationLine,
   NarrationLineInput,
   NarrationLineUpdateInput,
@@ -36,6 +43,7 @@ import type { TimelineDraft } from '../../types';
 type ContentStudioState = {
   activeProfileId: string | null;
   ideas: ContentIdea[];
+  trends: ContentTrend[];
   scripts: Script[];
   selectedScriptId: string | null;
   selectedScript: ScriptDetail | null;
@@ -48,6 +56,10 @@ type ContentStudioState = {
   createIdea: (profileId: string, input: ContentIdeaInput) => Promise<ContentIdea>;
   updateIdea: (ideaId: string, input: Partial<ContentIdeaInput>) => Promise<ContentIdea>;
   archiveIdea: (ideaId: string) => Promise<void>;
+  createTrend: (profileId: string, input: ContentTrendInput) => Promise<ContentTrend>;
+  suggestTrends: (profileId: string) => Promise<ContentTrend[]>;
+  updateTrend: (trendId: string, input: Partial<ContentTrendInput>) => Promise<ContentTrend>;
+  archiveTrend: (trendId: string) => Promise<void>;
   createScript: (profileId: string, input: ScriptInput) => Promise<ScriptDetail>;
   selectScript: (scriptId: string) => Promise<void>;
   updateScript: (scriptId: string, input: Partial<ScriptInput>) => Promise<ScriptDetail>;
@@ -83,6 +95,7 @@ const mergeScriptSummary = (scripts: Script[], detail: ScriptDetail): Script[] =
 export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
   activeProfileId: null,
   ideas: [],
+  trends: [],
   scripts: [],
   selectedScriptId: null,
   selectedScript: null,
@@ -96,6 +109,7 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
       set({
         activeProfileId: null,
         ideas: [],
+        trends: [],
         scripts: [],
         selectedScriptId: null,
         selectedScript: null,
@@ -107,14 +121,16 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
     }
     set({ activeProfileId: profileId, isLoading: true, error: null });
     try {
-      const [ideaResponse, scriptResponse] = await Promise.all([
+      const [ideaResponse, trendResponse, scriptResponse] = await Promise.all([
         listIdeas(profileId),
+        listTrends(profileId),
         listScripts(profileId),
       ]);
       const firstScript = scriptResponse.scripts[0] ?? null;
       const selectedScript = firstScript ? await getScript(firstScript.id) : null;
       set({
         ideas: ideaResponse.ideas,
+        trends: trendResponse.trends,
         scripts: scriptResponse.scripts,
         selectedScriptId: selectedScript?.id ?? null,
         selectedScript,
@@ -162,6 +178,66 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
       set(state => ({ ideas: state.ideas.filter(idea => idea.id !== ideaId) }));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not archive idea';
+      set({ error: message });
+      throw error;
+    } finally {
+      set({ isSaving: false });
+    }
+  },
+  createTrend: async (profileId, input) => {
+    set({ isSaving: true, error: null });
+    try {
+      const trend = await createTrend(profileId, input);
+      set(state => ({ trends: [trend, ...state.trends] }));
+      return trend;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not create trend';
+      set({ error: message });
+      throw error;
+    } finally {
+      set({ isSaving: false });
+    }
+  },
+  suggestTrends: async (profileId) => {
+    set({ isSaving: true, error: null });
+    try {
+      const response = await suggestTrends(profileId);
+      set(state => ({
+        trends: [
+          ...response.trends,
+          ...state.trends.filter(existing => !response.trends.some(trend => trend.id === existing.id)),
+        ],
+      }));
+      return response.trends;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not suggest trends';
+      set({ error: message });
+      throw error;
+    } finally {
+      set({ isSaving: false });
+    }
+  },
+  updateTrend: async (trendId, input) => {
+    set({ isSaving: true, error: null });
+    try {
+      const trend = await updateTrend(trendId, input);
+      set(state => ({ trends: state.trends.map(existing => existing.id === trend.id ? trend : existing) }));
+      return trend;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not update trend';
+      set({ error: message });
+      throw error;
+    } finally {
+      set({ isSaving: false });
+    }
+  },
+  archiveTrend: async (trendId) => {
+    set({ isSaving: true, error: null });
+    try {
+      await archiveTrend(trendId);
+      set(state => ({ trends: state.trends.filter(trend => trend.id !== trendId) }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not archive trend';
       set({ error: message });
       throw error;
     } finally {

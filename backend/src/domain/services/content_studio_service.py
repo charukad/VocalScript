@@ -6,6 +6,9 @@ from backend.src.domain.models.content_studio import (
     ContentIdea,
     ContentIdeaCreateRequest,
     ContentIdeaUpdateRequest,
+    ContentTrend,
+    ContentTrendCreateRequest,
+    ContentTrendUpdateRequest,
     NarrationLine,
     NarrationLineCreateRequest,
     NarrationLineUpdateRequest,
@@ -65,6 +68,99 @@ class ContentStudioService:
         idea = existing.model_copy(update={"status": "archived", "updated_at": utc_now_iso()})
         self.store.upsert_content_idea(idea)
         return idea
+
+    def create_trend(self, profile_id: str, request: ContentTrendCreateRequest) -> ContentTrend:
+        now = utc_now_iso()
+        trend = ContentTrend(
+            id=f"trend-{uuid.uuid4().hex[:12]}",
+            profileId=profile_id,
+            createdAt=now,
+            updatedAt=now,
+            **request.model_dump(by_alias=True),
+        )
+        self.store.upsert_content_trend(trend)
+        return trend
+
+    def list_trends(self, profile_id: str, include_archived: bool = False) -> List[ContentTrend]:
+        return self.store.list_content_trends(profile_id, include_archived=include_archived)
+
+    def update_trend(
+        self,
+        trend_id: str,
+        request: ContentTrendUpdateRequest,
+    ) -> Optional[ContentTrend]:
+        existing = self.store.get_content_trend(trend_id)
+        if not existing:
+            return None
+        trend = existing.model_copy(
+            update={
+                **request.model_dump(by_alias=False, exclude_unset=True),
+                "updated_at": utc_now_iso(),
+            }
+        )
+        self.store.upsert_content_trend(trend)
+        return trend
+
+    def archive_trend(self, trend_id: str) -> Optional[ContentTrend]:
+        existing = self.store.get_content_trend(trend_id)
+        if not existing:
+            return None
+        trend = existing.model_copy(update={"status": "archived", "updated_at": utc_now_iso()})
+        self.store.upsert_content_trend(trend)
+        return trend
+
+    def suggest_trends(
+        self,
+        profile_id: str,
+        content_type: str,
+        target_audience: str,
+        platforms: List[str],
+        hook_style: str,
+    ) -> List[ContentTrend]:
+        topic_root = (content_type or "your niche").strip()
+        audience = (target_audience or "your audience").strip()
+        platform = platforms[0] if platforms else None
+        templates = [
+            {
+                "topic": f"{topic_root} myths people still believe",
+                "suggested_angle": f"Challenge a common belief for {audience}.",
+                "suggested_hook": f"Most people still get this wrong about {topic_root}.",
+            },
+            {
+                "topic": f"Fastest-growing changes in {topic_root}",
+                "suggested_angle": f"Frame the topic as what is changing right now for {audience}.",
+                "suggested_hook": f"This part of {topic_root} is moving faster than people realize.",
+            },
+            {
+                "topic": f"{topic_root} mistakes beginners repeat",
+                "suggested_angle": f"Use a practical mistake-to-fix structure with a {hook_style or 'curiosity'} opening.",
+                "suggested_hook": f"If you are new to {topic_root}, avoid this first.",
+            },
+        ]
+        existing_topics = {
+            item.topic.casefold()
+            for item in self.list_trends(profile_id, include_archived=True)
+        }
+        suggestions: List[ContentTrend] = []
+        for index, template in enumerate(templates):
+            if template["topic"].casefold() in existing_topics:
+                continue
+            request = ContentTrendCreateRequest(
+                topic=template["topic"],
+                platform=platform,
+                trendScore=max(68, 84 - index * 6),
+                platformRelevance=82 - index * 4,
+                nicheRelevance=88 - index * 3,
+                suggestedAngle=template["suggested_angle"],
+                suggestedHook=template["suggested_hook"],
+                contentIdeaSuggestions=[
+                    f"Short explainer: {template['topic']}",
+                    f"Three-point breakdown for {audience}",
+                ],
+                source="rule_based_fallback",
+            )
+            suggestions.append(self.create_trend(profile_id, request))
+        return suggestions
 
     def create_script(self, profile_id: str, request: ScriptCreateRequest) -> ScriptDetail:
         now = utc_now_iso()

@@ -142,7 +142,9 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Create `frontend/src/features/contentStudio/` route/view shell.
 - `[x]` Add selected profile context and profile switcher.
 - `[x]` Add tabs for Ideas, Script Lab, Storyboard, Voice, Analytics, and Agents.
+- `[x]` Add Trending Topics tab with manual trend capture and rule-based local suggestions.
 - `[x]` Add backend tables for `content_ideas`, `scripts`, `script_versions`, and `narration_lines`.
+- `[x]` Add backend trend persistence for profile-scoped topics.
 - `[x]` Add CRUD endpoints for ideas and scripts.
 - `[x]` Add API for script versions and script splitting.
 - `[x]` Build Ideas tab with saved idea workflow.
@@ -152,6 +154,7 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 
 - `[x]` Content Studio opens independently from the editor.
 - `[x]` Users can save ideas and scripts under a selected profile.
+- `[x]` Users can save trends and generate local fallback trend suggestions.
 - `[x]` Users can split a script into narration lines.
 
 ## Phase 5: Viral Scoring and Script Analysis

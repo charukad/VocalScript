@@ -22,7 +22,7 @@ from backend.src.domain.models.analytics import (
     ProfileLearning,
 )
 from backend.src.domain.models.content_profile import ContentProfile
-from backend.src.domain.models.content_studio import ContentIdea, NarrationLine, Script, ScriptVersion
+from backend.src.domain.models.content_studio import ContentIdea, ContentTrend, NarrationLine, Script, ScriptVersion
 from backend.src.domain.models.agent import AgentRun, WorkflowRun
 from backend.src.domain.models.project import ProjectDetail, ProjectSummary
 
@@ -185,6 +185,27 @@ class SQLiteStore:
 
                 CREATE INDEX IF NOT EXISTS idx_content_ideas_profile_updated
                     ON content_ideas(profile_id, status, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS content_trends (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    platform TEXT,
+                    trend_score INTEGER,
+                    platform_relevance INTEGER,
+                    niche_relevance INTEGER,
+                    suggested_angle TEXT NOT NULL DEFAULT '',
+                    suggested_hook TEXT NOT NULL DEFAULT '',
+                    content_idea_suggestions_json TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'manual',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    trend_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_content_trends_profile_updated
+                    ON content_trends(profile_id, status, updated_at DESC);
 
                 CREATE TABLE IF NOT EXISTS scripts (
                     id TEXT PRIMARY KEY,
@@ -820,6 +841,68 @@ class SQLiteStore:
         with self._lock, self._registry_connect() as connection:
             rows = connection.execute(query, params).fetchall()
         return [idea for row in rows if (idea := self._content_idea_from_json(row["idea_json"]))]
+
+    def upsert_content_trend(self, trend: ContentTrend) -> None:
+        payload = trend.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO content_trends (
+                    id, profile_id, topic, platform, trend_score, platform_relevance,
+                    niche_relevance, suggested_angle, suggested_hook,
+                    content_idea_suggestions_json, source, status, created_at, updated_at, trend_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    topic = excluded.topic,
+                    platform = excluded.platform,
+                    trend_score = excluded.trend_score,
+                    platform_relevance = excluded.platform_relevance,
+                    niche_relevance = excluded.niche_relevance,
+                    suggested_angle = excluded.suggested_angle,
+                    suggested_hook = excluded.suggested_hook,
+                    content_idea_suggestions_json = excluded.content_idea_suggestions_json,
+                    source = excluded.source,
+                    status = excluded.status,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    trend_json = excluded.trend_json
+                """,
+                (
+                    trend.id,
+                    trend.profile_id,
+                    trend.topic,
+                    trend.platform,
+                    trend.trend_score,
+                    trend.platform_relevance,
+                    trend.niche_relevance,
+                    trend.suggested_angle,
+                    trend.suggested_hook,
+                    _json_dumps(trend.content_idea_suggestions),
+                    trend.source,
+                    trend.status,
+                    trend.created_at,
+                    trend.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_content_trend(self, trend_id: str) -> Optional[ContentTrend]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute("SELECT trend_json FROM content_trends WHERE id = ?", (trend_id,)).fetchone()
+        return self._content_trend_from_json(row["trend_json"]) if row else None
+
+    def list_content_trends(self, profile_id: str, include_archived: bool = False) -> List[ContentTrend]:
+        query = "SELECT trend_json FROM content_trends WHERE profile_id = ?"
+        params: list[Any] = [profile_id]
+        if not include_archived:
+            query += " AND status <> ?"
+            params.append("archived")
+        query += " ORDER BY updated_at DESC, created_at DESC"
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [trend for row in rows if (trend := self._content_trend_from_json(row["trend_json"]))]
 
     def upsert_script(self, script: Script) -> None:
         payload = script.model_dump(by_alias=True)
@@ -2524,6 +2607,12 @@ class SQLiteStore:
     def _content_idea_from_json(self, raw: str) -> Optional[ContentIdea]:
         try:
             return ContentIdea(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _content_trend_from_json(self, raw: str) -> Optional[ContentTrend]:
+        try:
+            return ContentTrend(**_json_loads(raw, {}))
         except ValueError:
             return None
 

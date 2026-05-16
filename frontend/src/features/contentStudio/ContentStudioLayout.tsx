@@ -6,12 +6,14 @@ import { AgentsTab } from './AgentsTab';
 import { VoiceTab } from './VoiceTab';
 import { StoryboardTab } from './StoryboardTab';
 import { AnalyticsTab } from './AnalyticsTab';
+import { TrendingTopicsTab } from './TrendingTopicsTab';
 import { useContentStudioStore } from './contentStudioStore';
 
-type StudioTab = 'ideas' | 'script_lab' | 'storyboard' | 'voice' | 'analytics' | 'agents';
+type StudioTab = 'ideas' | 'trending_topics' | 'script_lab' | 'storyboard' | 'voice' | 'analytics' | 'agents';
 
 const tabs: { id: StudioTab; label: string }[] = [
   { id: 'ideas', label: 'Ideas' },
+  { id: 'trending_topics', label: 'Trending Topics' },
   { id: 'script_lab', label: 'Script Lab' },
   { id: 'storyboard', label: 'Storyboard' },
   { id: 'voice', label: 'Voice' },
@@ -74,6 +76,7 @@ export const ContentStudioLayout = () => {
             {error && <div className="content-profile-error">{error}</div>}
             {isLoading && <div className="studio-empty studio-empty-large">Loading studio workspace...</div>}
             {!isLoading && activeTab === 'ideas' && <IdeasTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'trending_topics' && <TrendingTopicsTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'script_lab' && <ScriptLabTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'storyboard' && <StoryboardTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'voice' && <VoiceTab profileId={selectedProfileId} />}

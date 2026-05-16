@@ -6,6 +6,7 @@ import type {
 } from '../../types';
 
 export type ContentIdeaStatus = 'draft' | 'selected' | 'converted_to_script' | 'archived';
+export type ContentTrendStatus = 'active' | 'selected' | 'converted_to_idea' | 'archived';
 export type ScriptStatus = 'draft' | 'final' | 'archived';
 export type NarrationLineStatus = 'pending' | 'generating' | 'done' | 'failed';
 
@@ -37,6 +38,36 @@ export type ContentIdeaInput = {
   targetDurationSeconds?: number | null;
   suggestedVisualStyle?: string;
   status?: ContentIdeaStatus;
+};
+
+export type ContentTrend = {
+  id: string;
+  profileId: string;
+  topic: string;
+  platform: PlatformTarget | null;
+  trendScore: number | null;
+  platformRelevance: number | null;
+  nicheRelevance: number | null;
+  suggestedAngle: string;
+  suggestedHook: string;
+  contentIdeaSuggestions: string[];
+  source: string;
+  status: ContentTrendStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ContentTrendInput = {
+  topic: string;
+  platform?: PlatformTarget | null;
+  trendScore?: number | null;
+  platformRelevance?: number | null;
+  nicheRelevance?: number | null;
+  suggestedAngle?: string;
+  suggestedHook?: string;
+  contentIdeaSuggestions?: string[];
+  source?: string;
+  status?: ContentTrendStatus;
 };
 
 export type Script = {

@@ -7,6 +7,8 @@ from backend.src.domain.models.content_profile import ContentProfileCreateReques
 from backend.src.domain.models.content_studio import (
     ContentIdeaCreateRequest,
     ContentIdeaUpdateRequest,
+    ContentTrendCreateRequest,
+    ContentTrendUpdateRequest,
     NarrationLineCreateRequest,
     NarrationLineUpdateRequest,
     ScriptCreateRequest,
@@ -64,6 +66,41 @@ class ContentStudioTests(unittest.TestCase):
             [item.id for item in self.studio_service.list_ideas(self.profile.id, include_archived=True)],
             [idea.id],
         )
+
+    def test_trends_can_be_created_suggested_updated_and_archived(self) -> None:
+        trend = self.studio_service.create_trend(
+            self.profile.id,
+            ContentTrendCreateRequest(
+                topic="AI classroom tools",
+                platform="youtube_shorts",
+                trendScore=77,
+                suggestedHook="Teachers are using this faster than expected.",
+            ),
+        )
+        suggestions = self.studio_service.suggest_trends(
+            profile_id=self.profile.id,
+            content_type=self.profile.content_type,
+            target_audience=self.profile.target_audience,
+            platforms=self.profile.platforms,
+            hook_style=self.profile.hook_style,
+        )
+        self.assertEqual(len(suggestions), 3)
+        self.assertTrue(all(item.source == "rule_based_fallback" for item in suggestions))
+
+        updated = self.studio_service.update_trend(
+            trend.id,
+            ContentTrendUpdateRequest(status="selected", nicheRelevance=91),
+        )
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.status, "selected")
+        self.assertEqual(updated.niche_relevance, 91)
+        self.assertEqual(len(self.studio_service.list_trends(self.profile.id)), 4)
+
+        archived = self.studio_service.archive_trend(trend.id)
+        self.assertIsNotNone(archived)
+        self.assertEqual(len(self.studio_service.list_trends(self.profile.id)), 3)
+        self.assertEqual(len(self.studio_service.list_trends(self.profile.id, include_archived=True)), 4)
 
     def test_scripts_versions_and_narration_lines_persist(self) -> None:
         script = self.studio_service.create_script(

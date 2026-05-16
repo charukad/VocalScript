@@ -5,6 +5,10 @@ from backend.src.domain.models.content_studio import (
     ContentIdeaCreateRequest,
     ContentIdeaListResponse,
     ContentIdeaUpdateRequest,
+    ContentTrend,
+    ContentTrendCreateRequest,
+    ContentTrendListResponse,
+    ContentTrendUpdateRequest,
     NarrationLine,
     NarrationLineCreateRequest,
     NarrationLineListResponse,
@@ -69,6 +73,48 @@ def build_content_studio_router(
         if not idea:
             raise HTTPException(status_code=404, detail="Content idea not found")
         return idea
+
+    @router.get("/api/content-profiles/{profile_id}/trends", response_model=ContentTrendListResponse)
+    async def list_content_trends(
+        profile_id: str,
+        include_archived: bool = Query(False, alias="includeArchived"),
+    ):
+        require_profile(profile_id)
+        return ContentTrendListResponse(
+            trends=content_studio_service.list_trends(profile_id, include_archived=include_archived)
+        )
+
+    @router.post("/api/content-profiles/{profile_id}/trends", response_model=ContentTrend)
+    async def create_content_trend(profile_id: str, request: ContentTrendCreateRequest):
+        require_profile(profile_id)
+        return content_studio_service.create_trend(profile_id, request)
+
+    @router.post("/api/content-profiles/{profile_id}/trends/suggest", response_model=ContentTrendListResponse)
+    async def suggest_content_trends(profile_id: str):
+        profile = require_profile(profile_id)
+        return ContentTrendListResponse(
+            trends=content_studio_service.suggest_trends(
+                profile_id=profile.id,
+                content_type=profile.content_type,
+                target_audience=profile.target_audience,
+                platforms=profile.platforms,
+                hook_style=profile.hook_style,
+            )
+        )
+
+    @router.put("/api/content-trends/{trend_id}", response_model=ContentTrend)
+    async def update_content_trend(trend_id: str, request: ContentTrendUpdateRequest):
+        trend = content_studio_service.update_trend(trend_id, request)
+        if not trend:
+            raise HTTPException(status_code=404, detail="Content trend not found")
+        return trend
+
+    @router.delete("/api/content-trends/{trend_id}", response_model=ContentTrend)
+    async def archive_content_trend(trend_id: str):
+        trend = content_studio_service.archive_trend(trend_id)
+        if not trend:
+            raise HTTPException(status_code=404, detail="Content trend not found")
+        return trend
 
     @router.get("/api/content-profiles/{profile_id}/scripts", response_model=ScriptListResponse)
     async def list_scripts(profile_id: str):
