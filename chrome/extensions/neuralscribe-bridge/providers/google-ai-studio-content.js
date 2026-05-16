@@ -71,6 +71,8 @@ async function runGoogleAiStudioHealthCheck() {
       canExtendVideo: false,
       metadata: {
         audioCandidateCount: String(audioCandidates.length),
+        promptSelector: promptBox ? selectorHint(promptBox) : "",
+        generateButtonFound: String(Boolean(generateButton)),
       },
     },
     capability: {
@@ -106,7 +108,8 @@ async function runGoogleAiStudioJob(job, options = {}) {
     return manualActionResult("Google AI Studio generate button was not detected or is disabled.");
   }
 
-  const before = new Set(findAudioCandidates().map((candidate) => candidate.url));
+  const beforeCandidates = findAudioCandidates();
+  const before = new Set(beforeCandidates.map((candidate) => candidate.url));
   clickElement(generateButton);
   const audio = await waitForNewAudio(before, timeoutMs);
   if (!audio) {
@@ -116,13 +119,10 @@ async function runGoogleAiStudioJob(job, options = {}) {
     throw new Error("Timed out waiting for generated Google AI Studio audio.");
   }
 
-  let mediaUrl = audio.url;
-  let localPath = "";
-  if (isLocalObjectUrl(mediaUrl)) {
-    const uploaded = await uploadLocalAudio(job, mediaUrl, options.httpBaseUrl);
-    mediaUrl = uploaded.resultUrl;
-    localPath = uploaded.localPath || "";
-  }
+  const capture = await captureAudioResult(job, audio, options.httpBaseUrl);
+  const mediaUrl = capture.mediaUrl;
+  const localPath = capture.localPath;
+  const durationSeconds = await readAudioDuration(audio.element);
 
   return {
     status: "completed",
@@ -140,6 +140,11 @@ async function runGoogleAiStudioJob(job, options = {}) {
       providerPageUrl: location.href,
       voiceMode: job.metadata?.voiceMode || "",
       narrationLineId: job.metadata?.narrationLineId || "",
+      capturedVia: capture.capturedVia,
+      audioUrlKind: capture.audioUrlKind,
+      audioCandidateCountBefore: String(beforeCandidates.length),
+      audioCandidateCountAfter: String(findAudioCandidates().length),
+      ...(durationSeconds ? { durationSeconds: String(durationSeconds) } : {}),
     },
   };
 }
@@ -184,7 +189,7 @@ function findAudioCandidates() {
   queryAll(GOOGLE_AI_STUDIO_SELECTORS.audio).forEach((element) => {
     const url = element.currentSrc || element.src || element.href || element.getAttribute("src") || element.getAttribute("href");
     if (!url) return;
-    candidates.push({ url });
+    candidates.push({ url, element });
   });
   return dedupeCandidates(candidates);
 }
@@ -211,7 +216,33 @@ async function fillPrompt(element, value) {
   element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
 }
 
-async function uploadLocalAudio(job, mediaUrl, httpBaseUrl) {
+async function captureAudioResult(job, audio, httpBaseUrl) {
+  const audioUrlKind = classifyAudioUrl(audio.url);
+  try {
+    const uploaded = await uploadAudioFromUrl(job, audio.url, httpBaseUrl, {
+      capturedVia: isLocalObjectUrl(audio.url) ? "content-script-blob-upload" : "content-script-fetch-upload",
+      audioUrlKind,
+    });
+    return {
+      mediaUrl: uploaded.resultUrl,
+      localPath: uploaded.localPath || "",
+      capturedVia: isLocalObjectUrl(audio.url) ? "content-script-blob-upload" : "content-script-fetch-upload",
+      audioUrlKind,
+    };
+  } catch (error) {
+    if (isLocalObjectUrl(audio.url)) {
+      throw error;
+    }
+    return {
+      mediaUrl: audio.url,
+      localPath: "",
+      capturedVia: "provider-url",
+      audioUrlKind,
+    };
+  }
+}
+
+async function uploadAudioFromUrl(job, mediaUrl, httpBaseUrl, metadata = {}) {
   const response = await fetch(mediaUrl);
   if (!response.ok) {
     throw new Error("Captured Google AI Studio audio blob, but could not read it.");
@@ -223,7 +254,9 @@ async function uploadLocalAudio(job, mediaUrl, httpBaseUrl) {
   formData.append("metadata", JSON.stringify({
     provider: "google_ai_studio",
     providerPageUrl: location.href,
-    capturedVia: "content-script-blob-upload",
+    voiceMode: job.metadata?.voiceMode || "",
+    narrationLineId: job.metadata?.narrationLineId || "",
+    ...metadata,
   }));
   formData.append("file", blob, `${job.id}.${extension}`);
   const baseUrl = String(httpBaseUrl || "http://127.0.0.1:8000").replace(/\/$/, "");
@@ -235,6 +268,23 @@ async function uploadLocalAudio(job, mediaUrl, httpBaseUrl) {
     throw new Error(`Generated audio upload failed: ${await uploadResponse.text()}`);
   }
   return uploadResponse.json();
+}
+
+async function readAudioDuration(element) {
+  if (!(element instanceof HTMLMediaElement)) return null;
+  if (Number.isFinite(element.duration) && element.duration > 0) {
+    return Number(element.duration.toFixed(3));
+  }
+  await new Promise((resolve) => {
+    const timeoutId = window.setTimeout(resolve, 1500);
+    element.addEventListener("loadedmetadata", () => {
+      window.clearTimeout(timeoutId);
+      resolve();
+    }, { once: true });
+  });
+  return Number.isFinite(element.duration) && element.duration > 0
+    ? Number(element.duration.toFixed(3))
+    : null;
 }
 
 function manualActionResult(message) {
@@ -273,6 +323,13 @@ function dedupeCandidates(candidates) {
   });
 }
 
+function selectorHint(element) {
+  if (!element) return "";
+  if (element.id) return `#${element.id}`;
+  if (element.getAttribute("aria-label")) return `[aria-label="${element.getAttribute("aria-label")}"]`;
+  return element.tagName.toLowerCase();
+}
+
 function clickElement(element) {
   element.scrollIntoView({ block: "center", inline: "nearest" });
   element.click();
@@ -280,6 +337,14 @@ function clickElement(element) {
 
 function isLocalObjectUrl(url) {
   return String(url || "").startsWith("blob:");
+}
+
+function classifyAudioUrl(url) {
+  const value = String(url || "");
+  if (value.startsWith("blob:")) return "blob";
+  if (value.startsWith("data:")) return "data";
+  if (value.startsWith("http://") || value.startsWith("https://")) return "remote";
+  return "other";
 }
 
 function sleep(ms) {

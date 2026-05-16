@@ -1,4 +1,5 @@
 import tempfile
+from io import BytesIO
 import unittest
 from pathlib import Path
 
@@ -185,6 +186,46 @@ class ContentStudioTests(unittest.TestCase):
         assert failed_sync is not None
         self.assertEqual(failed_sync.status, "failed")
         self.assertEqual(failed_sync.error, "provider failed")
+
+    def test_voice_jobs_can_be_claimed_completed_and_synced(self) -> None:
+        script = self.studio_service.create_script(
+            self.profile.id,
+            ScriptCreateRequest(title="Voice queue", content="Opening line. Payoff line."),
+        )
+        lines = self.studio_service.split_script_into_lines(script.id, ScriptSplitLinesRequest())
+        self.assertIsNotNone(lines)
+        assert lines is not None
+
+        jobs = self.queue_service.create_voice_jobs(
+            script_id=script.id,
+            script_text=script.content,
+            narration_lines=lines,
+            mode="line_by_line",
+        )
+        claimed = self.queue_service.claim_next_job(provider="google_ai_studio", worker_id="worker-1")
+        self.assertIsNotNone(claimed)
+        assert claimed is not None
+        self.assertEqual(claimed.id, jobs[0].id)
+        self.assertEqual(claimed.status, "running")
+
+        completed = self.queue_service.complete_job_with_file(
+            claimed.id,
+            source_filename="voice.mp3",
+            source_stream=BytesIO(b"fake-audio"),
+            media_type="audio",
+            metadata={"durationSeconds": "1.75", "capturedVia": "content-script-fetch-upload"},
+        )
+        self.assertIsNotNone(completed)
+        assert completed is not None
+        synced = self.studio_service.sync_narration_line_from_voice_job(completed)
+        self.assertIsNotNone(synced)
+        assert synced is not None
+        self.assertEqual(completed.status, "completed")
+        self.assertEqual(completed.media_type, "audio")
+        self.assertEqual(completed.metadata["capturedVia"], "content-script-fetch-upload")
+        self.assertEqual(synced.status, "done")
+        self.assertEqual(synced.audio_asset_id, f"generated-{claimed.id}")
+        self.assertEqual(synced.duration_seconds, 1.75)
 
     def test_timeline_draft_uses_narration_storyboard_and_generated_media(self) -> None:
         script = self.studio_service.create_script(

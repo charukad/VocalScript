@@ -234,9 +234,10 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 
 ### Phase 9 Acceptance Checks
 
-- `[ ]` Voice jobs can be created, claimed, completed, and failed.
-- `[ ]` Generated narration audio appears in NeuralScribe assets.
-- `[ ]` Line-by-line outputs can be placed in order on the timeline.
+- `[x]` Voice jobs can be created, claimed, completed, and failed locally.
+- `[/]` Generated narration audio appears in NeuralScribe assets.
+- `[x]` Line-by-line outputs can be placed in order on the timeline locally.
+- `[!]` Live Google AI Studio selector/audio validation still needs a signed-in provider session.
 
 ## Phase 10: AI Timeline Builder
 
@@ -305,6 +306,7 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `ProjectDetail` stores a broad JSON `state` blob while SQLite also persists normalized per-project tables; new profile/project links need a clear source-of-truth rule.
 - The app currently has no project-owned automated tests visible outside dependency folders, so regression checks will need to be added or documented.
 - The active bridge is provider-aware but currently only wires a runnable Meta adapter; adding Google AI Studio will test how cleanly the provider abstraction scales.
+- Google AI Studio live automation remains the main external unknown: the local queue/import path is implemented, but final provider selectors and real audio capture still need validation inside an authenticated AI Studio session.
 - Content Studio introduces app-level navigation beyond the current editor-first shell, so route/layout decisions should be made before large UI work starts.
 - Analytics credentials need a secure storage plan before real OAuth-backed integrations are claimed as complete.
 

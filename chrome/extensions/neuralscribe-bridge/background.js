@@ -568,12 +568,11 @@ async function claimAndRunNextJob() {
   }
 
   const settings = await getSettings();
-  const provider = settings.providers.find((name) => PROVIDER_ADAPTERS[name]);
-  if (!provider) {
+  const providers = enabledRunnableProviders(settings);
+  if (providers.length === 0) {
     updateStatus({ jobMessage: "No supported provider is enabled" });
     return { delayMs: IDLE_CLAIM_INTERVAL_MS };
   }
-  const adapter = PROVIDER_ADAPTERS[provider];
 
   const providerWaitMs = await getProviderDelayMs(settings);
   if (providerWaitMs > 0) {
@@ -586,9 +585,12 @@ async function claimAndRunNextJob() {
 
   const workerId = await getWorkerId();
   let job = currentJob;
+  let provider = currentJob?.provider || providers[0];
   if (!job) {
     try {
-      job = await claimQueuedJob(settings, adapter.claimProvider, workerId);
+      const claim = await claimQueuedJobAcrossProviders(settings, providers, workerId);
+      job = claim.job;
+      provider = claim.provider || provider;
     } catch (error) {
       updateStatus({ jobMessage: `Queue claim failed: ${error.message}`, lastError: error.message });
       return { delayMs: IDLE_CLAIM_INTERVAL_MS };
@@ -610,6 +612,7 @@ async function claimAndRunNextJob() {
   currentJob = job;
   currentJobInProgress = true;
   const runToken = jobRunToken;
+  const adapter = PROVIDER_ADAPTERS[job.provider] || PROVIDER_ADAPTERS[provider];
   await chrome.storage.local.set({ [STORAGE_KEYS.activeJob]: job });
   updateStatus({
     currentJob: job,
@@ -677,6 +680,25 @@ async function claimAndRunNextJob() {
       updateStatus({ currentJob: null });
     }
   }
+}
+
+function enabledRunnableProviders(settings) {
+  return (settings.providers || []).filter((name) => PROVIDER_ADAPTERS[name]);
+}
+
+async function claimQueuedJobAcrossProviders(settings, providers, workerId) {
+  let blocked = null;
+  for (const provider of providers) {
+    const claimed = await claimQueuedJob(settings, provider, workerId);
+    if (claimed?.blocked) {
+      blocked ||= claimed;
+      continue;
+    }
+    if (claimed) {
+      return { provider, job: claimed };
+    }
+  }
+  return { provider: null, job: blocked };
 }
 
 async function claimQueuedJob(settings, provider, workerId) {
@@ -957,9 +979,18 @@ async function runGoogleAiStudioJob(job, settings) {
   });
   const tab = await findOrOpenProviderTab(settings.googleAiStudioUrl, "*://aistudio.google.com/*");
   lastProviderTabId = tab.id || null;
+  await reportDebugEvent("provider_tab_ready_wait", "Waiting for Google AI Studio tab to finish loading", {
+    provider: "google_ai_studio",
+    jobId: job.id,
+    metadata: { tabId: String(tab.id || ""), url: tab.url || "" },
+  });
   await waitForTabReady(tab.id);
   await ensureGoogleAiStudioContentScript(tab.id);
-  const response = await sendTabMessage(tab.id, {
+  await reportDebugEvent("content_script_ready", "Google AI Studio content script is ready", {
+    provider: "google_ai_studio",
+    jobId: job.id,
+  });
+  const response = await sendGoogleAiStudioRunJobMessage(tab.id, {
     type: "provider.google_ai_studio.runJob",
     job,
     options: {
@@ -976,6 +1007,8 @@ async function runGoogleAiStudioJob(job, settings) {
     metadata: {
       providerPageUrl: response.result?.metadata?.providerPageUrl || "",
       narrationLineId: response.result?.metadata?.narrationLineId || "",
+      capturedVia: response.result?.metadata?.capturedVia || "",
+      durationSeconds: response.result?.metadata?.durationSeconds || "",
     },
   });
   return response.result;
@@ -1024,7 +1057,21 @@ async function runMetaExtendVideoJob(job, settings) {
 
 async function runProviderHealthCheck(settings, includeAdapterTest = false) {
   const workerId = await getWorkerId();
-  const provider = settings.providers.find((name) => PROVIDER_ADAPTERS[name]) || PROVIDERS.META;
+  const providers = enabledRunnableProviders(settings);
+  const providersToCheck = providers.length > 0 ? providers : [PROVIDERS.META];
+  const results = await Promise.all(providersToCheck.map((provider) => runSingleProviderHealthCheck(
+    settings,
+    provider,
+    workerId,
+    includeAdapterTest,
+  )));
+  return {
+    health: results.flatMap((result) => result.health),
+    capabilities: results.flatMap((result) => result.capabilities),
+  };
+}
+
+async function runSingleProviderHealthCheck(settings, provider, workerId, includeAdapterTest) {
   try {
     const tab = provider === PROVIDERS.GOOGLE_AI_STUDIO
       ? await findOrOpenProviderTab(settings.googleAiStudioUrl, "*://aistudio.google.com/*")
@@ -1210,6 +1257,26 @@ function sendTabMessage(tabId, message) {
       resolve(response);
     });
   });
+}
+
+async function sendGoogleAiStudioRunJobMessage(tabId, message) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await sendTabMessage(tabId, message);
+      if (response) return response;
+      lastError = new Error("Google AI Studio provider adapter returned no response");
+    } catch (error) {
+      lastError = error;
+      const retryable = /message channel closed|back\/forward cache|bfcache|receiving end does not exist|extension context invalidated/i.test(error.message || "");
+      if (!retryable || attempt === 3) break;
+      await chrome.tabs.reload(tabId).catch(() => {});
+      await waitForTabReady(tabId).catch(() => {});
+      await ensureGoogleAiStudioContentScript(tabId).catch(() => {});
+      await sleep(1200 * attempt);
+    }
+  }
+  throw lastError || new Error("Google AI Studio provider adapter failed");
 }
 
 function sleep(ms) {
