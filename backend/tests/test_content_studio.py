@@ -162,6 +162,27 @@ class ContentStudioTests(unittest.TestCase):
         )
         self.assertTrue(all(job.metadata["flow"] == "voice_generation" for job in jobs))
 
+        completed = jobs[0].model_copy(
+            update={
+                "status": "completed",
+                "result_url": "/api/generation/media/voice.mp3",
+                "metadata": {**jobs[0].metadata, "durationSeconds": "1.5"},
+            }
+        )
+        synced = self.studio_service.sync_narration_line_from_voice_job(completed)
+        self.assertIsNotNone(synced)
+        assert synced is not None
+        self.assertEqual(synced.status, "done")
+        self.assertEqual(synced.audio_asset_id, f"generated-{jobs[0].id}")
+        self.assertEqual(synced.duration_seconds, 1.5)
+
+        failed = jobs[1].model_copy(update={"status": "failed", "error": "provider failed"})
+        failed_sync = self.studio_service.sync_narration_line_from_voice_job(failed)
+        self.assertIsNotNone(failed_sync)
+        assert failed_sync is not None
+        self.assertEqual(failed_sync.status, "failed")
+        self.assertEqual(failed_sync.error, "provider failed")
+
 
 if __name__ == "__main__":
     unittest.main()

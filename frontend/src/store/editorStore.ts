@@ -420,6 +420,7 @@ export type EditorState = {
   syncGenerationBatch: (silent?: boolean) => Promise<void>;
   importGenerationVariant: (jobId: string, variantUrl?: string) => Promise<void>;
   importCompletedGenerationMedia: () => Promise<void>;
+  importCompletedVoiceMedia: (jobs: GenerationJob[], autoPlaceOnTimeline?: boolean) => Promise<void>;
 
   // Auto Animate Video
   animationSettings: AnimationSettings;
@@ -756,7 +757,11 @@ const makeDefaultTracks = (): TimelineTrack[] => [
 ];
 
 const getGeneratedFileName = (asset: GeneratedMediaAsset, resultUrl: string): string => {
-  const fallbackExtension = asset.mediaType === 'video' ? 'mp4' : 'png';
+  const fallbackExtension = asset.mediaType === 'video'
+    ? 'mp4'
+    : asset.mediaType === 'audio'
+      ? 'mp3'
+      : 'png';
   try {
     const parsed = new URL(resultUrl, window.location.href);
     const name = parsed.pathname.split('/').filter(Boolean).pop();
@@ -772,9 +777,10 @@ function inferGeneratedMediaTypeFromClip(
   generation: Partial<NonNullable<TimelineClip['generation']>>,
   clip: Partial<SerializableClip | TimelineClip>,
 ): GeneratedMediaAsset['mediaType'] {
-  if (generation.mediaType === 'video' || generation.mediaType === 'image') return generation.mediaType;
+  if (generation.mediaType === 'video' || generation.mediaType === 'image' || generation.mediaType === 'audio') return generation.mediaType;
   const fileType = 'fileType' in clip ? String(clip.fileType || '') : ('file' in clip ? clip.file?.type || '' : '');
   const fileName = 'fileName' in clip ? String(clip.fileName || '') : ('file' in clip ? clip.file?.name || '' : '');
+  if (fileType.startsWith('audio/') || /\.(mp3|wav|m4a|flac|ogg|aac)$/i.test(fileName)) return 'audio';
   if (fileType.startsWith('video/') || /\.(mp4|webm|mov|m4v)$/i.test(fileName)) return 'video';
   return 'image';
 }
@@ -867,7 +873,9 @@ function collectGeneratedMediaAssetsForSnapshot(state: EditorState): GeneratedMe
 }
 
 const getGeneratedFallbackMime = (asset: GeneratedMediaAsset): string => {
-  return asset.mediaType === 'video' ? 'video/mp4' : 'image/png';
+  if (asset.mediaType === 'video') return 'video/mp4';
+  if (asset.mediaType === 'audio') return 'audio/mpeg';
+  return 'image/png';
 };
 
 const isRemoteMediaUrl = (resultUrl: string): boolean => /^https?:\/\//i.test(resultUrl);
@@ -1028,7 +1036,7 @@ const generatedMediaAssetFromJob = (job: GenerationJob): GeneratedMediaAsset => 
   start: 0,
   end: 5,
   duration: 5,
-  transcript: job.metadata.animationAssetName || job.sceneId,
+  transcript: job.metadata.animationAssetName || job.prompt || job.sceneId,
   error: job.error,
   metadata: { ...(job.metadata ?? {}) },
 });
@@ -3248,6 +3256,97 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   importCompletedGenerationMedia: async () => {
     await get().syncGenerationBatch(false);
+  },
+  importCompletedVoiceMedia: async (jobs, autoPlaceOnTimeline = true) => {
+    const completedJobs = uniqueGenerationJobsById(jobs)
+      .filter(job => job.mediaType === 'audio' && job.status === 'completed' && Boolean(job.resultUrl))
+      .sort((left, right) => {
+        const leftIndex = Number(left.metadata.lineIndex ?? Number.MAX_SAFE_INTEGER);
+        const rightIndex = Number(right.metadata.lineIndex ?? Number.MAX_SAFE_INTEGER);
+        return leftIndex - rightIndex || left.id.localeCompare(right.id);
+      });
+    if (completedJobs.length === 0) return;
+
+    const preparedAssets: MediaAsset[] = [];
+    const preparedClips: TimelineClip[] = [];
+    let tracks = [...get().tracks];
+    let audioTrack = tracks.find(track => track.type === 'audio');
+    if (!audioTrack && autoPlaceOnTimeline) {
+      audioTrack = makeTrack(tracks, 'audio');
+      tracks = [...tracks, audioTrack];
+    }
+    const existingAssetIds = new Set(get().assets.map(asset => asset.id));
+    const existingVoiceJobIds = new Set(
+      get().clips
+        .map(clip => clip.generation?.jobId)
+        .filter((jobId): jobId is string => Boolean(jobId))
+    );
+    let nextStart = audioTrack
+      ? get().clips
+          .filter(clip => clip.trackId === audioTrack!.id)
+          .reduce((latest, clip) => Math.max(latest, clip.startTime + clip.duration), 0)
+      : 0;
+
+    for (const job of completedJobs) {
+      const assetId = `generated-${job.id}`;
+      if (existingAssetIds.has(assetId)) continue;
+      let assetForImport = generatedMediaAssetFromJob(job);
+      if (assetForImport.resultUrl && isRemoteMediaUrl(assetForImport.resultUrl) && !assetForImport.localPath) {
+        try {
+          const storedJob = await storeRemoteGenerationJob(job.id);
+          assetForImport = generatedMediaAssetFromJob(storedJob);
+        } catch (error) {
+          console.warn('Backend could not store remote generated audio, trying browser fetch.', error);
+        }
+      }
+      if (!assetForImport.resultUrl) continue;
+      const file = await fetchGeneratedMediaFile(assetForImport);
+      const duration = await getMediaDuration(file, 'audio').catch(() => assetForImport.duration);
+      const asset: MediaAsset = {
+        id: assetId,
+        file,
+        type: 'audio',
+        mediaKind: 'audio',
+        duration,
+        sourceUrl: assetForImport.resultUrl,
+        localPath: assetForImport.localPath,
+      };
+      preparedAssets.push(asset);
+
+      generateWaveform(file, 1000).then(waveform => {
+        set(state => ({
+          assets: state.assets.map(existing => existing.id === asset.id ? { ...existing, waveform } : existing),
+        }));
+      });
+
+      if (autoPlaceOnTimeline && audioTrack && !existingVoiceJobIds.has(job.id)) {
+        preparedClips.push({
+          id: makeId(),
+          assetId,
+          trackId: audioTrack.id,
+          file,
+          type: 'audio',
+          duration: Math.max(0.1, duration || assetForImport.duration),
+          startTime: nextStart,
+          mediaOffset: 0,
+          transform: { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false },
+          color: { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 },
+          audio: { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 },
+          generation: generatedMetadata(assetForImport),
+        });
+        nextStart += Math.max(0.1, duration || assetForImport.duration);
+      }
+    }
+
+    if (preparedAssets.length === 0 && preparedClips.length === 0) return;
+    set(state => ({
+      ...withHistory(state),
+      assets: [...state.assets, ...preparedAssets],
+      tracks,
+      clips: [...state.clips, ...preparedClips],
+      selectedClipId: preparedClips[0]?.id ?? state.selectedClipId,
+    }));
+    if (get().currentProject) void get().saveProject();
   },
 
   setAnimationSettings: (settings) => {

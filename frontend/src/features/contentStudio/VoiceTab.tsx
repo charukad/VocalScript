@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useEditorStore } from '../../store/editorStore';
 import { useContentStudioStore } from './contentStudioStore';
 import type { NarrationLineInput, NarrationLineUpdateInput, VoiceGenerationMode } from './types';
 
@@ -19,7 +20,9 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
     updateNarrationLine,
     regenerateNarrationLine,
     queueVoiceJobs,
+    refreshVoiceJobs,
   } = useContentStudioStore();
+  const { currentProject, importCompletedVoiceMedia } = useEditorStore();
   const [newLineText, setNewLineText] = useState('');
   const [voiceMode, setVoiceMode] = useState<VoiceGenerationMode>('line_by_line');
   const [voiceStyle, setVoiceStyle] = useState('');
@@ -39,6 +42,21 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
     );
   }, [selectedScript]);
 
+  useEffect(() => {
+    if (!selectedScriptId) return;
+    void refreshVoiceJobs(selectedScriptId);
+  }, [refreshVoiceJobs, selectedScriptId]);
+
+  const shouldPollVoiceJobs = Boolean(voiceJobs?.jobs.some(job => job.status === 'queued' || job.status === 'running'));
+
+  useEffect(() => {
+    if (!selectedScriptId || !shouldPollVoiceJobs) return;
+    const interval = window.setInterval(() => {
+      void refreshVoiceJobs(selectedScriptId);
+    }, 3500);
+    return () => window.clearInterval(interval);
+  }, [refreshVoiceJobs, selectedScriptId, shouldPollVoiceJobs]);
+
   const lines = useMemo(() => selectedScript?.narrationLines ?? [], [selectedScript]);
 
   const handleAddLine = async () => {
@@ -54,12 +72,25 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
 
   const handleQueueVoiceJobs = async () => {
     if (!selectedScript) return;
+    const linkedProject = currentProject?.scriptId === selectedScript.id ? currentProject : null;
     await queueVoiceJobs(selectedScript.id, {
       mode: voiceMode,
       provider: 'google_ai_studio',
+      projectId: linkedProject?.id ?? null,
+      projectName: linkedProject?.name ?? null,
       voiceStyle: voiceStyle || null,
     });
   };
+
+  const completedVoiceJobs = useMemo(
+    () => voiceJobs?.jobs.filter(job => job.status === 'completed' && job.mediaType === 'audio') ?? [],
+    [voiceJobs],
+  );
+
+  useEffect(() => {
+    if (!selectedScriptId || currentProject?.scriptId !== selectedScriptId || completedVoiceJobs.length === 0) return;
+    void importCompletedVoiceMedia(completedVoiceJobs, true);
+  }, [completedVoiceJobs, currentProject?.scriptId, importCompletedVoiceMedia, selectedScriptId]);
 
   return (
     <div className="studio-voice-grid">
@@ -127,6 +158,22 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
                   {voiceJobs.jobs.map(job => (
                     <span key={job.id}>{job.sceneId}: {job.status}</span>
                   ))}
+                </div>
+                <div className="studio-inline-actions">
+                  <button
+                    className="btn-secondary"
+                    onClick={() => selectedScriptId && void refreshVoiceJobs(selectedScriptId)}
+                    disabled={isSaving}
+                  >
+                    Refresh Jobs
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => void importCompletedVoiceMedia(completedVoiceJobs, true)}
+                    disabled={completedVoiceJobs.length === 0}
+                  >
+                    Import Completed Audio
+                  </button>
                 </div>
               </div>
             )}

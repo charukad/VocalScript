@@ -17,6 +17,7 @@ from backend.src.domain.models.content_studio import (
     ScriptVersion,
     ScriptVersionCreateRequest,
 )
+from backend.src.domain.models.generation import GenerationJob
 from backend.src.domain.models.project import utc_now_iso
 from backend.src.domain.services.sqlite_store import SQLiteStore
 
@@ -231,6 +232,50 @@ class ContentStudioService:
                 "updated_at": utc_now_iso(),
             }
         )
+        self.store.upsert_narration_line(line)
+        return line
+
+    def sync_narration_line_from_voice_job(self, job: GenerationJob) -> Optional[NarrationLine]:
+        if job.metadata.get("flow") != "voice_generation":
+            return None
+        line_id = job.metadata.get("narrationLineId")
+        if not line_id:
+            return None
+        existing = self.store.get_narration_line(line_id)
+        if not existing:
+            return None
+
+        status_by_job = {
+            "queued": "pending",
+            "running": "generating",
+            "completed": "done",
+            "failed": "failed",
+            "canceled": "failed",
+            "manual_action_required": "failed",
+        }
+        update = {
+            "status": status_by_job.get(job.status, existing.status),
+            "updated_at": utc_now_iso(),
+        }
+        if job.status == "completed":
+            update.update({
+                "audio_asset_id": f"generated-{job.id}",
+                "error": None,
+            })
+            duration = job.metadata.get("durationSeconds")
+            if duration is not None:
+                try:
+                    update["duration_seconds"] = float(duration)
+                except (TypeError, ValueError):
+                    pass
+        elif job.status in ("failed", "canceled", "manual_action_required"):
+            update.update({
+                "audio_asset_id": None,
+                "duration_seconds": None,
+                "error": job.error or job.metadata.get("providerError") or job.status.replace("_", " "),
+            })
+
+        line = existing.model_copy(update=update)
         self.store.upsert_narration_line(line)
         return line
 

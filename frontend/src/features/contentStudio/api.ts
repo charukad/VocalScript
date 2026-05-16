@@ -235,6 +235,15 @@ export const createVoiceJobs = async (
   return response.json();
 };
 
+export const listVoiceJobs = async (
+  scriptId: string,
+  signal?: AbortSignal,
+): Promise<VoiceJobBatch> => {
+  const response = await fetch(`${API_BASE_URL}/api/scripts/${scriptId}/voice-jobs`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load voice jobs');
+  return response.json();
+};
+
 export const analyzeScript = async (
   script: string,
   signal?: AbortSignal,

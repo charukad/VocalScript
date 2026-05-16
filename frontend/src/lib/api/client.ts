@@ -112,7 +112,7 @@ type GenerationListOptions = {
   status?: GenerationJobStatus | null;
   provider?: ProviderName | null;
   workerId?: string | null;
-  flow?: 'auto_generate' | 'auto_animate' | null;
+  flow?: 'auto_generate' | 'auto_animate' | 'voice_generation' | null;
   mediaType?: GeneratedMediaType | null;
   signal?: AbortSignal;
 };
@@ -121,7 +121,7 @@ type ClearGenerationHistoryOptions = {
   projectId?: string | null;
   provider?: ProviderName | null;
   workerId?: string | null;
-  flow?: 'auto_generate' | 'auto_animate' | null;
+  flow?: 'auto_generate' | 'auto_animate' | 'voice_generation' | null;
   mediaType?: GeneratedMediaType | null;
   statuses?: GenerationJobStatus[];
   includeActive?: boolean;

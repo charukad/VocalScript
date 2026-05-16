@@ -43,7 +43,7 @@ type BrowserBridgeMonitorProps = {
 };
 
 type MonitorTab = 'active' | 'disconnected';
-type QueueFlowFilter = 'all' | 'auto_generate' | 'auto_animate';
+type QueueFlowFilter = 'all' | 'auto_generate' | 'auto_animate' | 'voice_generation';
 type QueueStatusFilter = 'all' | GenerationJobStatus;
 type QueueProviderFilter = 'all' | ProviderName;
 type QueueMediaFilter = 'all' | GeneratedMediaType;
@@ -60,7 +60,7 @@ const queueStatuses: GenerationJobStatus[] = [
 const failedQueueStatuses: GenerationJobStatus[] = ['failed', 'manual_action_required', 'canceled'];
 const finishedQueueStatuses: GenerationJobStatus[] = ['completed', 'failed', 'manual_action_required', 'canceled'];
 const bridgeProviders: ProviderName[] = ['meta', 'grok', 'google_ai_studio'];
-const runnableBridgeProviders: ProviderName[] = ['meta'];
+const runnableBridgeProviders: ProviderName[] = ['meta', 'google_ai_studio'];
 
 const statusLabel = (status: BridgeWorkerSnapshot['status']) => status.replaceAll('_', ' ');
 
@@ -141,13 +141,19 @@ const eventElapsedLabel = (events: BridgeDebugEvent[], event: BridgeDebugEvent):
 
 const queueStatusLabel = (status: GenerationJobStatus): string => status.replaceAll('_', ' ');
 
-const queueFlow = (job: GenerationJob): 'auto_generate' | 'auto_animate' =>
-  job.metadata.flow === 'auto_animate' || job.metadata.source === 'auto_animate'
-    ? 'auto_animate'
-    : 'auto_generate';
+const queueFlow = (job: GenerationJob): 'auto_generate' | 'auto_animate' | 'voice_generation' =>
+  job.metadata.flow === 'voice_generation'
+    ? 'voice_generation'
+    : job.metadata.flow === 'auto_animate' || job.metadata.source === 'auto_animate'
+      ? 'auto_animate'
+      : 'auto_generate';
 
 const queueFlowLabel = (job: GenerationJob): string =>
-  queueFlow(job) === 'auto_animate' ? 'Auto Animate' : 'Auto Generate';
+  queueFlow(job) === 'voice_generation'
+    ? 'Voice Generation'
+    : queueFlow(job) === 'auto_animate'
+      ? 'Auto Animate'
+      : 'Auto Generate';
 
 const queueSubject = (job: GenerationJob): string =>
   job.metadata.animationAssetName ||
@@ -641,6 +647,7 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                 <option value="all">All workflows</option>
                 <option value="auto_generate">Auto Generate</option>
                 <option value="auto_animate">Auto Animate</option>
+                <option value="voice_generation">Voice Generation</option>
               </select>
             </label>
             <label>
@@ -658,6 +665,7 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                 <option value="all">All providers</option>
                 <option value="meta">Meta</option>
                 <option value="grok">Grok</option>
+                <option value="google_ai_studio">Google AI Studio</option>
               </select>
             </label>
             <label>
@@ -689,6 +697,7 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                 <option value="all">All media</option>
                 <option value="image">Image</option>
                 <option value="video">Video</option>
+                <option value="audio">Audio</option>
               </select>
             </label>
           </div>

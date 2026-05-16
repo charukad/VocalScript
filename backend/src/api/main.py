@@ -74,7 +74,13 @@ generation_queue_service = GenerationQueueService(
     store=sqlite_store,
 )
 browser_bridge_service = BrowserBridgeService(str(Path(settings.projects.projects_dir) / "browser_bridge_debug"))
-app.include_router(build_generation_router(storyboard_service, whisper_engine, generation_queue_service, browser_bridge_service))
+app.include_router(build_generation_router(
+    storyboard_service,
+    whisper_engine,
+    generation_queue_service,
+    browser_bridge_service,
+    content_studio_service,
+))
 app.include_router(build_animation_router(animation_planner_service, whisper_engine, generation_queue_service))
 app.include_router(build_projects_router(project_service))
 app.include_router(build_content_profiles_router(content_profile_service))

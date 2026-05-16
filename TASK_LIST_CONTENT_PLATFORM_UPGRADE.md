@@ -226,11 +226,11 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Add voice job creation and result storage endpoints.
 - `[x]` Extend bridge protocol/capabilities for voice generation.
 - `[/]` Add Google AI Studio provider adapter/content script.
-- `[/]` Support `full_script` generation mode.
-- `[/]` Support preferred `line_by_line` generation mode.
+- `[x]` Support `full_script` generation mode.
+- `[x]` Support preferred `line_by_line` generation mode.
 - `[/]` Add audio result reporting and backend import flow.
-- `[/]` Add frontend voice job status UI.
-- `[ ]` Auto-import completed narration audio and optionally place clips on the timeline.
+- `[x]` Add frontend voice job status UI.
+- `[x]` Auto-import completed narration audio and optionally place clips on the timeline.
 
 ### Phase 9 Acceptance Checks
 

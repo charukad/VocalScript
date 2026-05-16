@@ -8,6 +8,7 @@ import {
   createVoiceJobs,
   getScript,
   listIdeas,
+  listVoiceJobs,
   listScripts,
   splitScriptIntoLines,
   updateIdea,
@@ -52,6 +53,7 @@ type ContentStudioState = {
   updateNarrationLine: (lineId: string, input: NarrationLineUpdateInput) => Promise<NarrationLine>;
   regenerateNarrationLine: (lineId: string) => Promise<NarrationLine>;
   queueVoiceJobs: (scriptId: string, input: VoiceJobCreateInput) => Promise<VoiceJobBatch>;
+  refreshVoiceJobs: (scriptId: string) => Promise<VoiceJobBatch>;
 };
 
 const mergeScriptSummary = (scripts: Script[], detail: ScriptDetail): Script[] => {
@@ -323,6 +325,23 @@ export const useContentStudioStore = create<ContentStudioState>((set, get) => ({
       throw error;
     } finally {
       set({ isSaving: false });
+    }
+  },
+  refreshVoiceJobs: async (scriptId) => {
+    try {
+      const [voiceJobs, selectedScript] = await Promise.all([
+        listVoiceJobs(scriptId),
+        get().selectedScriptId === scriptId ? getScript(scriptId) : Promise.resolve(null),
+      ]);
+      set(state => ({
+        voiceJobs,
+        selectedScript: selectedScript ?? state.selectedScript,
+      }));
+      return voiceJobs;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load voice jobs';
+      set({ error: message });
+      throw error;
     }
   },
 }));

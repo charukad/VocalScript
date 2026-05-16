@@ -155,4 +155,18 @@ def build_content_studio_router(
             raise HTTPException(status_code=400, detail="No voice jobs were created")
         return GenerationJobListResponse(jobs=jobs, batchId=jobs[0].batch_id)
 
+    @router.get("/api/scripts/{script_id}/voice-jobs", response_model=GenerationJobListResponse)
+    async def list_voice_jobs(script_id: str):
+        script = content_studio_service.get_script_detail(script_id)
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+        jobs = [
+            job
+            for job in generation_queue_service.list_jobs(flow="voice_generation")
+            if job.metadata.get("scriptId") == script_id
+        ]
+        for job in jobs:
+            content_studio_service.sync_narration_line_from_voice_job(job)
+        return GenerationJobListResponse(jobs=jobs, batchId=jobs[-1].batch_id if jobs else None)
+
     return router

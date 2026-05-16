@@ -35,6 +35,7 @@ from backend.src.domain.models.generation import (
 )
 from backend.src.domain.services.generation_queue_service import GenerationQueueService
 from backend.src.domain.services.browser_bridge_service import BrowserBridgeService
+from backend.src.domain.services.content_studio_service import ContentStudioService
 from backend.src.domain.services.storyboard_service import StoryboardService
 
 
@@ -43,8 +44,13 @@ def build_generation_router(
     transcriber: ITranscriber,
     queue_service: GenerationQueueService,
     bridge_service: Optional[BrowserBridgeService] = None,
+    content_studio_service: Optional[ContentStudioService] = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/generation", tags=["generation"])
+
+    def sync_voice_job(job: Optional[GenerationJob]) -> None:
+        if job and content_studio_service:
+            content_studio_service.sync_narration_line_from_voice_job(job)
 
     @router.post("/storyboard/from-transcript", response_model=StoryboardResponse)
     async def create_storyboard_from_transcript(request: StoryboardRequest):
@@ -326,6 +332,7 @@ def build_generation_router(
         )
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
+        sync_voice_job(job)
         return job
 
     @router.post("/jobs/{job_id}/result", response_model=GenerationJob)
@@ -339,6 +346,7 @@ def build_generation_router(
         )
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
+        sync_voice_job(job)
         return job
 
     @router.post("/jobs/{job_id}/result/upload", response_model=GenerationJob)
@@ -357,6 +365,7 @@ def build_generation_router(
         )
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
+        sync_voice_job(job)
         return job
 
     @router.post("/jobs/{job_id}/result/upload-variants", response_model=GenerationJob)
@@ -379,6 +388,7 @@ def build_generation_router(
         )
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
+        sync_voice_job(job)
         return job
 
     @router.post("/jobs/{job_id}/store-remote", response_model=GenerationJob)
@@ -408,6 +418,7 @@ def build_generation_router(
 
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
+        sync_voice_job(job)
         return job
 
     @router.post("/jobs/{job_id}/select-variant", response_model=GenerationJob)
