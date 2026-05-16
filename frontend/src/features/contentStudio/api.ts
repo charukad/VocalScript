@@ -1,4 +1,6 @@
 import type {
+  BrandKit,
+  BrandKitInput,
   ContentIdea,
   ContentIdeaInput,
   ContentTrend,
@@ -6,6 +8,10 @@ import type {
   CompetitorAnalysisSummary,
   CompetitorContent,
   CompetitorContentInput,
+  PackagingGenerationInput,
+  PackagingGenerationResult,
+  PromptTemplate,
+  PromptTemplateInput,
   AgentRun,
   AgentWorkflowStartInput,
   AnalyticsConnection,
@@ -65,6 +71,10 @@ type ProfileLearningListResponse = {
 
 type CompetitorContentListResponse = {
   items: CompetitorContent[];
+};
+
+type PromptTemplateListResponse = {
+  templates: PromptTemplate[];
 };
 
 const formatApiError = async (response: Response, fallback: string): Promise<Error> => {
@@ -244,6 +254,96 @@ export const getCompetitorSummary = async (
 ): Promise<CompetitorAnalysisSummary> => {
   const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/competitor-content/summary`, { signal });
   if (!response.ok) throw await formatApiError(response, 'Could not summarize competitor content');
+  return response.json();
+};
+
+export const getBrandKit = async (
+  profileId: string,
+  signal?: AbortSignal
+): Promise<BrandKit> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/brand-kit`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load brand kit');
+  return response.json();
+};
+
+export const updateBrandKit = async (
+  profileId: string,
+  input: BrandKitInput,
+  signal?: AbortSignal
+): Promise<BrandKit> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/brand-kit`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not update brand kit');
+  return response.json();
+};
+
+export const listPromptTemplates = async (
+  profileId: string,
+  signal?: AbortSignal
+): Promise<PromptTemplateListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/prompt-templates`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load prompt templates');
+  return response.json();
+};
+
+export const createPromptTemplate = async (
+  profileId: string,
+  input: PromptTemplateInput,
+  signal?: AbortSignal
+): Promise<PromptTemplate> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/prompt-templates`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not create prompt template');
+  return response.json();
+};
+
+export const updatePromptTemplate = async (
+  templateId: string,
+  input: Partial<PromptTemplateInput>,
+  signal?: AbortSignal
+): Promise<PromptTemplate> => {
+  const response = await fetch(`${API_BASE_URL}/api/prompt-templates/${templateId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not update prompt template');
+  return response.json();
+};
+
+export const archivePromptTemplate = async (
+  templateId: string,
+  signal?: AbortSignal
+): Promise<PromptTemplate> => {
+  const response = await fetch(`${API_BASE_URL}/api/prompt-templates/${templateId}`, {
+    method: 'DELETE',
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not archive prompt template');
+  return response.json();
+};
+
+export const generatePackaging = async (
+  profileId: string,
+  input: PackagingGenerationInput,
+  signal?: AbortSignal,
+): Promise<PackagingGenerationResult> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/packaging/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not generate packaging');
   return response.json();
 };
 

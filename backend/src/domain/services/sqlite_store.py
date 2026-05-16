@@ -21,11 +21,13 @@ from backend.src.domain.models.analytics import (
     ContentPerformance,
     ProfileLearning,
 )
+from backend.src.domain.models.brand_kit import BrandKit
 from backend.src.domain.models.competitor import CompetitorContent
 from backend.src.domain.models.content_profile import ContentProfile
 from backend.src.domain.models.content_studio import ContentIdea, ContentTrend, NarrationLine, Script, ScriptVersion
 from backend.src.domain.models.agent import AgentRun, WorkflowRun
 from backend.src.domain.models.project import ProjectDetail, ProjectSummary
+from backend.src.domain.models.prompt_library import PromptTemplate
 
 
 RUNNING_JOB_TIMEOUT_SECONDS = 900
@@ -165,6 +167,43 @@ class SQLiteStore:
 
                 CREATE INDEX IF NOT EXISTS idx_content_profiles_updated
                     ON content_profiles(is_archived, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS brand_kits (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL UNIQUE,
+                    logo_path TEXT,
+                    color_palette_json TEXT NOT NULL,
+                    font_families_json TEXT NOT NULL,
+                    tone_keywords_json TEXT NOT NULL,
+                    avoid_keywords_json TEXT NOT NULL,
+                    caption_preset TEXT NOT NULL DEFAULT '',
+                    thumbnail_style TEXT NOT NULL DEFAULT '',
+                    default_cta TEXT NOT NULL DEFAULT '',
+                    music_style TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    kit_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_brand_kits_profile
+                    ON brand_kits(profile_id, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS prompt_templates (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    use_case TEXT NOT NULL,
+                    prompt_text TEXT NOT NULL,
+                    variables_json TEXT NOT NULL,
+                    notes TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    template_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_prompt_templates_profile
+                    ON prompt_templates(profile_id, status, updated_at DESC);
 
                 CREATE TABLE IF NOT EXISTS content_ideas (
                     id TEXT PRIMARY KEY,
@@ -448,6 +487,12 @@ class SQLiteStore:
 
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
                 VALUES (4, CURRENT_TIMESTAMP);
+
+                INSERT OR IGNORE INTO schema_migrations(version, applied_at)
+                VALUES (5, CURRENT_TIMESTAMP);
+
+                INSERT OR IGNORE INTO schema_migrations(version, applied_at)
+                VALUES (6, CURRENT_TIMESTAMP);
 
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
                 VALUES (5, CURRENT_TIMESTAMP);
@@ -806,6 +851,118 @@ class SQLiteStore:
         with self._lock, self._registry_connect() as connection:
             rows = connection.execute(query, params).fetchall()
         return [profile for row in rows if (profile := self._content_profile_from_row(row))]
+
+    def upsert_brand_kit(self, brand_kit: BrandKit) -> None:
+        payload = brand_kit.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO brand_kits (
+                    id, profile_id, logo_path, color_palette_json, font_families_json,
+                    tone_keywords_json, avoid_keywords_json, caption_preset, thumbnail_style,
+                    default_cta, music_style, created_at, updated_at, kit_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    logo_path = excluded.logo_path,
+                    color_palette_json = excluded.color_palette_json,
+                    font_families_json = excluded.font_families_json,
+                    tone_keywords_json = excluded.tone_keywords_json,
+                    avoid_keywords_json = excluded.avoid_keywords_json,
+                    caption_preset = excluded.caption_preset,
+                    thumbnail_style = excluded.thumbnail_style,
+                    default_cta = excluded.default_cta,
+                    music_style = excluded.music_style,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    kit_json = excluded.kit_json
+                """,
+                (
+                    brand_kit.id,
+                    brand_kit.profile_id,
+                    brand_kit.logo_path,
+                    _json_dumps(brand_kit.color_palette),
+                    _json_dumps(brand_kit.font_families),
+                    _json_dumps(brand_kit.tone_keywords),
+                    _json_dumps(brand_kit.avoid_keywords),
+                    brand_kit.caption_preset,
+                    brand_kit.thumbnail_style,
+                    brand_kit.default_cta,
+                    brand_kit.music_style,
+                    brand_kit.created_at,
+                    brand_kit.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_brand_kit(self, profile_id: str) -> Optional[BrandKit]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute(
+                "SELECT kit_json FROM brand_kits WHERE profile_id = ?",
+                (profile_id,),
+            ).fetchone()
+        return self._brand_kit_from_json(row["kit_json"]) if row else None
+
+    def upsert_prompt_template(self, template: PromptTemplate) -> None:
+        payload = template.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO prompt_templates (
+                    id, profile_id, name, use_case, prompt_text, variables_json,
+                    notes, status, created_at, updated_at, template_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    name = excluded.name,
+                    use_case = excluded.use_case,
+                    prompt_text = excluded.prompt_text,
+                    variables_json = excluded.variables_json,
+                    notes = excluded.notes,
+                    status = excluded.status,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    template_json = excluded.template_json
+                """,
+                (
+                    template.id,
+                    template.profile_id,
+                    template.name,
+                    template.use_case,
+                    template.prompt_text,
+                    _json_dumps(template.variables),
+                    template.notes,
+                    template.status,
+                    template.created_at,
+                    template.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_prompt_template(self, template_id: str) -> Optional[PromptTemplate]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute(
+                "SELECT template_json FROM prompt_templates WHERE id = ?",
+                (template_id,),
+            ).fetchone()
+        return self._prompt_template_from_json(row["template_json"]) if row else None
+
+    def list_prompt_templates(self, profile_id: str, include_archived: bool = False) -> List[PromptTemplate]:
+        query = "SELECT template_json FROM prompt_templates WHERE profile_id = ?"
+        params: list[Any] = [profile_id]
+        if not include_archived:
+            query += " AND status <> ?"
+            params.append("archived")
+        query += " ORDER BY updated_at DESC, created_at DESC"
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            template
+            for row in rows
+            if (template := self._prompt_template_from_json(row["template_json"]))
+        ]
 
     def upsert_content_idea(self, idea: ContentIdea) -> None:
         payload = idea.model_dump(by_alias=True)
@@ -2767,6 +2924,18 @@ class SQLiteStore:
     def _competitor_content_from_json(self, raw: str) -> Optional[CompetitorContent]:
         try:
             return CompetitorContent(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _brand_kit_from_json(self, raw: str) -> Optional[BrandKit]:
+        try:
+            return BrandKit(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _prompt_template_from_json(self, raw: str) -> Optional[PromptTemplate]:
+        try:
+            return PromptTemplate(**_json_loads(raw, {}))
         except ValueError:
             return None
 

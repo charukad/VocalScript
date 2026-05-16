@@ -124,6 +124,85 @@ export type CompetitorAnalysisSummary = {
   recommendations: string[];
 };
 
+export type BrandKit = {
+  id: string;
+  profileId: string;
+  logoPath: string | null;
+  colorPalette: string[];
+  fontFamilies: string[];
+  toneKeywords: string[];
+  avoidKeywords: string[];
+  captionPreset: string;
+  thumbnailStyle: string;
+  defaultCta: string;
+  musicStyle: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BrandKitInput = {
+  logoPath?: string | null;
+  colorPalette?: string[];
+  fontFamilies?: string[];
+  toneKeywords?: string[];
+  avoidKeywords?: string[];
+  captionPreset?: string;
+  thumbnailStyle?: string;
+  defaultCta?: string;
+  musicStyle?: string;
+};
+
+export type PromptTemplateStatus = 'active' | 'archived';
+
+export type PromptTemplate = {
+  id: string;
+  profileId: string;
+  name: string;
+  useCase: string;
+  promptText: string;
+  variables: string[];
+  notes: string;
+  status: PromptTemplateStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PromptTemplateInput = {
+  name: string;
+  useCase?: string;
+  promptText: string;
+  variables?: string[];
+  notes?: string;
+  status?: PromptTemplateStatus;
+};
+
+export type PackagingGenerationInput = {
+  script: string;
+  currentTitle?: string;
+  topic?: string;
+  platform?: PlatformTarget | null;
+};
+
+export type TitleCandidate = {
+  title: string;
+  rationale: string;
+  estimatedViralPotential: ViralPotentialScore;
+};
+
+export type ThumbnailConcept = {
+  headline: string;
+  visualPrompt: string;
+  composition: string;
+  emotion: string;
+  rationale: string;
+};
+
+export type PackagingGenerationResult = {
+  titles: TitleCandidate[];
+  thumbnailConcepts: ThumbnailConcept[];
+  usedLlmMode: string;
+};
+
 export type Script = {
   id: string;
   profileId: string;

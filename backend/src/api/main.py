@@ -17,12 +17,15 @@ from backend.src.infrastructure.local_llm_service import LocalLLMService
 from backend.src.domain.services.export_orchestrator import ExportOrchestrator, generate_srt
 from backend.src.domain.services.browser_bridge_service import BrowserBridgeService
 from backend.src.domain.services.content_profile_service import ContentProfileService
+from backend.src.domain.services.brand_kit_service import BrandKitService
 from backend.src.domain.services.content_studio_service import ContentStudioService
 from backend.src.domain.services.competitor_service import CompetitorService
+from backend.src.domain.services.packaging_service import PackagingService
 from backend.src.domain.services.animation_planner_service import AnimationPlannerService
 from backend.src.domain.services.analytics_service import AnalyticsService
 from backend.src.domain.services.generation_queue_service import GenerationQueueService
 from backend.src.domain.services.project_service import ProjectService
+from backend.src.domain.services.prompt_library_service import PromptLibraryService
 from backend.src.domain.services.sqlite_store import SQLiteStore
 from backend.src.domain.services.storyboard_service import StoryboardService
 from backend.src.domain.services.timeline_builder_service import TimelineBuilderService
@@ -32,8 +35,11 @@ from backend.src.api.animation import build_animation_router
 from backend.src.api.analytics import build_analytics_router
 from backend.src.api.browser_bridge import build_browser_bridge_router
 from backend.src.api.content_profiles import build_content_profiles_router
+from backend.src.api.brand_kits import build_brand_kits_router
 from backend.src.api.content_studio import build_content_studio_router
 from backend.src.api.competitors import build_competitors_router
+from backend.src.api.packaging import build_packaging_router
+from backend.src.api.prompt_library import build_prompt_library_router
 from backend.src.api.generation import build_generation_router
 from backend.src.api.projects import build_projects_router
 from backend.src.api.viral import build_viral_router
@@ -64,9 +70,12 @@ legacy_database_path = str(Path(settings.projects.projects_dir) / "neuralscribe.
 sqlite_store = SQLiteStore(registry_database_path, legacy_database_path=legacy_database_path)
 project_service = ProjectService(settings.projects.projects_dir, store=sqlite_store)
 content_profile_service = ContentProfileService(sqlite_store)
+brand_kit_service = BrandKitService(sqlite_store)
+prompt_library_service = PromptLibraryService(sqlite_store)
 content_studio_service = ContentStudioService(sqlite_store)
 competitor_service = CompetitorService(sqlite_store)
 viral_scoring_service = ViralScoringService(local_llm_service)
+packaging_service = PackagingService(local_llm_service, viral_scoring_service)
 timeline_builder_service = TimelineBuilderService()
 analytics_service = AnalyticsService(sqlite_store, content_profile_service)
 agent_orchestrator = AgentOrchestrator(
@@ -93,6 +102,8 @@ app.include_router(build_generation_router(
 app.include_router(build_animation_router(animation_planner_service, whisper_engine, generation_queue_service))
 app.include_router(build_projects_router(project_service))
 app.include_router(build_content_profiles_router(content_profile_service))
+app.include_router(build_brand_kits_router(content_profile_service, brand_kit_service))
+app.include_router(build_prompt_library_router(content_profile_service, prompt_library_service))
 app.include_router(build_content_studio_router(
     content_profile_service,
     content_studio_service,
@@ -100,6 +111,7 @@ app.include_router(build_content_studio_router(
     timeline_builder_service,
 ))
 app.include_router(build_competitors_router(content_profile_service, competitor_service))
+app.include_router(build_packaging_router(content_profile_service, brand_kit_service, packaging_service))
 app.include_router(build_analytics_router(content_profile_service, analytics_service))
 app.include_router(build_viral_router(viral_scoring_service))
 app.include_router(build_agents_router(agent_orchestrator))

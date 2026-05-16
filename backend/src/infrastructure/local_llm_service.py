@@ -81,6 +81,9 @@ class LocalLLMService:
     def rewrite_script_json(self, prompt: str) -> Optional[str]:
         return self._generate_structured_json(prompt, temperature=0.35)
 
+    def generate_packaging_json(self, prompt: str) -> Optional[str]:
+        return self._generate_structured_json(prompt, temperature=0.35)
+
     def rewrite_generation_prompt(self, job: GenerationJob) -> str:
         mode = self.settings.mode.lower().strip()
         fallback = self._rule_based_prompt_rewrite(job)

@@ -8,15 +8,21 @@ import { StoryboardTab } from './StoryboardTab';
 import { AnalyticsTab } from './AnalyticsTab';
 import { TrendingTopicsTab } from './TrendingTopicsTab';
 import { CompetitorsTab } from './CompetitorsTab';
+import { PackagingTab } from './PackagingTab';
+import { BrandKitTab } from './BrandKitTab';
+import { PromptLibraryTab } from './PromptLibraryTab';
 import { useContentStudioStore } from './contentStudioStore';
 
-type StudioTab = 'ideas' | 'trending_topics' | 'competitors' | 'script_lab' | 'storyboard' | 'voice' | 'analytics' | 'agents';
+type StudioTab = 'ideas' | 'trending_topics' | 'competitors' | 'brand_kit' | 'prompt_library' | 'script_lab' | 'packaging' | 'storyboard' | 'voice' | 'analytics' | 'agents';
 
 const tabs: { id: StudioTab; label: string }[] = [
   { id: 'ideas', label: 'Ideas' },
   { id: 'trending_topics', label: 'Trending Topics' },
   { id: 'competitors', label: 'Competitors' },
+  { id: 'brand_kit', label: 'Brand Kit' },
+  { id: 'prompt_library', label: 'Prompt Library' },
   { id: 'script_lab', label: 'Script Lab' },
+  { id: 'packaging', label: 'Packaging' },
   { id: 'storyboard', label: 'Storyboard' },
   { id: 'voice', label: 'Voice' },
   { id: 'analytics', label: 'Analytics' },
@@ -80,7 +86,10 @@ export const ContentStudioLayout = () => {
             {!isLoading && activeTab === 'ideas' && <IdeasTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'trending_topics' && <TrendingTopicsTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'competitors' && <CompetitorsTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'brand_kit' && <BrandKitTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'prompt_library' && <PromptLibraryTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'script_lab' && <ScriptLabTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'packaging' && <PackagingTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'storyboard' && <StoryboardTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'voice' && <VoiceTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'analytics' && <AnalyticsTab profileId={selectedProfileId} />}
