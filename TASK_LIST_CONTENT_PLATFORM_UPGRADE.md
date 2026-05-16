@@ -292,12 +292,12 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Competitor content analyzer with manual local observations and summary insights.
 - `[ ]` Trend radar with external data sources.
 - `[x]` Thumbnail/title generator with local fallback options and LLM-ready structured output.
-- `[ ]` Auto caption designer.
+- `[x]` Auto caption designer with branded preset generation and timeline clip application.
 - `[x]` Brand kit with profile-scoped creative defaults and packaging integration.
 - `[x]` Prompt library with profile-scoped reusable templates and archive support.
 - `[ ]` Character consistency system.
-- `[ ]` Content calendar.
-- `[ ]` A/B testing support.
+- `[x]` Content calendar with profile-scoped scheduling and idea/script links.
+- `[x]` A/B testing support for local experiment planning, variants, winners, and metrics capture.
 - `[ ]` Comment analyzer.
 - `[ ]` Long-video-to-shorts repurposing.
 - `[ ]` Publishing package generator.

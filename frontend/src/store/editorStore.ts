@@ -7,6 +7,7 @@ import type {
   TextData,
   ExportSettings,
   CaptionSegment,
+  CaptionDesignPreset,
   AnimationAssetMemoryItem,
   AnimationAssetNeed,
   AnimationAssetType,
@@ -153,6 +154,14 @@ const makeSnapshot = (state: Pick<EditorState, 'clips' | 'tracks'>): TimelineSna
   clips: cloneClips(state.clips),
   tracks: cloneTracks(state.tracks),
 });
+
+const isCaptionTimelineClip = (clip: TimelineClip): boolean => (
+  clip.type === 'text'
+  && (
+    clip.assetId.startsWith('caption-')
+    || clip.assetId.startsWith('timeline-caption-')
+  )
+);
 
 const withHistory = (state: EditorState) => ({
   historyPast: [...state.historyPast.slice(-HISTORY_LIMIT + 1), makeSnapshot(state)],
@@ -357,6 +366,7 @@ export type EditorState = {
   updateClipColor: (id: string, colorData: Partial<TimelineClip['color']>) => void;
   updateClipAudio: (id: string, audioData: Partial<TimelineClip['audio']>) => void;
   updateClipText: (id: string, textData: Partial<TextData>) => void;
+  applyCaptionDesignToCaptionClips: (design: CaptionDesignPreset) => number;
   addKeyframe: (id: string, property: KeyframeProperty, time?: number, value?: number) => void;
   updateKeyframe: (id: string, keyframeId: string, updates: Partial<Pick<NonNullable<TimelineClip['keyframes']>[number], 'time' | 'value'>>) => void;
   removeKeyframe: (id: string, keyframeId: string) => void;
@@ -2185,6 +2195,37 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         return clip;
       })
     }));
+  },
+  applyCaptionDesignToCaptionClips: (design) => {
+    let updatedCount = 0;
+    set(state => {
+      const clips = state.clips.map(clip => {
+        if (!isCaptionTimelineClip(clip)) return clip;
+        updatedCount += 1;
+        return {
+          ...clip,
+          textData: {
+            ...DEFAULT_TEXT_DATA,
+            ...clip.textData,
+            fontFamily: design.fontFamily,
+            fontSize: design.fontSize,
+            color: design.color,
+            bold: design.bold,
+            align: design.align,
+            x: design.x,
+            y: design.y,
+            bgColor: design.bgColor,
+            bgOpacity: design.bgOpacity,
+          },
+        };
+      });
+      if (updatedCount === 0) return state;
+      return {
+        ...withHistory(state),
+        clips,
+      };
+    });
+    return updatedCount;
   },
 
   addKeyframe: (id, property, time, value) => {

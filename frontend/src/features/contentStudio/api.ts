@@ -1,6 +1,12 @@
 import type {
   BrandKit,
   BrandKitInput,
+  CalendarItem,
+  CalendarItemInput,
+  Experiment,
+  ExperimentInput,
+  CaptionDesignInput,
+  CaptionDesignResult,
   ContentIdea,
   ContentIdeaInput,
   ContentTrend,
@@ -75,6 +81,14 @@ type CompetitorContentListResponse = {
 
 type PromptTemplateListResponse = {
   templates: PromptTemplate[];
+};
+
+type CalendarItemListResponse = {
+  items: CalendarItem[];
+};
+
+type ExperimentListResponse = {
+  experiments: Experiment[];
 };
 
 const formatApiError = async (response: Response, fallback: string): Promise<Error> => {
@@ -281,6 +295,21 @@ export const updateBrandKit = async (
   return response.json();
 };
 
+export const generateCaptionDesigns = async (
+  profileId: string,
+  input: CaptionDesignInput,
+  signal?: AbortSignal
+): Promise<CaptionDesignResult> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/caption-designs/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not generate caption designs');
+  return response.json();
+};
+
 export const listPromptTemplates = async (
   profileId: string,
   signal?: AbortSignal
@@ -329,6 +358,108 @@ export const archivePromptTemplate = async (
     signal,
   });
   if (!response.ok) throw await formatApiError(response, 'Could not archive prompt template');
+  return response.json();
+};
+
+export const listCalendarItems = async (
+  profileId: string,
+  signal?: AbortSignal
+): Promise<CalendarItemListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/calendar-items`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load calendar items');
+  return response.json();
+};
+
+export const createCalendarItem = async (
+  profileId: string,
+  input: CalendarItemInput,
+  signal?: AbortSignal
+): Promise<CalendarItem> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/calendar-items`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not create calendar item');
+  return response.json();
+};
+
+export const updateCalendarItem = async (
+  itemId: string,
+  input: Partial<CalendarItemInput>,
+  signal?: AbortSignal
+): Promise<CalendarItem> => {
+  const response = await fetch(`${API_BASE_URL}/api/calendar-items/${itemId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not update calendar item');
+  return response.json();
+};
+
+export const archiveCalendarItem = async (
+  itemId: string,
+  signal?: AbortSignal
+): Promise<CalendarItem> => {
+  const response = await fetch(`${API_BASE_URL}/api/calendar-items/${itemId}`, {
+    method: 'DELETE',
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not archive calendar item');
+  return response.json();
+};
+
+export const listExperiments = async (
+  profileId: string,
+  signal?: AbortSignal
+): Promise<ExperimentListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/experiments`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load experiments');
+  return response.json();
+};
+
+export const createExperiment = async (
+  profileId: string,
+  input: ExperimentInput,
+  signal?: AbortSignal
+): Promise<Experiment> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/experiments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not create experiment');
+  return response.json();
+};
+
+export const updateExperiment = async (
+  experimentId: string,
+  input: Partial<ExperimentInput>,
+  signal?: AbortSignal
+): Promise<Experiment> => {
+  const response = await fetch(`${API_BASE_URL}/api/experiments/${experimentId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not update experiment');
+  return response.json();
+};
+
+export const archiveExperiment = async (
+  experimentId: string,
+  signal?: AbortSignal
+): Promise<Experiment> => {
+  const response = await fetch(`${API_BASE_URL}/api/experiments/${experimentId}`, {
+    method: 'DELETE',
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not archive experiment');
   return response.json();
 };
 

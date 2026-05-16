@@ -11,16 +11,22 @@ import { CompetitorsTab } from './CompetitorsTab';
 import { PackagingTab } from './PackagingTab';
 import { BrandKitTab } from './BrandKitTab';
 import { PromptLibraryTab } from './PromptLibraryTab';
+import { CaptionDesignerTab } from './CaptionDesignerTab';
+import { ContentCalendarTab } from './ContentCalendarTab';
+import { ABTestingTab } from './ABTestingTab';
 import { useContentStudioStore } from './contentStudioStore';
 
-type StudioTab = 'ideas' | 'trending_topics' | 'competitors' | 'brand_kit' | 'prompt_library' | 'script_lab' | 'packaging' | 'storyboard' | 'voice' | 'analytics' | 'agents';
+type StudioTab = 'ideas' | 'trending_topics' | 'competitors' | 'brand_kit' | 'caption_designer' | 'prompt_library' | 'content_calendar' | 'ab_testing' | 'script_lab' | 'packaging' | 'storyboard' | 'voice' | 'analytics' | 'agents';
 
 const tabs: { id: StudioTab; label: string }[] = [
   { id: 'ideas', label: 'Ideas' },
   { id: 'trending_topics', label: 'Trending Topics' },
   { id: 'competitors', label: 'Competitors' },
   { id: 'brand_kit', label: 'Brand Kit' },
+  { id: 'caption_designer', label: 'Caption Designer' },
   { id: 'prompt_library', label: 'Prompt Library' },
+  { id: 'content_calendar', label: 'Content Calendar' },
+  { id: 'ab_testing', label: 'A/B Testing' },
   { id: 'script_lab', label: 'Script Lab' },
   { id: 'packaging', label: 'Packaging' },
   { id: 'storyboard', label: 'Storyboard' },
@@ -87,7 +93,10 @@ export const ContentStudioLayout = () => {
             {!isLoading && activeTab === 'trending_topics' && <TrendingTopicsTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'competitors' && <CompetitorsTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'brand_kit' && <BrandKitTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'caption_designer' && <CaptionDesignerTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'prompt_library' && <PromptLibraryTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'content_calendar' && <ContentCalendarTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'ab_testing' && <ABTestingTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'script_lab' && <ScriptLabTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'packaging' && <PackagingTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'storyboard' && <StoryboardTab profileId={selectedProfileId} />}

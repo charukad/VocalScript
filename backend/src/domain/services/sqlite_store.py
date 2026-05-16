@@ -21,7 +21,9 @@ from backend.src.domain.models.analytics import (
     ContentPerformance,
     ProfileLearning,
 )
+from backend.src.domain.models.ab_testing import Experiment
 from backend.src.domain.models.brand_kit import BrandKit
+from backend.src.domain.models.content_calendar import CalendarItem
 from backend.src.domain.models.competitor import CompetitorContent
 from backend.src.domain.models.content_profile import ContentProfile
 from backend.src.domain.models.content_studio import ContentIdea, ContentTrend, NarrationLine, Script, ScriptVersion
@@ -204,6 +206,42 @@ class SQLiteStore:
 
                 CREATE INDEX IF NOT EXISTS idx_prompt_templates_profile
                     ON prompt_templates(profile_id, status, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS calendar_items (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    scheduled_at TEXT NOT NULL,
+                    platform TEXT,
+                    status TEXT NOT NULL DEFAULT 'planned',
+                    idea_id TEXT,
+                    script_id TEXT,
+                    project_id TEXT,
+                    notes TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    item_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_calendar_items_profile
+                    ON calendar_items(profile_id, status, scheduled_at ASC);
+
+                CREATE TABLE IF NOT EXISTS experiments (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    platform TEXT,
+                    status TEXT NOT NULL DEFAULT 'planned',
+                    script_id TEXT,
+                    project_id TEXT,
+                    winner_label TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    experiment_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_experiments_profile
+                    ON experiments(profile_id, status, updated_at DESC);
 
                 CREATE TABLE IF NOT EXISTS content_ideas (
                     id TEXT PRIMARY KEY,
@@ -493,6 +531,12 @@ class SQLiteStore:
 
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
                 VALUES (6, CURRENT_TIMESTAMP);
+
+                INSERT OR IGNORE INTO schema_migrations(version, applied_at)
+                VALUES (7, CURRENT_TIMESTAMP);
+
+                INSERT OR IGNORE INTO schema_migrations(version, applied_at)
+                VALUES (8, CURRENT_TIMESTAMP);
 
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
                 VALUES (5, CURRENT_TIMESTAMP);
@@ -962,6 +1006,130 @@ class SQLiteStore:
             template
             for row in rows
             if (template := self._prompt_template_from_json(row["template_json"]))
+        ]
+
+    def upsert_calendar_item(self, item: CalendarItem) -> None:
+        payload = item.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO calendar_items (
+                    id, profile_id, title, scheduled_at, platform, status, idea_id,
+                    script_id, project_id, notes, created_at, updated_at, item_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    title = excluded.title,
+                    scheduled_at = excluded.scheduled_at,
+                    platform = excluded.platform,
+                    status = excluded.status,
+                    idea_id = excluded.idea_id,
+                    script_id = excluded.script_id,
+                    project_id = excluded.project_id,
+                    notes = excluded.notes,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    item_json = excluded.item_json
+                """,
+                (
+                    item.id,
+                    item.profile_id,
+                    item.title,
+                    item.scheduled_at,
+                    item.platform,
+                    item.status,
+                    item.idea_id,
+                    item.script_id,
+                    item.project_id,
+                    item.notes,
+                    item.created_at,
+                    item.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_calendar_item(self, item_id: str) -> Optional[CalendarItem]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute(
+                "SELECT item_json FROM calendar_items WHERE id = ?",
+                (item_id,),
+            ).fetchone()
+        return self._calendar_item_from_json(row["item_json"]) if row else None
+
+    def list_calendar_items(self, profile_id: str, include_archived: bool = False) -> List[CalendarItem]:
+        query = "SELECT item_json FROM calendar_items WHERE profile_id = ?"
+        params: list[Any] = [profile_id]
+        if not include_archived:
+            query += " AND status <> ?"
+            params.append("archived")
+        query += " ORDER BY scheduled_at ASC, updated_at DESC"
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            item
+            for row in rows
+            if (item := self._calendar_item_from_json(row["item_json"]))
+        ]
+
+    def upsert_experiment(self, experiment: Experiment) -> None:
+        payload = experiment.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO experiments (
+                    id, profile_id, name, platform, status, script_id, project_id,
+                    winner_label, created_at, updated_at, experiment_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    name = excluded.name,
+                    platform = excluded.platform,
+                    status = excluded.status,
+                    script_id = excluded.script_id,
+                    project_id = excluded.project_id,
+                    winner_label = excluded.winner_label,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    experiment_json = excluded.experiment_json
+                """,
+                (
+                    experiment.id,
+                    experiment.profile_id,
+                    experiment.name,
+                    experiment.platform,
+                    experiment.status,
+                    experiment.script_id,
+                    experiment.project_id,
+                    experiment.winner_label,
+                    experiment.created_at,
+                    experiment.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_experiment(self, experiment_id: str) -> Optional[Experiment]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute(
+                "SELECT experiment_json FROM experiments WHERE id = ?",
+                (experiment_id,),
+            ).fetchone()
+        return self._experiment_from_json(row["experiment_json"]) if row else None
+
+    def list_experiments(self, profile_id: str, include_archived: bool = False) -> List[Experiment]:
+        query = "SELECT experiment_json FROM experiments WHERE profile_id = ?"
+        params: list[Any] = [profile_id]
+        if not include_archived:
+            query += " AND status <> ?"
+            params.append("archived")
+        query += " ORDER BY updated_at DESC, created_at DESC"
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            experiment
+            for row in rows
+            if (experiment := self._experiment_from_json(row["experiment_json"]))
         ]
 
     def upsert_content_idea(self, idea: ContentIdea) -> None:
@@ -2936,6 +3104,18 @@ class SQLiteStore:
     def _prompt_template_from_json(self, raw: str) -> Optional[PromptTemplate]:
         try:
             return PromptTemplate(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _calendar_item_from_json(self, raw: str) -> Optional[CalendarItem]:
+        try:
+            return CalendarItem(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _experiment_from_json(self, raw: str) -> Optional[Experiment]:
+        try:
+            return Experiment(**_json_loads(raw, {}))
         except ValueError:
             return None
 

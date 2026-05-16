@@ -141,6 +141,25 @@ export type CaptionSegment = {
   text: string;
 };
 
+export type CaptionDesignPreset = {
+  name: string;
+  rationale: string;
+  fontFamily: string;
+  fontSize: number;
+  color: string;
+  accentColor: string;
+  bgColor: string;
+  bgOpacity: number;
+  bold: boolean;
+  align: 'left' | 'center' | 'right';
+  x: number;
+  y: number;
+  maxCharsPerLine: number;
+  previewLines: string[];
+  estimatedReadabilityScore: number;
+  notes: string[];
+};
+
 export type ProviderName = 'meta' | 'grok' | 'google_ai_studio';
 
 export type GeneratedMediaType = 'image' | 'video' | 'audio';

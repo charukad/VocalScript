@@ -1,4 +1,5 @@
 import type {
+  CaptionDesignPreset,
   GeneratedMediaAsset,
   GenerationJob,
   PlatformTarget,
@@ -152,6 +153,16 @@ export type BrandKitInput = {
   musicStyle?: string;
 };
 
+export type CaptionDesignInput = {
+  sampleText: string;
+  platform?: PlatformTarget | null;
+  emphasis?: 'balanced' | 'bold' | 'minimal';
+};
+
+export type CaptionDesignResult = {
+  designs: CaptionDesignPreset[];
+};
+
 export type PromptTemplateStatus = 'active' | 'archived';
 
 export type PromptTemplate = {
@@ -174,6 +185,75 @@ export type PromptTemplateInput = {
   variables?: string[];
   notes?: string;
   status?: PromptTemplateStatus;
+};
+
+export type CalendarItemStatus = 'planned' | 'drafting' | 'ready' | 'published' | 'archived';
+
+export type CalendarItem = {
+  id: string;
+  profileId: string;
+  title: string;
+  scheduledAt: string;
+  platform: PlatformTarget | null;
+  status: CalendarItemStatus;
+  ideaId: string | null;
+  scriptId: string | null;
+  projectId: string | null;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CalendarItemInput = {
+  title: string;
+  scheduledAt: string;
+  platform?: PlatformTarget | null;
+  status?: CalendarItemStatus;
+  ideaId?: string | null;
+  scriptId?: string | null;
+  projectId?: string | null;
+  notes?: string;
+};
+
+export type ExperimentStatus = 'planned' | 'running' | 'completed' | 'archived';
+
+export type ExperimentVariant = {
+  label: string;
+  title: string;
+  thumbnailConcept: string;
+  captionPreset: string;
+  notes: string;
+  metrics: AnalyticsMetrics;
+};
+
+export type Experiment = {
+  id: string;
+  profileId: string;
+  name: string;
+  hypothesis: string;
+  platform: PlatformTarget | null;
+  scriptId: string | null;
+  projectId: string | null;
+  variantA: ExperimentVariant;
+  variantB: ExperimentVariant;
+  winnerLabel: string | null;
+  status: ExperimentStatus;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ExperimentInput = {
+  name: string;
+  hypothesis?: string;
+  platform?: PlatformTarget | null;
+  scriptId?: string | null;
+  projectId?: string | null;
+  variantA: ExperimentVariant;
+  variantB: ExperimentVariant;
+  winnerLabel?: string | null;
+  status?: ExperimentStatus;
+  notes?: string;
 };
 
 export type PackagingGenerationInput = {
