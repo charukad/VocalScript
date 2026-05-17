@@ -58,6 +58,7 @@ import {
   uploadProjectAsset,
 } from '../lib/api/client';
 import { clampKeyframeTime, getClipPropertyValue, getKeyframedValue } from '../lib/utils/keyframes';
+import { getShortDraftCandidates } from '../lib/utils/editorInsights';
 
 const DEFAULT_TEXT_DATA: TextData = {
   content: 'Text Here',
@@ -138,6 +139,11 @@ const DEFAULT_AUDIO_DATA: NonNullable<TimelineClip['audio']> = {
   fadeOut: 0,
   fadeInCurve: 'linear',
   fadeOutCurve: 'linear',
+  eqPreset: 'flat',
+  voiceEnhancement: false,
+  noiseReduction: 0,
+  duckingRole: 'none',
+  autoDucking: true,
 };
 
 const DEFAULT_STORYBOARD_SETTINGS: StoryboardSettings = {
@@ -497,6 +503,9 @@ export type EditorState = {
   addMarkers: (markers: Array<Pick<TimelineMarker, 'time' | 'label' | 'color'>>) => void;
   createBeatMarkersFromClip: (id: string) => number;
   splitSelectedClipAtCaptionBoundaries: () => number;
+  buildTranscriptRoughCut: () => number;
+  appendBestShortDraft: (targetDurationSeconds?: number) => number;
+  alignSelectedClipSpeechToPlayhead: () => boolean;
   updateMarker: (id: string, updates: Partial<Pick<TimelineMarker, 'time' | 'label' | 'color'>>) => void;
   removeMarker: (id: string) => void;
   undo: () => void;
@@ -3022,6 +3031,108 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       selectedClipIds: segments[0]?.id ? [segments[0].id] : state.selectedClipIds,
     });
     return Math.max(0, segments.length - 1);
+  },
+
+  buildTranscriptRoughCut: () => {
+    const state = get();
+    const clip = state.selectedClipId
+      ? state.clips.find(item => item.id === state.selectedClipId)
+      : null;
+    if (!clip || state.captions.length === 0 || isTrackLocked(state.tracks, clip.trackId)) return 0;
+
+    const clipSourceStart = clip.mediaOffset || 0;
+    const clipSourceEnd = clipSourceStart + clip.duration;
+    const speechRanges = state.captions
+      .filter(caption => caption.text.trim())
+      .map(caption => ({
+        start: Math.max(clipSourceStart, caption.start),
+        end: Math.min(clipSourceEnd, caption.end),
+      }))
+      .filter(range => range.end > range.start)
+      .sort((a, b) => a.start - b.start)
+      .reduce<Array<{ start: number; end: number }>>((ranges, range) => {
+        const previous = ranges[ranges.length - 1];
+        if (previous && range.start - previous.end <= 0.35) {
+          previous.end = Math.max(previous.end, range.end);
+          return ranges;
+        }
+        ranges.push({ ...range });
+        return ranges;
+      }, []);
+
+    if (speechRanges.length === 0) return 0;
+
+    let cursor = clip.startTime;
+    const segments = speechRanges.map((range, index) => {
+      const duration = Math.max(0.1, range.end - range.start);
+      const segment = {
+        ...clip,
+        id: index === 0 ? clip.id : makeId(),
+        startTime: cursor,
+        duration,
+        mediaOffset: range.start,
+        keyframes: undefined,
+      };
+      cursor += duration;
+      return segment;
+    });
+
+    set({
+      ...withHistory(state),
+      clips: state.clips.flatMap(item => item.id === clip.id ? segments : [item]),
+      selectedClipId: segments[0]?.id ?? state.selectedClipId,
+      selectedClipIds: segments[0]?.id ? [segments[0].id] : state.selectedClipIds,
+    });
+    return segments.length;
+  },
+
+  appendBestShortDraft: (targetDurationSeconds = 45) => {
+    const state = get();
+    const clip = state.selectedClipId
+      ? state.clips.find(item => item.id === state.selectedClipId)
+      : null;
+    if (!clip || state.captions.length === 0 || isTrackLocked(state.tracks, clip.trackId)) return 0;
+
+    const candidates = getShortDraftCandidates(state.captions, targetDurationSeconds);
+    const best = candidates[0];
+    if (!best) return 0;
+
+    const newClip = cloneClips([clip])[0];
+    newClip.id = makeId();
+    newClip.startTime = Math.max(...state.clips.map(item => item.startTime + item.duration), 0) + 1;
+    newClip.mediaOffset = best.start;
+    newClip.duration = Math.max(0.1, best.end - best.start);
+    newClip.keyframes = undefined;
+
+    set({
+      ...withHistory(state),
+      clips: [...state.clips, newClip],
+      selectedClipId: newClip.id,
+      selectedClipIds: [newClip.id],
+      exportSettings: { ...state.exportSettings, aspectRatio: '9:16' },
+    });
+    return 1;
+  },
+
+  alignSelectedClipSpeechToPlayhead: () => {
+    const state = get();
+    const clip = state.selectedClipId
+      ? state.clips.find(item => item.id === state.selectedClipId)
+      : null;
+    if (!clip || state.captions.length === 0 || isTrackLocked(state.tracks, clip.trackId)) return false;
+
+    const firstCaption = [...state.captions]
+      .filter(caption => caption.text.trim() && caption.end > (clip.mediaOffset || 0))
+      .sort((a, b) => a.start - b.start)[0];
+    if (!firstCaption) return false;
+
+    const sourceOffsetWithinClip = Math.max(0, firstCaption.start - (clip.mediaOffset || 0));
+    const nextStart = Math.max(0, state.playheadTime - sourceOffsetWithinClip);
+    set({
+      ...withHistory(state),
+      clips: state.clips.map(item => item.id === clip.id ? { ...item, startTime: nextStart } : item),
+    });
+    return true;
   },
 
   updateMarker: (id, updates) => {

@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import type { KeyframeEasing, KeyframeProperty } from '../../types';
-import { buildTranscriptInsights, transcriptInsightsToMarkers } from '../../lib/utils/editorInsights';
+import {
+  buildBrollSuggestions,
+  buildTranscriptInsights,
+  getShortDraftCandidates,
+  transcriptInsightsToMarkers,
+} from '../../lib/utils/editorInsights';
 import { StatusState } from '../ui/StatusState';
 
 type KeyframeMeta = {
@@ -207,6 +212,10 @@ export const Inspector = () => {
     addMarkers,
     createBeatMarkersFromClip,
     splitSelectedClipAtCaptionBoundaries,
+    buildTranscriptRoughCut,
+    appendBestShortDraft,
+    alignSelectedClipSpeechToPlayhead,
+    setExportSettings,
   } = useEditorStore();
   const [activeTab, setActiveTab] = useState<InspectorTab>('basic');
   const [audioStatus, setAudioStatus] = useState<string | null>(null);
@@ -250,6 +259,8 @@ export const Inspector = () => {
     return Math.max(max, end);
   }, 0);
   const transcriptInsights = buildTranscriptInsights(captions, totalSequenceDuration);
+  const brollSuggestions = buildBrollSuggestions(captions);
+  const shortCandidates = getShortDraftCandidates(captions, 45);
 
   return (
     <div className="panel properties-panel">
@@ -962,6 +973,67 @@ export const Inspector = () => {
               </select>
             </div>
 
+            <div className="inspector-section-title" style={{ marginTop: '1rem' }}>Processing</div>
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.9rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>EQ Preset</div>
+                <select
+                  value={selectedClip.audio?.eqPreset ?? 'flat'}
+                  onChange={event => updateClipAudio(selectedClip.id, { eqPreset: event.target.value as NonNullable<typeof selectedClip.audio>['eqPreset'] })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                >
+                  <option value="flat">Flat</option>
+                  <option value="voice">Voice</option>
+                  <option value="music">Music</option>
+                  <option value="bass_boost">Bass Boost</option>
+                  <option value="bright">Bright</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Noise Reduction</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={selectedClip.audio?.noiseReduction ?? 0}
+                  onChange={event => updateClipAudio(selectedClip.id, { noiseReduction: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+            </div>
+            <div className="toggle-row-grid" style={{ marginBottom: '0.9rem' }}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selectedClip.audio?.voiceEnhancement ?? false}
+                  onChange={event => updateClipAudio(selectedClip.id, { voiceEnhancement: event.target.checked })}
+                />
+                Voice enhance
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selectedClip.audio?.autoDucking ?? true}
+                  onChange={event => updateClipAudio(selectedClip.id, { autoDucking: event.target.checked })}
+                />
+                Auto duck
+              </label>
+            </div>
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.9rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Mix Role</div>
+                <select
+                  value={selectedClip.audio?.duckingRole ?? 'none'}
+                  onChange={event => updateClipAudio(selectedClip.id, { duckingRole: event.target.value as NonNullable<typeof selectedClip.audio>['duckingRole'] })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                >
+                  <option value="none">None</option>
+                  <option value="narration">Narration</option>
+                  <option value="bed">Music Bed</option>
+                </select>
+              </div>
+            </div>
+
             {selectedClip.type === 'audio' && (
               <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
                 <button
@@ -983,7 +1055,19 @@ export const Inspector = () => {
             <button
               className="btn-secondary"
               style={{ width: '100%', fontSize: '0.7rem' }}
-              onClick={() => updateClipAudio(selectedClip.id, { volume: 100, mute: false, fadeIn: 0, fadeOut: 0, fadeInCurve: 'linear', fadeOutCurve: 'linear' })}
+              onClick={() => updateClipAudio(selectedClip.id, {
+                volume: 100,
+                mute: false,
+                fadeIn: 0,
+                fadeOut: 0,
+                fadeInCurve: 'linear',
+                fadeOutCurve: 'linear',
+                eqPreset: 'flat',
+                voiceEnhancement: false,
+                noiseReduction: 0,
+                duckingRole: 'none',
+                autoDucking: true,
+              })}
             >
               Reset Audio
             </button>
@@ -1475,6 +1559,30 @@ export const Inspector = () => {
               >
                 Split At Captions
               </button>
+              <button
+                className="btn-secondary"
+                disabled={!selectedClip || captions.length === 0}
+                onClick={() => {
+                  const count = buildTranscriptRoughCut();
+                  setAssistStatus(count > 0
+                    ? `Built a rough cut with ${count} speech segment${count === 1 ? '' : 's'}.`
+                    : 'No usable transcript ranges found for the selected clip.');
+                }}
+              >
+                Build Rough Cut
+              </button>
+              <button
+                className="btn-secondary"
+                disabled={!selectedClip || captions.length === 0}
+                onClick={() => {
+                  const aligned = alignSelectedClipSpeechToPlayhead();
+                  setAssistStatus(aligned
+                    ? 'Aligned the selected clip so its first spoken word lands on the playhead.'
+                    : 'No spoken caption is available to align.');
+                }}
+              >
+                Align First Word
+              </button>
             </div>
             {assistStatus && <div className="inspector-helper-text">{assistStatus}</div>}
 
@@ -1490,6 +1598,81 @@ export const Inspector = () => {
                     </div>
                     <p>{insight.detail}</p>
                     <button className="btn-secondary" onClick={() => setPlayheadTime(insight.time)}>
+                      Jump
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="inspector-section-title" style={{ marginTop: '1rem' }}>B-roll Suggestions</div>
+            <div className="assist-actions">
+              <button
+                className="btn-secondary"
+                disabled={brollSuggestions.length === 0}
+                onClick={() => {
+                  addMarkers(transcriptInsightsToMarkers(brollSuggestions));
+                  setAssistStatus(brollSuggestions.length > 0
+                    ? `Added ${brollSuggestions.length} B-roll marker${brollSuggestions.length === 1 ? '' : 's'}.`
+                    : 'No B-roll suggestions found.');
+                }}
+              >
+                Add B-roll Markers
+              </button>
+            </div>
+            {brollSuggestions.length === 0 ? (
+              <div className="inspector-tab-empty">Longer spoken beats will surface B-roll suggestions here.</div>
+            ) : (
+              <div className="assist-insight-list">
+                {brollSuggestions.slice(0, 4).map(insight => (
+                  <div key={insight.id} className={`assist-insight kind-${insight.kind}`}>
+                    <div>
+                      <strong>{insight.title}</strong>
+                      <span>{formatDuration(insight.time)}</span>
+                    </div>
+                    <p>{insight.detail}</p>
+                    <button className="btn-secondary" onClick={() => setPlayheadTime(insight.time)}>
+                      Jump
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="inspector-section-title" style={{ marginTop: '1rem' }}>Short-form Variants</div>
+            <div className="assist-actions">
+              <button
+                className="btn-secondary"
+                disabled={!selectedClip || shortCandidates.length === 0}
+                onClick={() => {
+                  const count = appendBestShortDraft(45);
+                  setAssistStatus(count > 0
+                    ? 'Appended the strongest 45-second short candidate and switched export to 9:16.'
+                    : 'No short candidate could be built from the transcript.');
+                }}
+              >
+                Append Best Short
+              </button>
+              <button className="btn-secondary" onClick={() => setExportSettings({ aspectRatio: '9:16' })}>
+                9:16
+              </button>
+              <button className="btn-secondary" onClick={() => setExportSettings({ aspectRatio: '1:1' })}>
+                1:1
+              </button>
+              <button className="btn-secondary" onClick={() => setExportSettings({ aspectRatio: '16:9' })}>
+                16:9
+              </button>
+            </div>
+            {shortCandidates.length > 0 && (
+              <div className="assist-insight-list">
+                {shortCandidates.slice(0, 3).map(candidate => (
+                  <div key={candidate.id} className="assist-insight kind-hook">
+                    <div>
+                      <strong>{candidate.title || 'Short candidate'}</strong>
+                      <span>{candidate.duration.toFixed(1)}s</span>
+                    </div>
+                    <p>{candidate.hook}</p>
+                    <button className="btn-secondary" onClick={() => setPlayheadTime(candidate.start)}>
                       Jump
                     </button>
                   </div>

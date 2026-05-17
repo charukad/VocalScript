@@ -454,6 +454,11 @@ type ClipBlueprint = {
     fadeOut: number;
     fadeInCurve?: 'linear' | 'ease_in' | 'ease_out' | 'smooth';
     fadeOutCurve?: 'linear' | 'ease_in' | 'ease_out' | 'smooth';
+    eqPreset?: 'flat' | 'voice' | 'music' | 'bass_boost' | 'bright';
+    voiceEnhancement?: boolean;
+    noiseReduction?: number;
+    duckingRole?: 'none' | 'narration' | 'bed';
+    autoDucking?: boolean;
   };
   text?: {
     content: string;
@@ -547,7 +552,19 @@ export const exportTimeline = async (
           stabilization: false,
           backgroundRemoval: false,
         },
-        audio: c.audio || { volume: 100, mute: false, fadeIn: 0, fadeOut: 0, fadeInCurve: 'linear', fadeOutCurve: 'linear' },
+        audio: c.audio || {
+          volume: 100,
+          mute: false,
+          fadeIn: 0,
+          fadeOut: 0,
+          fadeInCurve: 'linear',
+          fadeOutCurve: 'linear',
+          eqPreset: 'flat',
+          voiceEnhancement: false,
+          noiseReduction: 0,
+          duckingRole: 'none',
+          autoDucking: true,
+        },
         text: c.textData || null
       }))
   }));

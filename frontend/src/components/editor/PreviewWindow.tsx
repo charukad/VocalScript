@@ -159,6 +159,9 @@ export const PreviewWindow = () => {
     if (isNaN(end) || !isFinite(end)) return max;
     return Math.max(max, end);
   }, 0);
+  const narrationRanges = clips
+    .filter(clip => clip.audio?.duckingRole === 'narration' && isTrackActive(clip.trackId))
+    .map(clip => ({ start: clip.startTime, end: clip.startTime + clip.duration }));
 
   const getMediaTime = (clip: TimelineClip, timelineTime: number): number => {
     const relative = Math.max(0, timelineTime - clip.startTime);
@@ -223,6 +226,13 @@ export const PreviewWindow = () => {
                   envMultiplier,
                   Math.max(0, applyFadeCurve(fadeOutProgress, clip.audio?.fadeOutCurve)),
                 );
+              }
+              if (
+                clip.audio?.duckingRole === 'bed'
+                && (clip.audio.autoDucking ?? true)
+                && narrationRanges.some(range => currentPlayhead >= range.start && currentPlayhead <= range.end)
+              ) {
+                envMultiplier *= 0.42;
               }
               const targetVol = Math.max(0, Math.min(1, baseVol * envMultiplier));
               if (Math.abs(mediaEl.volume - targetVol) > 0.005) mediaEl.volume = targetVol;

@@ -211,6 +211,12 @@ class FFmpegMediaCompiler(IMediaCompiler):
 
         # ─── Audio Processing ──────────────────────────────────────────────
         audio_outs = []
+        narration_ranges = [
+            (clip.start_time, clip.start_time + clip.duration)
+            for track in blueprint.tracks
+            for clip in track.clips
+            if clip.audio.duckingRole == "narration"
+        ]
 
         def process_audio_clip(clip, node_prefix: str, in_idx: int) -> None:
             """Extract, volume-adjust, fade, and delay an audio clip into audio_outs."""
@@ -222,10 +228,28 @@ class FFmpegMediaCompiler(IMediaCompiler):
                 "smooth": "hsin",
             }
 
-            filter_complex.append(
-                f"[{in_idx}:a]atrim=start={clip.in_point}:duration={clip.duration},"
-                f"asetpts=PTS-STARTPTS,volume={effective_volume:.3f}[{node_prefix}_v]"
-            )
+            processing_filters = [
+                f"atrim=start={clip.in_point}:duration={clip.duration}",
+                "asetpts=PTS-STARTPTS",
+            ]
+            if clip.audio.eqPreset == "voice":
+                processing_filters.extend(["highpass=f=80", "lowpass=f=12000", "equalizer=f=3500:t=q:w=1:g=2"])
+            elif clip.audio.eqPreset == "bass_boost":
+                processing_filters.append("bass=g=5")
+            elif clip.audio.eqPreset == "bright":
+                processing_filters.append("treble=g=4")
+            elif clip.audio.eqPreset == "music":
+                processing_filters.append("dynaudnorm=f=150:g=7")
+            if clip.audio.noiseReduction > 0:
+                noise_floor = max(-80.0, min(-10.0, -15.0 - clip.audio.noiseReduction * 0.45))
+                processing_filters.append(f"afftdn=nf={noise_floor:.1f}")
+            if clip.audio.voiceEnhancement:
+                processing_filters.extend([
+                    "acompressor=threshold=0.12:ratio=3:attack=20:release=250",
+                    "loudnorm=I=-16:LRA=11:TP=-1.5",
+                ])
+            processing_filters.append(f"volume={effective_volume:.3f}")
+            filter_complex.append(f"[{in_idx}:a]{','.join(processing_filters)}[{node_prefix}_v]")
             fade_node = f"{node_prefix}_v"
             if clip.audio.fadeIn > 0:
                 fade_in_curve = curve_map.get(clip.audio.fadeInCurve, "tri")
@@ -244,7 +268,17 @@ class FFmpegMediaCompiler(IMediaCompiler):
             filter_complex.append(
                 f"[{fade_node}]adelay={delay_ms}|{delay_ms}[{node_prefix}_out]"
             )
-            audio_outs.append(f"[{node_prefix}_out]")
+            output_node = f"{node_prefix}_out"
+            if clip.audio.duckingRole == "bed" and clip.audio.autoDucking and narration_ranges:
+                overlap_expr = "+".join(
+                    f"between(t,{start:.3f},{end:.3f})"
+                    for start, end in narration_ranges
+                )
+                filter_complex.append(
+                    f"[{output_node}]volume='if(gt({overlap_expr},0),0.42,1)'[{node_prefix}_duck]"
+                )
+                output_node = f"{node_prefix}_duck"
+            audio_outs.append(f"[{output_node}]")
 
         # 1a. Explicit audio-track clips
         for track in blueprint.tracks:

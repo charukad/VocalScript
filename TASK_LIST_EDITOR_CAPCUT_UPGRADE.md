@@ -31,7 +31,7 @@ Upgrade the editor into a modern creator workspace with CapCut-like editing dept
 - `[/]` Phase 4: Motion, Keyframes, And Speed Tools
 - `[/]` Phase 5: Text, Captions, And Titles
 - `[/]` Phase 6: Effects, Color, And Compositing
-- `[/]` Phase 7: Audio System Upgrade
+- `[x]` Phase 7: Audio System Upgrade
 - `[/]` Phase 8: AI-Assisted Editing
 - `[ ]` Phase 9: Templates, Assets, Export, And Reliability
 - `[ ]` Phase 10: Collaboration And Advanced Workflow
@@ -232,35 +232,35 @@ Upgrade the editor into a modern creator workspace with CapCut-like editing dept
 
 - `[x]` Add visible audio waveforms.
 - `[x]` Add fade-curve types.
-- `[ ]` Add EQ presets.
-- `[ ]` Add voice enhancement.
-- `[ ]` Add noise reduction.
-- `[ ]` Add automatic ducking beneath narration.
-- `[ ]` Add silence detection/removal.
-- `[/]` Add beat detection and beat markers.
-- `[ ]` Add audio/video auto-sync helpers.
+- `[x]` Add EQ presets.
+- `[x]` Add voice enhancement.
+- `[x]` Add noise reduction.
+- `[x]` Add automatic ducking beneath narration.
+- `[x]` Add silence detection/removal.
+- `[x]` Add beat detection and beat markers.
+- `[x]` Add audio/video auto-sync helpers.
 
 ### Acceptance Checks
 
-- `[/]` Users can mix narration, music, and SFX inside the editor.
-- `[/]` Audio automation does not damage existing manual control.
+- `[x]` Users can mix narration, music, and SFX inside the editor.
+- `[x]` Audio automation does not damage existing manual control.
 
 ## Phase 8: AI-Assisted Editing
 
 - `[x]` Add transcript-based editing commands.
 - `[x]` Add filler-word removal suggestions.
 - `[x]` Add silence-removal suggestions.
-- `[ ]` Add AI rough-cut workflow.
-- `[ ]` Add long-video-to-shorts timeline builder.
-- `[ ]` Add automatic B-roll placement suggestions.
+- `[x]` Add AI rough-cut workflow.
+- `[x]` Add long-video-to-shorts timeline builder.
+- `[x]` Add automatic B-roll placement suggestions.
 - `[x]` Add retention-risk markers on the timeline.
 - `[x]` Add hook-strength feedback for the opening seconds.
-- `[ ]` Add one-click multi-platform variants.
-- `[ ]` Add smart reframing / subject tracking planning.
+- `[x]` Add one-click multi-platform variants.
+- `[!]` Add smart reframing / subject tracking planning. Requires a real visual-analysis layer to identify and follow subjects.
 
 ### Acceptance Checks
 
-- `[/]` AI creates useful reviewable edits without silently changing user work.
+- `[x]` AI creates useful reviewable edits without silently changing user work.
 - `[x]` Manual editing remains first-class.
 
 ## Phase 9: Templates, Assets, Export, And Reliability

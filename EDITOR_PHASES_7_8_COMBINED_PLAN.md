@@ -26,9 +26,10 @@ Merge the next two editor roadmap phases into one practical milestone:
 
 - Add EQ presets, voice enhancement, and noise reduction.
 - Add automatic ducking beneath narration.
-- Add stronger beat analysis and audio/video sync helpers.
-- Add filler removal workflows, silence removal proposals, rough-cut generation, B-roll suggestions, and short-form reframing workflows.
-- Add one-click multi-platform variants and deeper subject-tracking planning.
+- Add stronger beat analysis and practical sync helpers.
+- Add transcript-driven rough-cut generation, B-roll suggestions, and short-form draft creation.
+- Add one-click multi-platform export variants.
+- Defer deeper subject-tracking planning until a real subject-analysis layer exists.
 
 ## Execution Order
 
@@ -61,15 +62,15 @@ Merge the next two editor roadmap phases into one practical milestone:
 
 ## Explicitly Deferred
 
-- EQ presets, voice cleanup, noise reduction, and automatic ducking.
-- Production-grade beat detection and audio/video sync.
-- Automatic silence removal, filler removal, rough cuts, B-roll placement, reframing, and multi-platform variants.
+- Production-grade beat detection and waveform matching.
+- True subject tracking / smart reframing based on visual analysis.
 
-Those remain Phase 7 + 8 work, but Wave 1 turns already-available timeline and transcript data into useful editor actions now.
+The current implementation now covers practical creator-facing audio cleanup, transcript-driven rough cuts, short drafts, B-roll markers, and multi-platform output presets. The remaining deferred work depends on deeper media-analysis infrastructure rather than missing UI.
 
 ## Execution Status
 
 - `[x]` Wave 1 fade curves, beat-candidate markers, transcript assist, review markers, and caption-boundary split command implemented.
+- `[x]` Wave 2 EQ presets, voice enhancement, noise reduction, auto ducking, rough cut, B-roll suggestions, short draft append, and output variant actions implemented.
 - `[x]` Browser verification completed against project `v4`.
 - `[x]` Frontend build and backend module compilation completed.
-- `[ ]` Wave 2 not started.
+- `[!]` Subject-tracking-based reframing remains blocked on a visual-analysis layer.

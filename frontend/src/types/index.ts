@@ -41,6 +41,8 @@ export type TimelineMarker = {
 };
 
 export type AudioFadeCurve = 'linear' | 'ease_in' | 'ease_out' | 'smooth';
+export type AudioEqPreset = 'flat' | 'voice' | 'music' | 'bass_boost' | 'bright';
+export type AudioDuckingRole = 'none' | 'narration' | 'bed';
 
 export type TextData = {
   content: string;
@@ -158,6 +160,11 @@ export type TimelineClip = {
     fadeOut: number;
     fadeInCurve?: AudioFadeCurve;
     fadeOutCurve?: AudioFadeCurve;
+    eqPreset?: AudioEqPreset;
+    voiceEnhancement?: boolean;
+    noiseReduction?: number;
+    duckingRole?: AudioDuckingRole;
+    autoDucking?: boolean;
   };
   textData?: TextData;
   keyframes?: Keyframe[];

@@ -3022,6 +3022,10 @@
   border-left-color: #5b8def;
 }
 
+.assist-insight.kind-broll {
+  border-left-color: #bf8cff;
+}
+
 .assist-insight div {
   display: flex;
   align-items: center;

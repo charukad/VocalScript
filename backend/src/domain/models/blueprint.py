@@ -64,6 +64,11 @@ class AudioBlueprint(BaseModel):
     fadeOut: float = 0.0    # seconds
     fadeInCurve: Literal["linear", "ease_in", "ease_out", "smooth"] = "linear"
     fadeOutCurve: Literal["linear", "ease_in", "ease_out", "smooth"] = "linear"
+    eqPreset: Literal["flat", "voice", "music", "bass_boost", "bright"] = "flat"
+    voiceEnhancement: bool = False
+    noiseReduction: float = 0.0
+    duckingRole: Literal["none", "narration", "bed"] = "none"
+    autoDucking: bool = True
 
 class TextBlueprint(BaseModel):
     content: str = "Text"
