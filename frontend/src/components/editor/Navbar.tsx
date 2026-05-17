@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
+import { Download, Film, FolderOpen, Save, Sparkles, UsersRound, Workflow } from 'lucide-react';
 import { useEditorStore } from '../../store/editorStore';
 import { useContentProfileStore } from '../../features/contentProfiles/contentProfileStore';
 import { PLATFORM_OPTIONS } from '../../features/contentProfiles/types';
+import { Button } from '../ui/Button';
 
 type NavbarProps = {
   onOpenBridgeMonitor?: () => void;
@@ -36,85 +38,91 @@ export const Navbar = ({ onOpenBridgeMonitor, onOpenContentProfiles }: NavbarPro
   }, [loadProfiles]);
 
   return (
-    <div className="navbar">
-      <div className="brand">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
-          <line x1="7" y1="2" x2="7" y2="22"></line>
-          <line x1="17" y1="2" x2="17" y2="22"></line>
-          <line x1="2" y1="12" x2="22" y2="12"></line>
-          <line x1="2" y1="7" x2="7" y2="7"></line>
-          <line x1="2" y1="17" x2="7" y2="17"></line>
-          <line x1="17" y1="17" x2="22" y2="17"></line>
-          <line x1="17" y1="7" x2="22" y2="7"></line>
-        </svg>
-        NeuralScribe Video Editor
-      </div>
-      <div className="project-bar">
-        <input
-          className="project-name-input"
-          value={projectName}
-          onChange={event => setProjectName(event.target.value)}
-          aria-label="Project name"
-        />
-        <select
-          className="project-meta-select"
-          value={projectContentProfileId ?? ''}
-          onChange={event => setProjectContentProfileId(event.target.value || null)}
-          aria-label="Content profile"
-        >
-          <option value="">No profile</option>
-          {profiles.map(profile => (
-            <option key={profile.id} value={profile.id}>{profile.name}</option>
-          ))}
-        </select>
-        <select
-          className="project-meta-select"
-          value={projectTargetPlatform ?? ''}
-          onChange={event => setProjectTargetPlatform((event.target.value || null) as typeof projectTargetPlatform)}
-          aria-label="Target platform"
-        >
-          <option value="">No platform</option>
-          {PLATFORM_OPTIONS.map(option => (
-            <option key={option.value} value={option.value}>{option.label}</option>
-          ))}
-        </select>
-        <button className="btn-secondary" onClick={() => void saveProject()} disabled={isSavingProject}>
-          {isSavingProject ? 'Saving...' : 'Save Project'}
-        </button>
-        <button className="btn-secondary" onClick={newProject}>
-          New
-        </button>
-        <span
-          className="project-folder"
-          title={currentProject?.generatedMediaPath || projectStatus || 'Save the project to create a media folder'}
-        >
-          {currentProject ? currentProject.generatedMediaPath : 'No project folder yet'}
+    <header className="navbar topbar">
+      <div className="topbar-brand">
+        <span className="brand-mark">
+          <Film size={18} strokeWidth={2.2} />
         </span>
+        <div>
+          <strong>NeuralScribe</strong>
+          <span>Editor</span>
+        </div>
       </div>
-      <div className="nav-actions">
-        <button className="btn-secondary" onClick={() => window.open('/#content-studio', '_blank', 'noopener,noreferrer')}>
-          Content Studio
-        </button>
-        <button className="btn-secondary" onClick={onOpenContentProfiles}>
-          Content Profiles
-        </button>
-        <button className="btn-secondary" onClick={onOpenBridgeMonitor}>
-          Bridge Monitor
-        </button>
+      <div className="topbar-project">
+        <div className="topbar-project-main">
+          <input
+            className="project-name-input"
+            value={projectName}
+            onChange={event => setProjectName(event.target.value)}
+            aria-label="Project name"
+          />
+          <select
+            className="project-meta-select"
+            value={projectContentProfileId ?? ''}
+            onChange={event => setProjectContentProfileId(event.target.value || null)}
+            aria-label="Content profile"
+          >
+            <option value="">No profile</option>
+            {profiles.map(profile => (
+              <option key={profile.id} value={profile.id}>{profile.name}</option>
+            ))}
+          </select>
+          <select
+            className="project-meta-select"
+            value={projectTargetPlatform ?? ''}
+            onChange={event => setProjectTargetPlatform((event.target.value || null) as typeof projectTargetPlatform)}
+            aria-label="Target platform"
+          >
+            <option value="">No platform</option>
+            {PLATFORM_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="topbar-project-meta">
+          <span className={`save-pill ${isSavingProject ? 'saving' : ''}`}>
+            <Save size={12} />
+            {isSavingProject ? 'Saving' : 'Ready'}
+          </span>
+          <span
+            className="project-folder"
+            title={currentProject?.generatedMediaPath || projectStatus || 'Save the project to create a media folder'}
+          >
+            <FolderOpen size={12} />
+            {currentProject ? currentProject.generatedMediaPath : 'No project folder yet'}
+          </span>
+        </div>
+      </div>
+      <div className="nav-actions topbar-actions">
+        <Button variant="ghost" leadingIcon={<Sparkles size={15} />} onClick={() => window.open('/#content-studio', '_blank', 'noopener,noreferrer')}>
+          Studio
+        </Button>
+        <Button variant="ghost" leadingIcon={<UsersRound size={15} />} onClick={onOpenContentProfiles}>
+          Profiles
+        </Button>
+        <Button variant="ghost" leadingIcon={<Workflow size={15} />} onClick={onOpenBridgeMonitor}>
+          Bridge
+        </Button>
         {mediaUrl && (
-          <a href={mediaUrl} download={exportedAudioOnly || !visualAsset ? "export.mp3" : "export.mp4"} className="btn-secondary" style={{textDecoration: 'none'}}>
-            Download {exportedAudioOnly || !visualAsset ? "Audio" : "Video"}
+          <a href={mediaUrl} download={exportedAudioOnly || !visualAsset ? "export.mp3" : "export.mp4"} className="ui-button ui-button-ghost topbar-link-button">
+            <Download size={15} />
+            {exportedAudioOnly || !visualAsset ? "Audio" : "Video"}
           </a>
         )}
-        <button 
-          className="btn-primary" 
+        <Button
+          variant="primary"
           onClick={openExportModal} 
           disabled={clips.length === 0 || isProcessing}
         >
           {isProcessing ? 'Processing...' : 'Export & Transcribe'}
-        </button>
+        </Button>
+        <Button variant="secondary" onClick={() => void saveProject()} disabled={isSavingProject}>
+          Save
+        </Button>
+        <Button variant="secondary" onClick={newProject}>
+          New
+        </Button>
       </div>
-    </div>
+    </header>
   );
 };

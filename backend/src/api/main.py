@@ -19,10 +19,15 @@ from backend.src.domain.services.browser_bridge_service import BrowserBridgeServ
 from backend.src.domain.services.content_profile_service import ContentProfileService
 from backend.src.domain.services.content_calendar_service import ContentCalendarService
 from backend.src.domain.services.brand_kit_service import BrandKitService
+from backend.src.domain.services.character_consistency_service import CharacterConsistencyService
 from backend.src.domain.services.caption_design_service import CaptionDesignService
+from backend.src.domain.services.comment_analysis_service import CommentAnalysisService
 from backend.src.domain.services.content_studio_service import ContentStudioService
 from backend.src.domain.services.competitor_service import CompetitorService
 from backend.src.domain.services.packaging_service import PackagingService
+from backend.src.domain.services.publishing_service import PublishingService
+from backend.src.domain.services.repurposing_service import RepurposingService
+from backend.src.domain.services.trend_radar_service import TrendRadarService
 from backend.src.domain.services.animation_planner_service import AnimationPlannerService
 from backend.src.domain.services.analytics_service import AnalyticsService
 from backend.src.domain.services.ab_testing_service import ABTestingService
@@ -41,11 +46,16 @@ from backend.src.api.browser_bridge import build_browser_bridge_router
 from backend.src.api.content_profiles import build_content_profiles_router
 from backend.src.api.content_calendar import build_content_calendar_router
 from backend.src.api.brand_kits import build_brand_kits_router
+from backend.src.api.characters import build_characters_router
 from backend.src.api.caption_design import build_caption_design_router
+from backend.src.api.comments import build_comments_router
 from backend.src.api.content_studio import build_content_studio_router
 from backend.src.api.competitors import build_competitors_router
 from backend.src.api.packaging import build_packaging_router
+from backend.src.api.publishing import build_publishing_router
+from backend.src.api.repurposing import build_repurposing_router
 from backend.src.api.prompt_library import build_prompt_library_router
+from backend.src.api.trend_radar import build_trend_radar_router
 from backend.src.api.generation import build_generation_router
 from backend.src.api.projects import build_projects_router
 from backend.src.api.viral import build_viral_router
@@ -78,12 +88,17 @@ project_service = ProjectService(settings.projects.projects_dir, store=sqlite_st
 content_profile_service = ContentProfileService(sqlite_store)
 content_calendar_service = ContentCalendarService(sqlite_store)
 brand_kit_service = BrandKitService(sqlite_store)
+character_consistency_service = CharacterConsistencyService(sqlite_store)
 caption_design_service = CaptionDesignService()
+comment_analysis_service = CommentAnalysisService(sqlite_store)
 prompt_library_service = PromptLibraryService(sqlite_store)
 content_studio_service = ContentStudioService(sqlite_store)
 competitor_service = CompetitorService(sqlite_store)
+trend_radar_service = TrendRadarService(content_studio_service)
 viral_scoring_service = ViralScoringService(local_llm_service)
 packaging_service = PackagingService(local_llm_service, viral_scoring_service)
+publishing_service = PublishingService(sqlite_store)
+repurposing_service = RepurposingService()
 timeline_builder_service = TimelineBuilderService()
 analytics_service = AnalyticsService(sqlite_store, content_profile_service)
 ab_testing_service = ABTestingService(sqlite_store)
@@ -113,7 +128,9 @@ app.include_router(build_projects_router(project_service))
 app.include_router(build_content_profiles_router(content_profile_service))
 app.include_router(build_content_calendar_router(content_profile_service, content_calendar_service))
 app.include_router(build_brand_kits_router(content_profile_service, brand_kit_service))
+app.include_router(build_characters_router(content_profile_service, character_consistency_service))
 app.include_router(build_caption_design_router(content_profile_service, brand_kit_service, caption_design_service))
+app.include_router(build_comments_router(content_profile_service, comment_analysis_service))
 app.include_router(build_prompt_library_router(content_profile_service, prompt_library_service))
 app.include_router(build_content_studio_router(
     content_profile_service,
@@ -122,7 +139,10 @@ app.include_router(build_content_studio_router(
     timeline_builder_service,
 ))
 app.include_router(build_competitors_router(content_profile_service, competitor_service))
+app.include_router(build_trend_radar_router(content_profile_service, trend_radar_service))
 app.include_router(build_packaging_router(content_profile_service, brand_kit_service, packaging_service))
+app.include_router(build_publishing_router(content_profile_service, brand_kit_service, publishing_service))
+app.include_router(build_repurposing_router(content_profile_service, repurposing_service))
 app.include_router(build_analytics_router(content_profile_service, analytics_service))
 app.include_router(build_ab_testing_router(content_profile_service, ab_testing_service))
 app.include_router(build_viral_router(viral_scoring_service))

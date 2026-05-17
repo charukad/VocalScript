@@ -11,6 +11,7 @@ Phase 1 decisions:
 - Use `chrome/extensions/neuralscribe-bridge` as the correctly spelled folder path.
 - Start with Meta as the first provider adapter.
 - Add Grok after the bridge and Meta adapter are stable.
+- Add Google AI Studio as the narration/audio provider inside the active bridge.
 - Use local/free generation flow: local transcription, local/rule-based storyboarding, browser-based provider generation.
 
 Phase 5 MVP:
@@ -29,6 +30,14 @@ Phase 6 MVP:
 - Watch the page for generated media URLs.
 - Mark jobs as completed, failed, or manual-action-required.
 - Report completed media URLs to the backend queue.
+
+Google AI Studio narration path:
+
+- Claims `google_ai_studio` voice-generation jobs from the same queue contract.
+- Reuses or opens the configured AI Studio speech page.
+- Supports both full-script and line-by-line narration jobs.
+- Uploads captured generated audio back into NeuralScribe so narration lines and timeline import can sync locally.
+- Still needs live selector/audio validation in an authenticated AI Studio session before claiming real-world provider completion.
 
 Useful ideas from the existing extension folders:
 
@@ -84,9 +93,9 @@ Grok fallback stays disabled until a runnable Grok adapter is added to the exten
 
 ## Adapter Tests And Debugging
 
-`Health Check` runs a safe provider inspection. `Test Meta` performs a safe adapter test that checks prompt insertion and generate-button detection without submitting project prompts.
+`Health Check` runs a safe provider inspection. The adapter-test selector can test either Meta or Google AI Studio when that provider is enabled on the worker; the safe test checks prompt insertion and generate-button detection without submitting project prompts.
 
-`Full Test` requires user confirmation and submits the prompt shown in the worker card. Full test results are stored as adapter-test history, separate from project jobs.
+`Full Test` requires user confirmation and submits the prompt shown in the worker card. Meta full tests store generated visual variants, and Google AI Studio full tests store generated audio, as adapter-test history separate from project jobs.
 
 The `Live Provider Debug` panel shows recent provider steps using the queue filters above it. Job flight-recorder events are persisted in backend debug storage and can be downloaded from selected job details.
 
@@ -152,7 +161,7 @@ The bridge captures a baseline of existing provider media before each job and on
 
 Meta can change button labels and page structure. If generation suddenly starts failing:
 
-1. Run `Test Meta` from `Bridge Monitor`.
+1. Run the matching provider adapter test from `Bridge Monitor`.
 2. Check the selector diagnostics in the health result.
 3. Reload the extension after code updates.
 4. Update `providers/meta-content.js` selectors if the prompt box, generate button, result media, or Extend control names changed.

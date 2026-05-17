@@ -35,6 +35,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
+  if (message?.type === "provider.google_ai_studio.adapterTest") {
+    runGoogleAiStudioAdapterTest(message.options || {})
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message?.type !== "provider.google_ai_studio.runJob") return false;
   runGoogleAiStudioJob(message.job, message.options || {})
     .then((result) => sendResponse({ ok: true, result }))
@@ -119,7 +125,9 @@ async function runGoogleAiStudioJob(job, options = {}) {
     throw new Error("Timed out waiting for generated Google AI Studio audio.");
   }
 
-  const capture = await captureAudioResult(job, audio, options.httpBaseUrl);
+  const capture = await captureAudioResult(job, audio, options.httpBaseUrl, {
+    adapterTestId: options.adapterTestId || "",
+  });
   const mediaUrl = capture.mediaUrl;
   const localPath = capture.localPath;
   const durationSeconds = await readAudioDuration(audio.element);
@@ -145,6 +153,96 @@ async function runGoogleAiStudioJob(job, options = {}) {
       audioCandidateCountBefore: String(beforeCandidates.length),
       audioCandidateCountAfter: String(findAudioCandidates().length),
       ...(durationSeconds ? { durationSeconds: String(durationSeconds) } : {}),
+    },
+  };
+}
+
+async function runGoogleAiStudioAdapterTest(options = {}) {
+  const submitFullTest = Boolean(options.submitFullTest);
+  const testPrompt = String(
+    options.fullTestPrompt || "Read this sentence clearly for a NeuralScribe adapter test."
+  ).trim();
+  const base = await runGoogleAiStudioHealthCheck();
+  const promptBox = await waitForPromptBox(10000);
+  let promptInserted = false;
+  let generateButton = null;
+  let result = null;
+
+  if (promptBox) {
+    await fillPrompt(promptBox, testPrompt);
+    promptInserted = await waitForPromptText(promptBox, testPrompt, 4000);
+    generateButton = await waitForGenerateButton(6000);
+  }
+
+  if (submitFullTest) {
+    if (!promptBox || !promptInserted) {
+      throw new Error("Full Google AI Studio adapter test could not insert the prompt.");
+    }
+    if (!generateButton) {
+      throw new Error("Full Google AI Studio adapter test could not find an enabled generate button.");
+    }
+    result = await runGoogleAiStudioJob(
+      {
+        id: options.adapterTestId || `adapter-test-${Date.now()}`,
+        sceneId: "adapter-test",
+        projectId: "",
+        provider: "google_ai_studio",
+        mediaType: "audio",
+        prompt: testPrompt,
+        negativePrompt: "",
+        metadata: {
+          voiceMode: "adapter_test",
+          jobType: "adapter_test",
+        },
+      },
+      {
+        timeoutMs: 180000,
+        httpBaseUrl: options.httpBaseUrl,
+        adapterTestId: options.adapterTestId || "adapter-test",
+      }
+    );
+  } else if (promptBox) {
+    await fillPrompt(promptBox, "");
+  }
+
+  const status = base.health.manualActionRequired
+    ? base.health.status
+    : promptInserted && generateButton
+      ? "ready"
+      : base.health.status;
+  const message = submitFullTest
+    ? `Full Google AI Studio adapter test ${result?.mediaUrl ? "generated audio successfully" : "completed"}.`
+    : `Safe Google AI Studio adapter test ${promptInserted ? "inserted prompt" : "could not insert prompt"} and ${generateButton ? "found generate button" : "did not find generate button"}.`;
+  const adapterMetadata = {
+    ...base.health.metadata,
+    adapterTest: "true",
+    adapterTestId: options.adapterTestId || "",
+    submitFullTest: String(submitFullTest),
+    promptInserted: String(promptInserted),
+    generateButtonFound: String(Boolean(generateButton)),
+    adapterResultUrl: result?.mediaUrl || "",
+    adapterVariantCount: String(result?.mediaVariants?.length || 0),
+  };
+
+  return {
+    health: {
+      ...base.health,
+      status,
+      message,
+      canFindPrompt: Boolean(promptBox),
+      canFindGenerateButton: Boolean(generateButton),
+      canDetectMedia: base.health.canDetectMedia || Boolean(result?.mediaUrl),
+      metadata: adapterMetadata,
+    },
+    capability: {
+      ...base.capability,
+      canGenerateAudio: Boolean(promptBox) && !base.health.manualActionRequired,
+      metadata: {
+        ...base.capability.metadata,
+        adapterTest: "true",
+        promptInserted: String(promptInserted),
+        generateButtonFound: String(Boolean(generateButton)),
+      },
     },
   };
 }
@@ -184,6 +282,16 @@ async function waitForGenerateButton(timeoutMs) {
   return null;
 }
 
+async function waitForPromptText(element, expected, timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const value = "value" in element ? element.value : element.textContent;
+    if (String(value || "").trim() === expected.trim()) return true;
+    await sleep(200);
+  }
+  return false;
+}
+
 function findAudioCandidates() {
   const candidates = [];
   queryAll(GOOGLE_AI_STUDIO_SELECTORS.audio).forEach((element) => {
@@ -216,13 +324,16 @@ async function fillPrompt(element, value) {
   element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
 }
 
-async function captureAudioResult(job, audio, httpBaseUrl) {
+async function captureAudioResult(job, audio, httpBaseUrl, options = {}) {
   const audioUrlKind = classifyAudioUrl(audio.url);
   try {
-    const uploaded = await uploadAudioFromUrl(job, audio.url, httpBaseUrl, {
+    const metadata = {
       capturedVia: isLocalObjectUrl(audio.url) ? "content-script-blob-upload" : "content-script-fetch-upload",
       audioUrlKind,
-    });
+    };
+    const uploaded = options.adapterTestId
+      ? await uploadAdapterTestAudioFromUrl(options.adapterTestId, audio.url, httpBaseUrl)
+      : await uploadAudioFromUrl(job, audio.url, httpBaseUrl, metadata);
     return {
       mediaUrl: uploaded.resultUrl,
       localPath: uploaded.localPath || "",
@@ -240,6 +351,30 @@ async function captureAudioResult(job, audio, httpBaseUrl) {
       audioUrlKind,
     };
   }
+}
+
+async function uploadAdapterTestAudioFromUrl(testId, mediaUrl, httpBaseUrl) {
+  const response = await fetch(mediaUrl);
+  if (!response.ok) {
+    throw new Error("Captured Google AI Studio adapter audio, but could not read it.");
+  }
+  const blob = await response.blob();
+  const extension = blob.type.includes("wav") ? "wav" : "mp3";
+  const formData = new FormData();
+  formData.append("files", blob, `${testId}.${extension}`);
+  const baseUrl = String(httpBaseUrl || "http://127.0.0.1:8000").replace(/\/$/, "");
+  const uploadResponse = await fetch(`${baseUrl}/api/browser-bridge/adapter-tests/${encodeURIComponent(testId)}/media`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!uploadResponse.ok) {
+    throw new Error(`Adapter audio upload failed: ${await uploadResponse.text()}`);
+  }
+  const payload = await uploadResponse.json();
+  return {
+    resultUrl: payload.resultUrl,
+    localPath: "",
+  };
 }
 
 async function uploadAudioFromUrl(job, mediaUrl, httpBaseUrl, metadata = {}) {

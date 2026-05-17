@@ -1,7 +1,32 @@
+import { Captions, CopyPlus, Flag, Group, Ungroup, Trash2 } from 'lucide-react';
 import { useEditorStore } from '../../store/editorStore';
 
 export const TimelineToolbar = () => {
-  const { zoom, setZoom, isPlaying, togglePlayback, playheadTime, selectedClipId, splitClip, undo, redo, historyPast, historyFuture, snapEnabled, toggleSnap } = useEditorStore();
+  const {
+    zoom,
+    setZoom,
+    isPlaying,
+    togglePlayback,
+    playheadTime,
+    selectedClipId,
+    selectedClipIds,
+    splitClip,
+    duplicateClip,
+    rippleDeleteClip,
+    groupSelectedClips,
+    ungroupSelectedClips,
+    rippleTrimClip,
+    rollTrimClip,
+    slipClip,
+    slideClip,
+    addMarker,
+    undo,
+    redo,
+    historyPast,
+    historyFuture,
+    snapEnabled,
+    toggleSnap,
+  } = useEditorStore();
 
   const formatTime = (seconds: number): string => {
     const m = Math.floor(seconds / 60);
@@ -70,6 +95,65 @@ export const TimelineToolbar = () => {
           </svg>
           Split (⌘K)
         </button>
+        <button
+          className="btn-secondary toolbar-btn"
+          onClick={() => { if (selectedClipId) duplicateClip(selectedClipId); }}
+          disabled={!selectedClipId}
+          title="Duplicate Selected Clip (Cmd/Ctrl + D)"
+        >
+          <CopyPlus size={12} />
+          Duplicate
+        </button>
+        <button
+          className="btn-secondary toolbar-btn"
+          onClick={() => { if (selectedClipId) rippleDeleteClip(selectedClipId); }}
+          disabled={!selectedClipId}
+          title="Ripple Delete Selected Clip (Shift + Delete)"
+        >
+          <Trash2 size={12} />
+          Ripple Delete
+        </button>
+        <button
+          className="btn-secondary toolbar-btn"
+          onClick={() => addMarker(playheadTime)}
+          title="Add Marker at Playhead (M)"
+        >
+          <Flag size={12} />
+          Marker
+        </button>
+        <button
+          className="btn-secondary toolbar-btn"
+          onClick={groupSelectedClips}
+          disabled={selectedClipIds.length < 2}
+          title="Group Selected Clips (Cmd/Ctrl + G)"
+        >
+          <Group size={12} />
+          Group
+        </button>
+        <button
+          className="btn-secondary toolbar-btn"
+          onClick={ungroupSelectedClips}
+          disabled={selectedClipIds.length === 0}
+          title="Ungroup Selected Clips (Cmd/Ctrl + Shift + G)"
+        >
+          <Ungroup size={12} />
+          Ungroup
+        </button>
+        <div className="toolbar-divider"></div>
+        <div className="toolbar-edit-cluster" aria-label="Timeline edit nudges">
+          <button className="btn-secondary toolbar-btn" disabled={!selectedClipId} onClick={() => selectedClipId && rippleTrimClip(selectedClipId, 'right', 0.1)} title="Ripple trim out +0.1s">
+            Ripple +
+          </button>
+          <button className="btn-secondary toolbar-btn" disabled={!selectedClipId} onClick={() => selectedClipId && rollTrimClip(selectedClipId, 0.1)} title="Roll edit +0.1s">
+            Roll +
+          </button>
+          <button className="btn-secondary toolbar-btn" disabled={!selectedClipId} onClick={() => selectedClipId && slipClip(selectedClipId, 0.1)} title="Slip media +0.1s">
+            Slip +
+          </button>
+          <button className="btn-secondary toolbar-btn" disabled={!selectedClipId} onClick={() => selectedClipId && slideClip(selectedClipId, 0.1)} title="Slide clip +0.1s">
+            Slide +
+          </button>
+        </div>
         <div className="toolbar-divider"></div>
         <button 
           className="btn-secondary toolbar-btn"
@@ -91,6 +175,22 @@ export const TimelineToolbar = () => {
             <line x1="12" y1="4" x2="12" y2="20"></line>
           </svg>
           Add Text
+        </button>
+        <button
+          className="btn-secondary toolbar-btn"
+          title="Add Caption Overlay"
+          onClick={() => {
+            const store = useEditorStore.getState();
+            let textTrack = store.tracks.find(t => t.type === 'text');
+            if (!textTrack) {
+              store.addTrack('text');
+              textTrack = useEditorStore.getState().tracks.find(t => t.type === 'text');
+            }
+            if (textTrack) store.addCaptionClip(textTrack.id, store.playheadTime);
+          }}
+        >
+          <Captions size={12} />
+          Add Caption
         </button>
       </div>
       <div className="toolbar-right">

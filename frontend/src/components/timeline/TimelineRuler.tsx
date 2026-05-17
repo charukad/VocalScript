@@ -13,7 +13,7 @@ const formatRulerTime = (seconds: number): string => {
 };
 
 export const TimelineRuler = ({ timelineWidth }: TimelineRulerProps) => {
-  const { zoom, playheadTime, setPlayheadTime } = useEditorStore();
+  const { zoom, playheadTime, setPlayheadTime, markers, removeMarker } = useEditorStore();
   const ticksRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
 
@@ -81,6 +81,32 @@ export const TimelineRuler = ({ timelineWidth }: TimelineRulerProps) => {
         {ticks.map((tick, i) => (
           <div key={i} className={`ruler-tick ${tick.major ? 'major' : 'minor'}`} style={{ left: `${tick.time * zoom}px` }}>
             {tick.major && <span className="ruler-tick-label">{formatRulerTime(tick.time)}</span>}
+          </div>
+        ))}
+
+        {markers.map(marker => (
+          <div
+            key={marker.id}
+            className="timeline-marker"
+            style={{ left: `${marker.time * zoom}px`, '--marker-color': marker.color ?? '#f2c46d' } as React.CSSProperties}
+          >
+            <button
+              type="button"
+              title={`${marker.label} at ${formatRulerTime(marker.time)}`}
+              onMouseDown={event => event.stopPropagation()}
+              onClick={() => setPlayheadTime(marker.time)}
+            >
+              <span />
+            </button>
+            <button
+              type="button"
+              className="timeline-marker-remove"
+              title={`Remove ${marker.label}`}
+              onMouseDown={event => event.stopPropagation()}
+              onClick={() => removeMarker(marker.id)}
+            >
+              x
+            </button>
           </div>
         ))}
 

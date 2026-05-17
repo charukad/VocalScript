@@ -10,7 +10,15 @@ interface DraggableClipProps {
 }
 
 export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
-  const { selectedClipId, setSelectedClip, trimClip, assets } = useEditorStore();
+  const {
+    selectedClipIds,
+    setSelectedClip,
+    toggleClipSelection,
+    trimClip,
+    setSnapGuideForTime,
+    clearSnapGuide,
+    assets,
+  } = useEditorStore();
   const asset = assets.find(a => a.id === clip.assetId);
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ 
@@ -18,7 +26,7 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
     data: { type: 'timeline-clip', clipType: clip.type }
   });
 
-  const isSelected = selectedClipId === clip.id;
+  const isSelected = selectedClipIds.includes(clip.id);
   const validDuration = (isNaN(clip.duration) || !isFinite(clip.duration)) ? 5 : clip.duration;
   
   const isTrimmingRef = useRef(false);
@@ -41,13 +49,15 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
         const maxTimeDelta = initialDuration - 0.1;
         const minTimeDelta = -initialMediaOffset;
         const clampedDelta = Math.max(minTimeDelta, Math.min(maxTimeDelta, timeDelta));
+        const nextStart = initialStartTime + clampedDelta;
         
         trimClip(
           clip.id, 
-          initialStartTime + clampedDelta, 
+          nextStart, 
           initialDuration - clampedDelta, 
           initialMediaOffset + clampedDelta
         );
+        setSnapGuideForTime(nextStart, clip.id);
       } else {
         const minTimeDelta = -initialDuration + 0.1;
         const clampedDelta = Math.max(minTimeDelta, timeDelta);
@@ -64,6 +74,7 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
     const onPointerUp = () => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      clearSnapGuide();
       setTimeout(() => { isTrimmingRef.current = false; }, 100);
     };
 
@@ -174,7 +185,11 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
       onClick={(e) => { 
         if (!isTrimmingRef.current) {
           e.stopPropagation(); 
-          setSelectedClip(clip.id); 
+          if (e.metaKey || e.ctrlKey || e.shiftKey) {
+            toggleClipSelection(clip.id);
+          } else {
+            setSelectedClip(clip.id);
+          }
         }
       }}
       {...(isTrimmingRef.current ? {} : attributes)} 
@@ -195,6 +210,18 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
       <div className="clip-name" style={{ position: 'relative', zIndex: 2, textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
         {clip.textData?.content || clip.file.name}
       </div>
+      {clip.groupId && <span className="clip-group-badge">Group</span>}
+      {isSelected && clip.keyframes && clip.keyframes.length > 0 && (
+        <div className="clip-keyframe-lane">
+          {clip.keyframes.map(keyframe => (
+            <span
+              key={keyframe.id}
+              title={`${keyframe.property} at ${keyframe.time.toFixed(2)}s`}
+              style={{ left: `${Math.max(0, Math.min(100, (keyframe.time / validDuration) * 100))}%` }}
+            />
+          ))}
+        </div>
+      )}
       <button className="clip-remove" style={{ zIndex: 3 }} onPointerDown={(e) => {
         e.stopPropagation();
         onRemove(clip.id);

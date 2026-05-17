@@ -1,16 +1,16 @@
 import React from 'react';
 import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import type { DragEndEvent } from '@dnd-kit/core';
+import type { DragEndEvent, DragMoveEvent } from '@dnd-kit/core';
 import { Navbar } from './Navbar';
-import { MediaPool } from './MediaPool';
 import { ProjectGate } from './ProjectGate';
-import { PreviewWindow } from './PreviewWindow';
-import { Inspector } from './Inspector';
 import { BrowserBridgeMonitor } from './BrowserBridgeMonitor';
 import { TimelinePanel } from '../timeline/TimelinePanel';
 import { ExportModal } from './ExportModal';
 import { useEditorStore } from '../../store/editorStore';
 import { ContentProfilesPanel } from '../../features/contentProfiles/ContentProfilesPanel';
+import { ToolRail } from '../../features/editorShell/ToolRail';
+import { WorkspaceLayout } from '../../features/editorShell/WorkspaceLayout';
+import type { EditorToolId } from '../../features/editorShell/types';
 
 export const EditorLayout = () => {
   const { 
@@ -19,7 +19,19 @@ export const EditorLayout = () => {
     addAssetToTimeline, 
     assets,
     selectedClipId,
+    selectedClipIds,
     removeClip,
+    duplicateClip,
+    rippleDeleteClip,
+    groupSelectedClips,
+    ungroupSelectedClips,
+    rippleTrimClip,
+    rollTrimClip,
+    slipClip,
+    slideClip,
+    addMarker,
+    setSnapGuideForTime,
+    clearSnapGuide,
     togglePlayback,
     showExportModal,
     undo,
@@ -28,6 +40,7 @@ export const EditorLayout = () => {
   const currentProject = useEditorStore(state => state.currentProject);
   const [showBridgeMonitor, setShowBridgeMonitor] = React.useState(false);
   const [showContentProfiles, setShowContentProfiles] = React.useState(false);
+  const [activeTool, setActiveTool] = React.useState<EditorToolId>('media');
   
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -47,18 +60,75 @@ export const EditorLayout = () => {
       } else if ((e.code === 'KeyZ' && (e.metaKey || e.ctrlKey) && e.shiftKey) || (e.code === 'KeyY' && (e.metaKey || e.ctrlKey))) {
         e.preventDefault();
         redo();
+      } else if (e.code === 'Delete' && e.shiftKey && selectedClipId) {
+        e.preventDefault();
+        rippleDeleteClip(selectedClipId);
       } else if ((e.code === 'Backspace' || e.code === 'Delete') && selectedClipId) {
         e.preventDefault();
         removeClip(selectedClipId);
+      } else if (e.code === 'KeyD' && (e.metaKey || e.ctrlKey) && selectedClipId) {
+        e.preventDefault();
+        duplicateClip(selectedClipId);
+      } else if (e.code === 'KeyG' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+        e.preventDefault();
+        ungroupSelectedClips();
+      } else if (e.code === 'KeyG' && (e.metaKey || e.ctrlKey) && selectedClipIds.length > 1) {
+        e.preventDefault();
+        groupSelectedClips();
+      } else if (e.code === 'KeyM' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        addMarker(useEditorStore.getState().playheadTime);
       } else if (e.code === 'KeyK' && (e.metaKey || e.ctrlKey) && selectedClipId) {
         e.preventDefault();
         const state = useEditorStore.getState();
         state.splitClip(selectedClipId, state.playheadTime);
+      } else if (selectedClipId && e.altKey && e.code === 'BracketRight') {
+        e.preventDefault();
+        rippleTrimClip(selectedClipId, 'right', e.shiftKey ? 1 : 0.1);
+      } else if (selectedClipId && e.altKey && e.code === 'BracketLeft') {
+        e.preventDefault();
+        rippleTrimClip(selectedClipId, 'right', e.shiftKey ? -1 : -0.1);
+      } else if (selectedClipId && e.altKey && e.code === 'Period') {
+        e.preventDefault();
+        rollTrimClip(selectedClipId, e.shiftKey ? 1 : 0.1);
+      } else if (selectedClipId && e.altKey && e.code === 'Comma') {
+        e.preventDefault();
+        rollTrimClip(selectedClipId, e.shiftKey ? -1 : -0.1);
+      } else if (selectedClipId && e.altKey && e.code === 'ArrowRight') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          slideClip(selectedClipId, 0.1);
+        } else {
+          slipClip(selectedClipId, 0.1);
+        }
+      } else if (selectedClipId && e.altKey && e.code === 'ArrowLeft') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          slideClip(selectedClipId, -0.1);
+        } else {
+          slipClip(selectedClipId, -0.1);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedClipId, removeClip, togglePlayback, undo, redo]);
+  }, [
+    selectedClipId,
+    selectedClipIds.length,
+    removeClip,
+    duplicateClip,
+    rippleDeleteClip,
+    groupSelectedClips,
+    ungroupSelectedClips,
+    rippleTrimClip,
+    rollTrimClip,
+    slipClip,
+    slideClip,
+    addMarker,
+    togglePlayback,
+    undo,
+    redo,
+  ]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over, delta } = event;
@@ -88,6 +158,7 @@ export const EditorLayout = () => {
       } else if (asset) {
         alert(`Cannot drop ${asset.type} into a ${trackType} track!`);
       }
+      clearSnapGuide();
       return;
     }
     
@@ -110,10 +181,24 @@ export const EditorLayout = () => {
         updateClipStartTime(active.id as string, delta.x);
       }
     }
+    clearSnapGuide();
+  };
+
+  const handleDragMove = (event: DragMoveEvent) => {
+    if (event.active.data.current?.type !== 'timeline-clip') return;
+    const state = useEditorStore.getState();
+    const clip = state.clips.find(candidate => candidate.id === event.active.id);
+    if (!clip) return;
+    setSnapGuideForTime(clip.startTime + event.delta.x / state.zoom, clip.id);
   };
 
   return (
-    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+    <DndContext
+      sensors={sensors}
+      onDragMove={handleDragMove}
+      onDragEnd={handleDragEnd}
+      onDragCancel={clearSnapGuide}
+    >
       {showExportModal && <ExportModal />}
       <div className="editor-layout">
         {showContentProfiles && <ContentProfilesPanel onClose={() => setShowContentProfiles(false)} />}
@@ -124,10 +209,9 @@ export const EditorLayout = () => {
               onOpenBridgeMonitor={() => setShowBridgeMonitor(true)}
               onOpenContentProfiles={() => setShowContentProfiles(true)}
             />
-            <div className="workspace">
-              <MediaPool />
-              <PreviewWindow />
-              <Inspector />
+            <div className="editor-shell-body">
+              <ToolRail activeTool={activeTool} onSelectTool={setActiveTool} />
+              <WorkspaceLayout activeTool={activeTool} />
             </div>
             <TimelinePanel />
           </>

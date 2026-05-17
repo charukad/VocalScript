@@ -1,0 +1,118 @@
+import type { CaptionSegment, TimelineMarker } from '../../types';
+
+export type TranscriptInsightKind = 'hook' | 'filler' | 'silence' | 'retention';
+
+export type TranscriptInsight = {
+  id: string;
+  kind: TranscriptInsightKind;
+  time: number;
+  endTime?: number;
+  title: string;
+  detail: string;
+  color: string;
+};
+
+const FILLER_WORD_PATTERN = /\b(um+|uh+|erm+|like|you know|basically|actually|literally)\b/i;
+
+export const buildTranscriptInsights = (
+  captions: CaptionSegment[],
+  sequenceDuration: number,
+): TranscriptInsight[] => {
+  const cleanCaptions = captions
+    .filter(caption => caption.text.trim())
+    .sort((a, b) => a.start - b.start);
+  if (cleanCaptions.length === 0) return [];
+
+  const insights: TranscriptInsight[] = [];
+  const firstCaption = cleanCaptions[0];
+
+  if (firstCaption.start > 1) {
+    insights.push({
+      id: 'hook-late-start',
+      kind: 'hook',
+      time: 0,
+      endTime: firstCaption.start,
+      title: 'Late hook',
+      detail: `First spoken line starts at ${firstCaption.start.toFixed(1)}s. Consider bringing the payoff or question forward.`,
+      color: '#f2c46d',
+    });
+  } else if ((firstCaption.text.match(/\b(why|how|what if|secret|mistake|stop|before)\b/gi) ?? []).length === 0) {
+    insights.push({
+      id: 'hook-soft-open',
+      kind: 'hook',
+      time: firstCaption.start,
+      title: 'Soft opening',
+      detail: 'Opening line may need a stronger curiosity gap, contrast, or direct promise.',
+      color: '#f2c46d',
+    });
+  }
+
+  cleanCaptions.forEach((caption, index) => {
+    if (FILLER_WORD_PATTERN.test(caption.text)) {
+      insights.push({
+        id: `filler-${caption.id}`,
+        kind: 'filler',
+        time: caption.start,
+        endTime: caption.end,
+        title: 'Filler-word review',
+        detail: caption.text,
+        color: '#f48771',
+      });
+    }
+
+    const wordCount = caption.text.trim().split(/\s+/).length;
+    const duration = caption.end - caption.start;
+    if (wordCount >= 18 || duration >= 4.5) {
+      insights.push({
+        id: `retention-${caption.id}`,
+        kind: 'retention',
+        time: caption.start,
+        endTime: caption.end,
+        title: 'Dense caption',
+        detail: `${wordCount} words across ${duration.toFixed(1)}s. A shorter line or extra visual beat may read faster on mobile.`,
+        color: '#5b8def',
+      });
+    }
+
+    const next = cleanCaptions[index + 1];
+    if (next) {
+      const gap = next.start - caption.end;
+      if (gap >= 1) {
+        insights.push({
+          id: `silence-${caption.id}-${next.id}`,
+          kind: 'silence',
+          time: caption.end,
+          endTime: next.start,
+          title: 'Silence gap',
+          detail: `${gap.toFixed(1)}s without speech. Review whether this pause earns its place.`,
+          color: '#78c58d',
+        });
+      }
+    }
+  });
+
+  const lastCaption = cleanCaptions[cleanCaptions.length - 1];
+  if (sequenceDuration - lastCaption.end >= 2) {
+    insights.push({
+      id: 'tail-silence',
+      kind: 'silence',
+      time: lastCaption.end,
+      endTime: sequenceDuration,
+      title: 'Trailing silence',
+      detail: `${(sequenceDuration - lastCaption.end).toFixed(1)}s remain after the final line.`,
+      color: '#78c58d',
+    });
+  }
+
+  return insights.sort((a, b) => a.time - b.time);
+};
+
+export const transcriptInsightsToMarkers = (
+  insights: TranscriptInsight[],
+): Array<Pick<TimelineMarker, 'time' | 'label' | 'color'>> => (
+  insights.map(insight => ({
+    time: insight.time,
+    label: insight.title,
+    color: insight.color,
+  }))
+);

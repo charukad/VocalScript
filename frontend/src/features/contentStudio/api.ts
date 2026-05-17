@@ -3,6 +3,11 @@ import type {
   BrandKitInput,
   CalendarItem,
   CalendarItemInput,
+  CharacterProfile,
+  CharacterProfileInput,
+  CharacterPromptPack,
+  CommentAnalysisInput,
+  CommentAnalysisRun,
   Experiment,
   ExperimentInput,
   CaptionDesignInput,
@@ -11,13 +16,25 @@ import type {
   ContentIdeaInput,
   ContentTrend,
   ContentTrendInput,
+  TrendImportResult,
+  TrendRssImportInput,
+  TrendSource,
   CompetitorAnalysisSummary,
   CompetitorContent,
   CompetitorContentInput,
   PackagingGenerationInput,
   PackagingGenerationResult,
+  PublishJob,
+  PublishJobInput,
+  PublishingDestination,
+  PublishingDestinationInput,
+  PublishingPackage,
+  PublishingPackageInput,
+  PublishingProvider,
   PromptTemplate,
   PromptTemplateInput,
+  RepurposeInput,
+  RepurposeResult,
   AgentRun,
   AgentWorkflowStartInput,
   AnalyticsConnection,
@@ -55,6 +72,10 @@ type TrendListResponse = {
   trends: ContentTrend[];
 };
 
+type TrendSourceListResponse = {
+  sources: TrendSource[];
+};
+
 type NarrationLineListResponse = {
   lines: NarrationLine[];
 };
@@ -83,12 +104,32 @@ type PromptTemplateListResponse = {
   templates: PromptTemplate[];
 };
 
+type CharacterProfileListResponse = {
+  characters: CharacterProfile[];
+};
+
+type CommentAnalysisRunListResponse = {
+  runs: CommentAnalysisRun[];
+};
+
 type CalendarItemListResponse = {
   items: CalendarItem[];
 };
 
 type ExperimentListResponse = {
   experiments: Experiment[];
+};
+
+type PublishingProviderListResponse = {
+  providers: PublishingProvider[];
+};
+
+type PublishingDestinationListResponse = {
+  destinations: PublishingDestination[];
+};
+
+type PublishJobListResponse = {
+  jobs: PublishJob[];
 };
 
 const formatApiError = async (response: Response, fallback: string): Promise<Error> => {
@@ -211,6 +252,29 @@ export const archiveTrend = async (
   return response.json();
 };
 
+export const listTrendSources = async (
+  signal?: AbortSignal,
+): Promise<TrendSourceListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/trend-sources`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load trend sources');
+  return response.json();
+};
+
+export const importTrendRss = async (
+  profileId: string,
+  input: TrendRssImportInput,
+  signal?: AbortSignal,
+): Promise<TrendImportResult> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/trends/import/rss`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not import RSS trends');
+  return response.json();
+};
+
 export const listCompetitorContent = async (
   profileId: string,
   signal?: AbortSignal,
@@ -259,6 +323,90 @@ export const archiveCompetitorContent = async (
     signal,
   });
   if (!response.ok) throw await formatApiError(response, 'Could not archive competitor content');
+  return response.json();
+};
+
+export const listCharacters = async (
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<CharacterProfileListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/characters`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load characters');
+  return response.json();
+};
+
+export const createCharacter = async (
+  profileId: string,
+  input: CharacterProfileInput,
+  signal?: AbortSignal,
+): Promise<CharacterProfile> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/characters`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not create character');
+  return response.json();
+};
+
+export const updateCharacter = async (
+  characterId: string,
+  input: Partial<CharacterProfileInput>,
+  signal?: AbortSignal,
+): Promise<CharacterProfile> => {
+  const response = await fetch(`${API_BASE_URL}/api/characters/${characterId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not update character');
+  return response.json();
+};
+
+export const archiveCharacter = async (
+  characterId: string,
+  signal?: AbortSignal,
+): Promise<CharacterProfile> => {
+  const response = await fetch(`${API_BASE_URL}/api/characters/${characterId}`, {
+    method: 'DELETE',
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not archive character');
+  return response.json();
+};
+
+export const getCharacterPromptPack = async (
+  characterId: string,
+  signal?: AbortSignal,
+): Promise<CharacterPromptPack> => {
+  const response = await fetch(`${API_BASE_URL}/api/characters/${characterId}/prompt-pack`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load character prompt pack');
+  return response.json();
+};
+
+export const analyzeComments = async (
+  profileId: string,
+  input: CommentAnalysisInput,
+  signal?: AbortSignal,
+): Promise<CommentAnalysisRun> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/comments/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not analyze comments');
+  return response.json();
+};
+
+export const listCommentAnalyses = async (
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<CommentAnalysisRunListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/comments/analyses`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load comment analyses');
   return response.json();
 };
 
@@ -475,6 +623,132 @@ export const generatePackaging = async (
     signal,
   });
   if (!response.ok) throw await formatApiError(response, 'Could not generate packaging');
+  return response.json();
+};
+
+export const generateRepurposeCandidates = async (
+  profileId: string,
+  input: RepurposeInput,
+  signal?: AbortSignal,
+): Promise<RepurposeResult> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/repurpose/shorts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not generate repurpose candidates');
+  return response.json();
+};
+
+export const listPublishingProviders = async (
+  signal?: AbortSignal,
+): Promise<PublishingProviderListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/publishing/providers`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load publishing providers');
+  return response.json();
+};
+
+export const listPublishingDestinations = async (
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<PublishingDestinationListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/publishing/destinations`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load publishing destinations');
+  return response.json();
+};
+
+export const updatePublishingDestination = async (
+  profileId: string,
+  platform: string,
+  input: PublishingDestinationInput,
+  signal?: AbortSignal,
+): Promise<PublishingDestination> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/publishing/destinations/${platform}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not update publishing destination');
+  return response.json();
+};
+
+export const generatePublishingPackage = async (
+  profileId: string,
+  input: PublishingPackageInput,
+  signal?: AbortSignal,
+): Promise<PublishingPackage> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/publishing/package`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not generate publishing package');
+  return response.json();
+};
+
+export const listPublishJobs = async (
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<PublishJobListResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/publish-jobs`, { signal });
+  if (!response.ok) throw await formatApiError(response, 'Could not load publish jobs');
+  return response.json();
+};
+
+export const createPublishJob = async (
+  profileId: string,
+  input: PublishJobInput,
+  signal?: AbortSignal,
+): Promise<PublishJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/content-profiles/${profileId}/publish-jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not create publish job');
+  return response.json();
+};
+
+export const updatePublishJob = async (
+  jobId: string,
+  input: Partial<PublishJobInput>,
+  signal?: AbortSignal,
+): Promise<PublishJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/publish-jobs/${jobId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not update publish job');
+  return response.json();
+};
+
+export const archivePublishJob = async (
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<PublishJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/publish-jobs/${jobId}`, {
+    method: 'DELETE',
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not archive publish job');
+  return response.json();
+};
+
+export const dispatchPublishJob = async (
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<PublishJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/publish-jobs/${jobId}/dispatch`, {
+    method: 'POST',
+    signal,
+  });
+  if (!response.ok) throw await formatApiError(response, 'Could not dispatch publish job');
   return response.json();
 };
 

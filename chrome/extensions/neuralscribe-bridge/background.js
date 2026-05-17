@@ -305,10 +305,11 @@ async function handleBridgeSocketMessage(payload) {
   const workerId = await getWorkerId();
   if (payload.workerId && payload.workerId !== workerId) return;
   if (payload.command === "health_check") {
+    const provider = activeProviderFromSettings(settings);
     await reportDebugEvent(
       "health_check_started",
-      "Running Meta health check",
-      { level: "info", provider: "meta" }
+      "Running provider health check",
+      { level: "info", provider }
     );
     const result = await runProviderHealthCheck(settings, false);
     latestHealth = result.health;
@@ -324,11 +325,12 @@ async function handleBridgeSocketMessage(payload) {
     await reportDebugEvent(
       "health_check_completed",
       result.health[0]?.message || "Provider health check completed",
-      { level: result.health[0]?.status === "ready" ? "info" : "warning", provider: "meta" }
+      { level: result.health[0]?.status === "ready" ? "info" : "warning", provider }
     );
     return;
   }
   if (payload.command === "clear_cooldown") {
+    const provider = activeProviderFromSettings(settings);
     await chrome.storage.local.remove([
       STORAGE_KEYS.providerAvailableAt,
       STORAGE_KEYS.providerCooldownReason,
@@ -342,19 +344,20 @@ async function handleBridgeSocketMessage(payload) {
     });
     await reportDebugEvent("provider_cooldown_cleared", "Provider cooldown manually cleared", {
       level: "warning",
-      provider: "meta",
+      provider,
     });
     return;
   }
   if (payload.command === "adapter_test") {
     const commandPayload = payload.payload || {};
+    const provider = commandPayload.provider || activeProviderFromSettings(settings);
     const submitFullTest = commandPayload.submitFullTest === true || commandPayload.submitFullTest === "true";
-    await reportDebugEvent("adapter_test_started", submitFullTest ? "Running full Meta adapter test" : "Running safe Meta adapter test", {
+    await reportDebugEvent("adapter_test_started", submitFullTest ? `Running full ${provider} adapter test` : `Running safe ${provider} adapter test`, {
       level: "info",
-      provider: "meta",
+      provider,
       metadata: { adapterTestId: commandPayload.adapterTestId || "", submitFullTest: String(submitFullTest) },
     });
-    const result = await runProviderAdapterTest(settings, commandPayload);
+    const result = await runProviderAdapterTest(settings, { ...commandPayload, provider });
     latestHealth = result.health;
     updateStatus({
       health: latestHealth,
@@ -367,7 +370,7 @@ async function handleBridgeSocketMessage(payload) {
     }
     await reportDebugEvent("adapter_test_completed", result.health[0]?.message || "Provider adapter test completed", {
       level: result.health[0]?.status === "ready" ? "info" : "warning",
-      provider: "meta",
+      provider,
       metadata: result.health[0]?.metadata || {},
     });
   }
@@ -1119,14 +1122,25 @@ async function runSingleProviderHealthCheck(settings, provider, workerId, includ
 
 async function runProviderAdapterTest(settings, payload = {}) {
   const workerId = await getWorkerId();
+  const provider = payload.provider === PROVIDERS.GOOGLE_AI_STUDIO
+    ? PROVIDERS.GOOGLE_AI_STUDIO
+    : PROVIDERS.META;
   const submitFullTest = payload.submitFullTest === true || payload.submitFullTest === "true";
   try {
-    const tab = await findOrOpenProviderTab(settings.metaUrl, "*://*.meta.ai/*");
+    const tab = provider === PROVIDERS.GOOGLE_AI_STUDIO
+      ? await findOrOpenProviderTab(settings.googleAiStudioUrl, "*://aistudio.google.com/*")
+      : await findOrOpenProviderTab(settings.metaUrl, "*://*.meta.ai/*");
     lastProviderTabId = tab.id || null;
     await waitForTabReady(tab.id);
-    await ensureMetaContentScript(tab.id);
+    if (provider === PROVIDERS.GOOGLE_AI_STUDIO) {
+      await ensureGoogleAiStudioContentScript(tab.id);
+    } else {
+      await ensureMetaContentScript(tab.id);
+    }
     const response = await sendTabMessage(tab.id, {
-      type: "provider.meta.adapterTest",
+      type: provider === PROVIDERS.GOOGLE_AI_STUDIO
+        ? "provider.google_ai_studio.adapterTest"
+        : "provider.meta.adapterTest",
       options: {
         includeAdapterTest: true,
         submitFullTest,
@@ -1136,7 +1150,7 @@ async function runProviderAdapterTest(settings, payload = {}) {
       },
     });
     if (!response?.ok) {
-      throw new Error(response?.error || "Meta adapter test failed");
+      throw new Error(response?.error || `${provider} adapter test failed`);
     }
     return {
       health: [response.health],
@@ -1145,7 +1159,7 @@ async function runProviderAdapterTest(settings, payload = {}) {
   } catch (error) {
     return {
       health: [{
-        provider: "meta",
+        provider,
         status: "error",
         checkedAt: new Date().toISOString(),
         pageUrl: "",
@@ -1163,7 +1177,7 @@ async function runProviderAdapterTest(settings, payload = {}) {
           submitFullTest: String(submitFullTest),
         },
       }],
-      capabilities: createProviderCapabilities([PROVIDERS.META]),
+      capabilities: createProviderCapabilities([provider]),
     };
   }
 }

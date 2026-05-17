@@ -49,8 +49,8 @@ FONT_CANDIDATES = {
 
 def _load_pillow():
     try:
-        from PIL import Image, ImageColor, ImageDraw, ImageFont
-        return Image, ImageColor, ImageDraw, ImageFont
+        from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont
+        return Image, ImageColor, ImageDraw, ImageFilter, ImageFont
     except ImportError as exc:
         raise RuntimeError(
             "Text overlays require Pillow. Install backend dependencies again with "
@@ -78,7 +78,7 @@ def _font_path(font_family: str, bold: bool, italic: bool) -> Optional[str]:
     return None
 
 
-def _wrap_text(draw, text: str, font, max_width: int) -> list[str]:
+def _wrap_text(draw, text: str, font, max_width: int, max_chars_per_line: int) -> list[str]:
     wrapped: list[str] = []
     for raw_line in text.splitlines() or [""]:
         words = raw_line.split(" ")
@@ -86,7 +86,8 @@ def _wrap_text(draw, text: str, font, max_width: int) -> list[str]:
         for word in words:
             candidate = word if not line else f"{line} {word}"
             bbox = draw.textbbox((0, 0), candidate, font=font)
-            if bbox[2] - bbox[0] <= max_width or not line:
+            within_char_limit = len(candidate) <= max_chars_per_line if max_chars_per_line > 0 else True
+            if (bbox[2] - bbox[0] <= max_width and within_char_limit) or not line:
                 line = candidate
             else:
                 wrapped.append(line)
@@ -103,7 +104,7 @@ def _hex_to_rgba(ImageColor, color: str, alpha: float = 1.0) -> tuple[int, int, 
 
 class FFmpegMediaCompiler(IMediaCompiler):
     def _render_text_overlay(self, td, blueprint: TimelineBlueprint, output_path: str, index: int) -> str:
-        Image, ImageColor, ImageDraw, ImageFont = _load_pillow()
+        Image, ImageColor, ImageDraw, ImageFilter, ImageFont = _load_pillow()
 
         width, height = blueprint.width, blueprint.height
         image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -116,8 +117,8 @@ class FFmpegMediaCompiler(IMediaCompiler):
             logger.warning("Failed to load font %s, using Pillow default", font_path)
             font = ImageFont.load_default()
 
-        max_text_width = int(width * 0.9)
-        lines = _wrap_text(draw, td.content, font, max_text_width)
+        max_text_width = int(width * max(0.1, min(1.0, td.maxWidthPercent / 100.0)))
+        lines = _wrap_text(draw, td.content, font, max_text_width, td.maxCharsPerLine)
         spacing = max(4, int(td.fontSize * 0.2))
         line_boxes = [draw.textbbox((0, 0), line or " ", font=font) for line in lines]
         line_widths = [box[2] - box[0] for box in line_boxes]
@@ -125,8 +126,8 @@ class FFmpegMediaCompiler(IMediaCompiler):
         text_width = min(max(line_widths or [0]), max_text_width)
         text_height = sum(line_heights) + spacing * max(0, len(lines) - 1)
 
-        pad_x = int(td.fontSize * 0.4) if td.bgOpacity > 0 else 0
-        pad_y = int(td.fontSize * 0.2) if td.bgOpacity > 0 else 0
+        pad_x = td.boxPadding if td.bgOpacity > 0 else 0
+        pad_y = max(0, math.ceil(td.boxPadding * 0.6)) if td.bgOpacity > 0 else 0
         box_width = text_width + pad_x * 2
         box_height = text_height + pad_y * 2
 
@@ -139,11 +140,13 @@ class FFmpegMediaCompiler(IMediaCompiler):
             bg = _hex_to_rgba(ImageColor, td.bgColor, td.bgOpacity)
             draw.rounded_rectangle(
                 [left, top, left + box_width, top + box_height],
-                radius=max(4, math.ceil(td.fontSize * 0.1)),
+                radius=max(0, td.boxRadius),
                 fill=bg,
             )
 
         text_color = _hex_to_rgba(ImageColor, td.color, 1.0)
+        stroke_color = _hex_to_rgba(ImageColor, td.strokeColor, 1.0)
+        shadow_color = _hex_to_rgba(ImageColor, td.shadowColor, td.shadowOpacity)
         y = top + pad_y
         for line, line_width, line_height in zip(lines, line_widths, line_heights):
             if td.align == "left":
@@ -153,10 +156,28 @@ class FFmpegMediaCompiler(IMediaCompiler):
             else:
                 x = left + (box_width - line_width) / 2
 
-            # Subtle shadow when no background is present, matching the browser preview.
-            if td.bgOpacity == 0:
-                draw.text((x + 2, y + 2), line, font=font, fill=(0, 0, 0, 190))
-            draw.text((x, y), line, font=font, fill=text_color)
+            if td.shadowOpacity > 0:
+                shadow_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+                shadow_draw = ImageDraw.Draw(shadow_layer)
+                shadow_draw.text(
+                    (x + td.shadowOffsetX, y + td.shadowOffsetY),
+                    line,
+                    font=font,
+                    fill=shadow_color,
+                    stroke_width=max(0, td.strokeWidth),
+                    stroke_fill=stroke_color,
+                )
+                if td.shadowBlur > 0:
+                    shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(td.shadowBlur))
+                image.alpha_composite(shadow_layer)
+            draw.text(
+                (x, y),
+                line,
+                font=font,
+                fill=text_color,
+                stroke_width=max(0, td.strokeWidth),
+                stroke_fill=stroke_color,
+            )
             y += line_height + spacing
 
         overlay_path = os.path.join(os.path.dirname(output_path), f".text_overlay_{os.getpid()}_{index}.png")
@@ -194,6 +215,12 @@ class FFmpegMediaCompiler(IMediaCompiler):
         def process_audio_clip(clip, node_prefix: str, in_idx: int) -> None:
             """Extract, volume-adjust, fade, and delay an audio clip into audio_outs."""
             effective_volume = 0.0 if clip.audio.mute else (clip.audio.volume / 100.0)
+            curve_map = {
+                "linear": "tri",
+                "ease_in": "qua",
+                "ease_out": "iqsin",
+                "smooth": "hsin",
+            }
 
             filter_complex.append(
                 f"[{in_idx}:a]atrim=start={clip.in_point}:duration={clip.duration},"
@@ -201,14 +228,16 @@ class FFmpegMediaCompiler(IMediaCompiler):
             )
             fade_node = f"{node_prefix}_v"
             if clip.audio.fadeIn > 0:
+                fade_in_curve = curve_map.get(clip.audio.fadeInCurve, "tri")
                 filter_complex.append(
-                    f"[{fade_node}]afade=t=in:st=0:d={clip.audio.fadeIn:.2f}[{node_prefix}_fi]"
+                    f"[{fade_node}]afade=t=in:st=0:d={clip.audio.fadeIn:.2f}:curve={fade_in_curve}[{node_prefix}_fi]"
                 )
                 fade_node = f"{node_prefix}_fi"
             if clip.audio.fadeOut > 0:
                 fade_out_start = max(0, clip.duration - clip.audio.fadeOut)
+                fade_out_curve = curve_map.get(clip.audio.fadeOutCurve, "tri")
                 filter_complex.append(
-                    f"[{fade_node}]afade=t=out:st={fade_out_start:.2f}:d={clip.audio.fadeOut:.2f}[{node_prefix}_fo]"
+                    f"[{fade_node}]afade=t=out:st={fade_out_start:.2f}:d={clip.audio.fadeOut:.2f}:curve={fade_out_curve}[{node_prefix}_fo]"
                 )
                 fade_node = f"{node_prefix}_fo"
             delay_ms = int(clip.start_time * 1000)
@@ -284,14 +313,38 @@ class FFmpegMediaCompiler(IMediaCompiler):
             for i, clip in enumerate(visual_clips):
                 in_idx = input_idx_map[clip.file_id]
 
-                # 1. Trim, fit to canvas
-                filter_complex.append(
-                    f"[{in_idx}:v]trim=start={clip.in_point}:duration={clip.duration},"
-                    f"setpts=PTS-STARTPTS,"
-                    f"scale={blueprint.width}:{blueprint.height}:force_original_aspect_ratio=decrease,"
-                    f"pad={blueprint.width}:{blueprint.height}:(ow-iw)/2:(oh-ih)/2,"
-                    f"setsar=1[v_base_{i}]"
+                # 1. Trim, retime, crop, then fit inside the canvas.
+                source_duration = max(0.033, clip.duration * max(0.25, min(4.0, clip.speed.rate)))
+                timing_filters = []
+                if clip.speed.freezeFrame:
+                    timing_filters.append(f"trim=start={clip.in_point}:duration=0.033")
+                    timing_filters.append("setpts=PTS-STARTPTS")
+                    timing_filters.append(f"tpad=stop_mode=clone:stop_duration={clip.duration:.3f}")
+                else:
+                    timing_filters.append(f"trim=start={clip.in_point}:duration={source_duration:.3f}")
+                    if clip.speed.reverse:
+                        timing_filters.append("reverse")
+                    timing_filters.append(f"setpts=PTS/{max(0.25, min(4.0, clip.speed.rate)):.3f}")
+
+                crop_left = max(0.0, min(0.45, clip.crop.left / 100.0))
+                crop_right = max(0.0, min(0.45, clip.crop.right / 100.0))
+                crop_top = max(0.0, min(0.45, clip.crop.top / 100.0))
+                crop_bottom = max(0.0, min(0.45, clip.crop.bottom / 100.0))
+                if any(value > 0 for value in (crop_left, crop_right, crop_top, crop_bottom)):
+                    timing_filters.append(
+                        "crop="
+                        f"iw*{1 - crop_left - crop_right:.4f}:"
+                        f"ih*{1 - crop_top - crop_bottom:.4f}:"
+                        f"iw*{crop_left:.4f}:"
+                        f"ih*{crop_top:.4f}"
+                    )
+
+                timing_filters.append(
+                    f"scale=w='min({blueprint.width}/iw,{blueprint.height}/ih)*iw':"
+                    f"h='min({blueprint.width}/iw,{blueprint.height}/ih)*ih'"
                 )
+                timing_filters.append("setsar=1")
+                filter_complex.append(f"[{in_idx}:v]{','.join(timing_filters)}[v_base_{i}]")
 
                 # 2. Transforms (flip, rotate, zoom)
                 tf_filters = []
@@ -305,14 +358,12 @@ class FFmpegMediaCompiler(IMediaCompiler):
                         f":ow='max(iw,ih)':oh='max(iw,ih)'"
                     )
                 scale_factor = clip.transform.scale / 100.0
-                if scale_factor != 1.0 or clip.transform.rotation != 0:
+                if scale_factor != 1.0:
                     tf_filters.append(f"scale=iw*{scale_factor}:ih*{scale_factor}")
-                    if scale_factor < 1.0 and clip.transform.rotation == 0:
-                        tf_filters.append(
-                            f"pad={blueprint.width}:{blueprint.height}:(ow-iw)/2:(oh-ih)/2"
-                        )
-                    else:
-                        tf_filters.append(f"crop={blueprint.width}:{blueprint.height}")
+
+                opacity = max(0.0, min(1.0, clip.transform.opacity / 100.0))
+                if opacity < 1.0:
+                    tf_filters.append(f"format=rgba,colorchannelmixer=aa={opacity:.3f}")
 
                 out_node = f"v_base_{i}"
                 if tf_filters:
@@ -340,15 +391,69 @@ class FFmpegMediaCompiler(IMediaCompiler):
                         f":rh={rs:.3f}:gh=0:bh={bs:.3f}"
                     )
 
+                if any(value != 0 for value in (clip.color.red, clip.color.green, clip.color.blue)):
+                    rs = max(-1.0, min(1.0, clip.color.red / 100.0))
+                    gs = max(-1.0, min(1.0, clip.color.green / 100.0))
+                    bs = max(-1.0, min(1.0, clip.color.blue / 100.0))
+                    color_filters.append(
+                        f"colorbalance=rs={rs:.3f}:gs={gs:.3f}:bs={bs:.3f}"
+                        f":rm={rs:.3f}:gm={gs:.3f}:bm={bs:.3f}"
+                        f":rh={rs:.3f}:gh={gs:.3f}:bh={bs:.3f}"
+                    )
+
+                if clip.color.highlights != 0 or clip.color.shadows != 0:
+                    shadow_gain = max(0.0, min(2.0, 1 + clip.color.shadows / 200.0))
+                    highlight_gain = max(0.0, min(2.0, 1 + clip.color.highlights / 200.0))
+                    color_filters.append(
+                        f"colorlevels=rimin=0:gimin=0:bimin=0:rimax={highlight_gain:.3f}:"
+                        f"gimax={highlight_gain:.3f}:bimax={highlight_gain:.3f}:"
+                        f"romin=0:gomin=0:bomin=0:romax={shadow_gain:.3f}:"
+                        f"gomax={shadow_gain:.3f}:bomax={shadow_gain:.3f}"
+                    )
+
+                if clip.effects.blur > 0:
+                    color_filters.append(f"gblur=sigma={clip.effects.blur:.3f}")
+
+                if clip.effects.sharpen > 0:
+                    sharpen = max(0.0, min(5.0, clip.effects.sharpen / 20.0))
+                    color_filters.append(f"unsharp=5:5:{sharpen:.3f}:5:5:0")
+
+                if clip.effects.vignette > 0:
+                    angle = max(0.0, min(math.pi / 2, (clip.effects.vignette / 100.0) * (math.pi / 2)))
+                    color_filters.append(f"vignette=angle={angle:.3f}")
+
+                if clip.effects.clarity != 0:
+                    clarity = max(-0.5, min(0.5, clip.effects.clarity / 200.0))
+                    color_filters.append(f"eq=contrast={1 + clarity:.3f}")
+
+                if clip.compositing.stabilization:
+                    color_filters.append("deshake")
+
+                if clip.compositing.chromaKeyEnabled:
+                    similarity = max(0.01, min(1.0, clip.compositing.chromaKeySimilarity))
+                    blend = max(0.0, min(1.0, max(clip.compositing.edgeFeather, clip.compositing.spillSuppression)))
+                    color_filters.append(
+                        f"colorkey={clip.compositing.chromaKeyColor}:{similarity:.3f}:{blend:.3f}"
+                    )
+
+                if clip.compositing.borderWidth > 0:
+                    color_filters.append(
+                        f"drawbox=x=0:y=0:w=iw:h=ih:color={clip.compositing.borderColor}:t={clip.compositing.borderWidth:.1f}"
+                    )
+
                 if color_filters:
                     filter_complex.append(f"[{out_node}]{','.join(color_filters)}[v_color_{i}]")
                     out_node = f"v_color_{i}"
 
                 # Overlay onto canvas
                 next_out = f"base_{i+1}"
+                overlay_x = max(-0.5, min(1.5, clip.transform.x / 100.0))
+                overlay_y = max(-0.5, min(1.5, clip.transform.y / 100.0))
                 filter_complex.append(
                     f"[{last_out}][{out_node}]"
-                    f"overlay=enable='between(t,{clip.start_time},{clip.start_time + clip.duration})'"
+                    f"overlay=x='({blueprint.width}-w)*{overlay_x:.4f}':"
+                    f"y='({blueprint.height}-h)*{overlay_y:.4f}':"
+                    f"enable='between(t,{clip.start_time},{clip.start_time + clip.duration})'"
                     f"[{next_out}]"
                 )
                 last_out = next_out

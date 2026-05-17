@@ -290,14 +290,14 @@ export const runBrowserBridgeHealthCheck = async (
 
 export const runBrowserBridgeAdapterTest = async (
   workerId: string,
-  options: { fullTestPrompt?: string; submitFullTest?: boolean } = {},
+  options: { provider?: ProviderName; fullTestPrompt?: string; submitFullTest?: boolean } = {},
   signal?: AbortSignal
 ): Promise<BridgeStatusResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/browser-bridge/workers/${encodeURIComponent(workerId)}/adapter-test`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      provider: 'meta',
+      provider: options.provider ?? 'meta',
       fullTestPrompt: options.fullTestPrompt || '',
       submitFullTest: Boolean(options.submitFullTest),
     }),
@@ -394,8 +394,17 @@ type ClipBlueprint = {
   transform: {
     scale: number;
     rotation: number;
+    opacity?: number;
+    x?: number;
+    y?: number;
     flipX: boolean;
     flipY: boolean;
+  };
+  crop: {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
   };
   color: {
     brightness: number;
@@ -403,12 +412,48 @@ type ClipBlueprint = {
     saturation: number;
     exposure: number;
     temperature: number;
+    highlights?: number;
+    shadows?: number;
+    red?: number;
+    green?: number;
+    blue?: number;
+  };
+  effects: {
+    blur: number;
+    sharpen: number;
+    vignette: number;
+    clarity: number;
+    overlayPreset?: 'none' | 'glitch' | 'vhs' | 'light_leak';
+    overlayIntensity?: number;
+  };
+  speed: {
+    rate: number;
+    reverse: boolean;
+    freezeFrame: boolean;
+    curvePreset?: 'constant' | 'ramp_up' | 'ramp_down';
+  };
+  compositing: {
+    blendMode: 'normal' | 'screen' | 'multiply' | 'overlay';
+    layoutPreset: 'free' | 'pip_top_right' | 'pip_bottom_left' | 'split_left' | 'split_right';
+    borderWidth: number;
+    borderColor: string;
+    maskShape: 'none' | 'circle' | 'rounded';
+    cornerRadius: number;
+    chromaKeyEnabled: boolean;
+    chromaKeyColor: string;
+    chromaKeySimilarity: number;
+    spillSuppression: number;
+    edgeFeather: number;
+    stabilization: boolean;
+    backgroundRemoval: boolean;
   };
   audio: {
     volume: number;
     mute: boolean;
     fadeIn: number;
     fadeOut: number;
+    fadeInCurve?: 'linear' | 'ease_in' | 'ease_out' | 'smooth';
+    fadeOutCurve?: 'linear' | 'ease_in' | 'ease_out' | 'smooth';
   };
   text?: {
     content: string;
@@ -422,6 +467,17 @@ type ClipBlueprint = {
     y: number;
     bgColor: string;
     bgOpacity: number;
+    shadowColor: string;
+    shadowOpacity: number;
+    shadowBlur: number;
+    shadowOffsetX: number;
+    shadowOffsetY: number;
+    strokeColor: string;
+    strokeWidth: number;
+    boxPadding: number;
+    boxRadius: number;
+    maxWidthPercent: number;
+    maxCharsPerLine: number;
   } | null;
 };
 
@@ -442,7 +498,7 @@ type TimelineBlueprint = {
 };
 
 const isTrackActive = (track: TimelineTrack, tracks: TimelineTrack[]) => {
-  if (track.muted) return false;
+  if (track.muted || track.visible === false) return false;
   const hasSoloForType = tracks.some(t => t.type === track.type && t.solo);
   return !hasSoloForType || Boolean(track.solo);
 };
@@ -471,9 +527,27 @@ export const exportTimeline = async (
         duration: c.duration,
         in_point: c.mediaOffset || 0.0,
         volume: 1.0,    // Hardcoded until Phase 4 Volume UI is built
-        transform: c.transform || { scale: 100, rotation: 0, flipX: false, flipY: false },
-        color: c.color || { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 },
-        audio: c.audio || { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 },
+        transform: c.transform || { scale: 100, rotation: 0, opacity: 100, x: 50, y: 50, flipX: false, flipY: false },
+        crop: c.crop || { left: 0, right: 0, top: 0, bottom: 0 },
+        color: c.color || { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0, highlights: 0, shadows: 0, red: 0, green: 0, blue: 0 },
+        effects: c.effects || { blur: 0, sharpen: 0, vignette: 0, clarity: 0, overlayPreset: 'none', overlayIntensity: 0 },
+        speed: c.speed || { rate: 1, reverse: false, freezeFrame: false, curvePreset: 'constant' },
+        compositing: c.compositing || {
+          blendMode: 'normal',
+          layoutPreset: 'free',
+          borderWidth: 0,
+          borderColor: '#ffffff',
+          maskShape: 'none',
+          cornerRadius: 0,
+          chromaKeyEnabled: false,
+          chromaKeyColor: '#00ff00',
+          chromaKeySimilarity: 0.2,
+          spillSuppression: 0,
+          edgeFeather: 0,
+          stabilization: false,
+          backgroundRemoval: false,
+        },
+        audio: c.audio || { volume: 100, mute: false, fadeIn: 0, fadeOut: 0, fadeInCurve: 'linear', fadeOutCurve: 'linear' },
         text: c.textData || null
       }))
   }));

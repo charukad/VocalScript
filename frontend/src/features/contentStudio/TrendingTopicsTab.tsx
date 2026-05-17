@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PLATFORM_OPTIONS } from '../contentProfiles/types';
 import { useContentStudioStore } from './contentStudioStore';
-import type { ContentTrendInput, ContentTrendStatus } from './types';
+import { importTrendRss, listTrendSources } from './api';
+import type { ContentTrendInput, ContentTrendStatus, TrendSource } from './types';
 
 type TrendingTopicsTabProps = {
   profileId: string;
@@ -10,7 +11,7 @@ type TrendingTopicsTabProps = {
 const statusOptions: ContentTrendStatus[] = ['active', 'selected', 'converted_to_idea'];
 
 export const TrendingTopicsTab = ({ profileId }: TrendingTopicsTabProps) => {
-  const { trends, isSaving, createTrend, suggestTrends, updateTrend, archiveTrend } = useContentStudioStore();
+  const { trends, isSaving, loadProfileWorkspace, createTrend, suggestTrends, updateTrend, archiveTrend } = useContentStudioStore();
   const [draft, setDraft] = useState<ContentTrendInput>({
     topic: '',
     platform: null,
@@ -20,7 +21,18 @@ export const TrendingTopicsTab = ({ profileId }: TrendingTopicsTabProps) => {
     source: 'manual',
     status: 'active',
   });
+  const [rssUrl, setRssUrl] = useState('');
+  const [rssSourceName, setRssSourceName] = useState('rss_feed');
+  const [sources, setSources] = useState<TrendSource[]>([]);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
   const visibleTrends = useMemo(() => trends.filter(trend => trend.status !== 'archived'), [trends]);
+
+  useEffect(() => {
+    listTrendSources()
+      .then(response => setSources(response.sources))
+      .catch(() => setSources([]));
+  }, []);
 
   const handleCreate = async () => {
     if (!draft.topic.trim()) return;
@@ -34,6 +46,26 @@ export const TrendingTopicsTab = ({ profileId }: TrendingTopicsTabProps) => {
       source: 'manual',
       status: 'active',
     });
+  };
+
+  const handleImportRss = async () => {
+    if (!rssUrl.trim()) return;
+    setIsImporting(true);
+    setImportMessage(null);
+    try {
+      const result = await importTrendRss(profileId, {
+        feedUrl: rssUrl,
+        sourceName: rssSourceName || 'rss_feed',
+        maxItems: 8,
+        platform: draft.platform ?? null,
+      });
+      await loadProfileWorkspace(profileId);
+      setImportMessage(`${result.importedCount} imported · ${result.skippedCount} skipped`);
+    } catch (error) {
+      setImportMessage(error instanceof Error ? error.message : 'Could not import RSS trends');
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   return (
@@ -104,6 +136,21 @@ export const TrendingTopicsTab = ({ profileId }: TrendingTopicsTabProps) => {
             Suggest Local Trends
           </button>
         </div>
+        <div className="studio-subsection">
+          <h3>External Feed Import</h3>
+          <label>
+            RSS / Atom URL
+            <input value={rssUrl} onChange={event => setRssUrl(event.target.value)} placeholder="https://example.com/feed.xml" />
+          </label>
+          <label>
+            Source label
+            <input value={rssSourceName} onChange={event => setRssSourceName(event.target.value)} />
+          </label>
+          <button className="btn-secondary" onClick={() => void handleImportRss()} disabled={isImporting || !rssUrl.trim()}>
+            {isImporting ? 'Importing...' : 'Import Feed'}
+          </button>
+          {importMessage && <p>{importMessage}</p>}
+        </div>
       </section>
 
       <section className="studio-panel studio-collection">
@@ -111,6 +158,16 @@ export const TrendingTopicsTab = ({ profileId }: TrendingTopicsTabProps) => {
           <h2>Trend Radar</h2>
           <span>{visibleTrends.length}</span>
         </header>
+        {sources.length > 0 && (
+          <div className="studio-subsection">
+            <h3>Sources</h3>
+            {sources.map(source => (
+              <p key={source.key}>
+                {source.displayName} · {source.status.replaceAll('_', ' ')}
+              </p>
+            ))}
+          </div>
+        )}
         {visibleTrends.length === 0 && <div className="studio-empty">No trends yet.</div>}
         {visibleTrends.map(trend => (
           <article className="studio-list-item" key={trend.id}>

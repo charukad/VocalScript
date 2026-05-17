@@ -4,8 +4,8 @@ export const getClipPropertyValue = (clip: TimelineClip, property: KeyframePrope
   if (property === 'scale') return clip.transform?.scale ?? 100;
   if (property === 'rotation') return clip.transform?.rotation ?? 0;
   if (property === 'opacity') return clip.transform?.opacity ?? 100;
-  if (property === 'x') return clip.type === 'text' ? clip.textData?.x ?? clip.animation?.x ?? 50 : clip.animation?.x ?? 50;
-  if (property === 'y') return clip.type === 'text' ? clip.textData?.y ?? clip.animation?.y ?? 50 : clip.animation?.y ?? 50;
+  if (property === 'x') return clip.type === 'text' ? clip.textData?.x ?? clip.transform?.x ?? clip.animation?.x ?? 50 : clip.transform?.x ?? clip.animation?.x ?? 50;
+  if (property === 'y') return clip.type === 'text' ? clip.textData?.y ?? clip.transform?.y ?? clip.animation?.y ?? 50 : clip.transform?.y ?? clip.animation?.y ?? 50;
   return clip.audio?.volume ?? 100;
 };
 
@@ -36,7 +36,16 @@ export const getKeyframedValue = (
   const previous = propertyKeyframes[nextIndex - 1];
   const next = propertyKeyframes[nextIndex];
   const span = Math.max(0.001, next.time - previous.time);
-  const progress = (relativeTime - previous.time) / span;
+  const rawProgress = (relativeTime - previous.time) / span;
+  const progress = previous.easing === 'ease_in'
+    ? rawProgress ** 2
+    : previous.easing === 'ease_out'
+      ? 1 - (1 - rawProgress) ** 2
+      : previous.easing === 'ease_in_out'
+        ? rawProgress < 0.5
+          ? 2 * rawProgress ** 2
+          : 1 - ((-2 * rawProgress + 2) ** 2) / 2
+        : rawProgress;
 
   return previous.value + (next.value - previous.value) * progress;
 };

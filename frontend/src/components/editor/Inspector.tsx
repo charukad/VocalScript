@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
-import type { KeyframeProperty } from '../../types';
-import { AutoAnimatePanel } from './AutoAnimatePanel';
-import { AutoGeneratePanel } from './AutoGeneratePanel';
+import type { KeyframeEasing, KeyframeProperty } from '../../types';
+import { buildTranscriptInsights, transcriptInsightsToMarkers } from '../../lib/utils/editorInsights';
+import { StatusState } from '../ui/StatusState';
 
 type KeyframeMeta = {
   label: string;
@@ -33,13 +34,154 @@ const formatSize = (bytes: number): string => {
   return `${mb.toFixed(1)} MB`;
 };
 
+type InspectorTab = 'basic' | 'animation' | 'audio' | 'color' | 'captions' | 'assist';
+
+const INSPECTOR_TABS: Array<{ id: InspectorTab; label: string }> = [
+  { id: 'basic', label: 'Basic' },
+  { id: 'animation', label: 'Animation' },
+  { id: 'audio', label: 'Audio' },
+  { id: 'color', label: 'Color' },
+  { id: 'captions', label: 'Captions' },
+  { id: 'assist', label: 'Assist' },
+];
+
+const EASING_OPTIONS: Array<{ value: KeyframeEasing; label: string }> = [
+  { value: 'linear', label: 'Linear' },
+  { value: 'ease_in', label: 'Ease In' },
+  { value: 'ease_out', label: 'Ease Out' },
+  { value: 'ease_in_out', label: 'Ease In Out' },
+];
+
+const TEXT_PRESETS = [
+  {
+    id: 'title',
+    label: 'Title',
+    patch: {
+      fontSize: 62,
+      bold: true,
+      y: 24,
+      bgOpacity: 0,
+      strokeWidth: 1,
+      shadowOpacity: 0.72,
+      maxWidthPercent: 84,
+      maxCharsPerLine: 24,
+    },
+  },
+  {
+    id: 'subtitle',
+    label: 'Subtitle',
+    patch: {
+      fontSize: 40,
+      bold: false,
+      y: 78,
+      bgOpacity: 0.2,
+      strokeWidth: 0,
+      shadowOpacity: 0.55,
+      maxWidthPercent: 78,
+      maxCharsPerLine: 30,
+    },
+  },
+  {
+    id: 'caption',
+    label: 'Social Caption',
+    patch: {
+      fontSize: 42,
+      bold: true,
+      y: 82,
+      bgOpacity: 0.45,
+      strokeWidth: 0,
+      shadowOpacity: 0.5,
+      maxWidthPercent: 82,
+      maxCharsPerLine: 26,
+    },
+  },
+  {
+    id: 'lower_third',
+    label: 'Lower Third',
+    patch: {
+      fontSize: 34,
+      bold: true,
+      align: 'left' as const,
+      x: 18,
+      y: 84,
+      bgOpacity: 0.68,
+      boxRadius: 8,
+      maxWidthPercent: 56,
+      maxCharsPerLine: 28,
+    },
+  },
+] as const;
+
+const COLOR_LOOK_PRESETS = [
+  {
+    id: 'clean',
+    label: 'Clean',
+    color: { brightness: 100, contrast: 105, saturation: 102, exposure: 0, temperature: 0 },
+    effects: { blur: 0, sharpen: 8, vignette: 0, clarity: 8 },
+  },
+  {
+    id: 'punchy',
+    label: 'Punchy',
+    color: { brightness: 102, contrast: 118, saturation: 118, exposure: 2, temperature: 4 },
+    effects: { blur: 0, sharpen: 16, vignette: 10, clarity: 14 },
+  },
+  {
+    id: 'warm',
+    label: 'Warm',
+    color: { brightness: 102, contrast: 108, saturation: 108, exposure: 1, temperature: 24 },
+    effects: { blur: 0, sharpen: 8, vignette: 16, clarity: 8 },
+  },
+  {
+    id: 'cool',
+    label: 'Cool',
+    color: { brightness: 100, contrast: 110, saturation: 104, exposure: 0, temperature: -22 },
+    effects: { blur: 0, sharpen: 10, vignette: 12, clarity: 10 },
+  },
+  {
+    id: 'mono',
+    label: 'Mono',
+    color: { brightness: 102, contrast: 118, saturation: 0, exposure: 0, temperature: 0 },
+    effects: { blur: 0, sharpen: 12, vignette: 22, clarity: 10 },
+  },
+] as const;
+
+const TRANSITION_PRESETS = [
+  { id: 'cut', label: 'Cut' },
+  { id: 'fade', label: 'Fade' },
+  { id: 'crossfade', label: 'Crossfade' },
+  { id: 'slide_left', label: 'Slide Left' },
+  { id: 'slide_right', label: 'Slide Right' },
+  { id: 'wipe', label: 'Wipe' },
+] as const;
+
+const LAYOUT_PRESETS = [
+  { id: 'free', label: 'Free', patch: { x: 50, y: 50, scale: 100 } },
+  { id: 'pip_top_right', label: 'PIP Top Right', patch: { x: 76, y: 24, scale: 38 } },
+  { id: 'pip_bottom_left', label: 'PIP Bottom Left', patch: { x: 24, y: 76, scale: 38 } },
+  { id: 'split_left', label: 'Split Left', patch: { x: 25, y: 50, scale: 72 } },
+  { id: 'split_right', label: 'Split Right', patch: { x: 75, y: 50, scale: 72 } },
+] as const;
+
+const TITLE_ANIMATION_PRESETS = [
+  { id: 'none', label: 'Static' },
+  { id: 'pop', label: 'Pop' },
+  { id: 'slide_up', label: 'Slide Up' },
+  { id: 'drift', label: 'Drift' },
+] as const;
+
 export const Inspector = () => {
   const {
     clips,
     tracks,
     selectedClipId,
     updateClipTransform,
+    updateClipPosition,
+    updateClipCrop,
     updateClipColor,
+    updateClipEffects,
+    updateClipSpeed,
+    updateClipTransition,
+    updateClipCompositing,
     updateClipAudio,
     updateClipText,
     setClipTiming,
@@ -54,10 +196,21 @@ export const Inspector = () => {
     createTextClipsFromCaptions,
     transcribeSelectedMedia,
     playheadTime,
+    setPlayheadTime,
     addKeyframe,
     updateKeyframe,
-    removeKeyframe
+    removeKeyframe,
+    applyMotionPreset,
+    copyKeyframes,
+    pasteKeyframes,
+    copiedKeyframes,
+    addMarkers,
+    createBeatMarkersFromClip,
+    splitSelectedClipAtCaptionBoundaries,
   } = useEditorStore();
+  const [activeTab, setActiveTab] = useState<InspectorTab>('basic');
+  const [audioStatus, setAudioStatus] = useState<string | null>(null);
+  const [assistStatus, setAssistStatus] = useState<string | null>(null);
 
   const selectedClip = clips.find(c => c.id === selectedClipId);
   const track = selectedClip ? tracks.find(t => t.id === selectedClip.trackId) : null;
@@ -81,20 +234,45 @@ export const Inspector = () => {
       ]
     : [];
   const sortedKeyframes = [...(selectedClip?.keyframes ?? [])].sort((a, b) => a.time - b.time || a.property.localeCompare(b.property));
+  const availableTabs = new Set<InspectorTab>([
+    'basic',
+    ...(selectedClip && keyframeProperties.length > 0 ? ['animation' as const] : []),
+    ...(selectedClip ? ['audio' as const] : []),
+    ...(selectedClip?.type === 'visual' ? ['color' as const] : []),
+    'captions',
+    ...(captions.length > 0 ? ['assist' as const] : []),
+  ]);
+  const displayedTab = availableTabs.has(activeTab) ? activeTab : 'basic';
 
   const totalSequenceDuration = clips.reduce((max, clip) => {
     const end = clip.startTime + clip.duration;
     if (isNaN(end) || !isFinite(end)) return max;
     return Math.max(max, end);
   }, 0);
+  const transcriptInsights = buildTranscriptInsights(captions, totalSequenceDuration);
 
   return (
     <div className="panel properties-panel">
       <div className="panel-header">Inspector</div>
+      <div className="inspector-tabs" role="tablist" aria-label="Inspector sections">
+        {INSPECTOR_TABS.map(tab => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={displayedTab === tab.id}
+            className={displayedTab === tab.id ? 'active' : ''}
+            disabled={!availableTabs.has(tab.id)}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
       <div className="panel-content">
         
         {/* Sequence Overview (Show when nothing is selected) */}
-        {!selectedClip && (
+        {displayedTab === 'basic' && !selectedClip && (
           <>
             <div className="inspector-section">
               <div className="inspector-section-title">Sequence</div>
@@ -113,21 +291,23 @@ export const Inspector = () => {
             </div>
 
             <div className="inspector-empty">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ opacity: 0.5, marginBottom: '0.5rem' }}>
-                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
-                <polyline points="10 17 15 12 10 7"></polyline>
-                <line x1="15" y1="12" x2="3" y2="12"></line>
-              </svg>
-              Select a clip to inspect
+              <StatusState
+                title="Select a clip to inspect"
+                body="Clip-specific controls appear here when a timeline item is selected."
+                icon={
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ opacity: 0.5 }}>
+                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                    <polyline points="10 17 15 12 10 7"></polyline>
+                    <line x1="15" y1="12" x2="3" y2="12"></line>
+                  </svg>
+                }
+              />
             </div>
           </>
         )}
 
-        <AutoGeneratePanel />
-        <AutoAnimatePanel />
-
         {/* Clip Properties */}
-        {selectedClip && (
+        {displayedTab === 'basic' && selectedClip && (
           <div className="inspector-section">
             <div className="inspector-section-title">Clip Properties</div>
             <div className="inspector-row">
@@ -182,7 +362,7 @@ export const Inspector = () => {
         )}
 
         {/* Video Transform Controls */}
-        {selectedClip && selectedClip.type === 'visual' && (
+        {displayedTab === 'basic' && selectedClip && selectedClip.type === 'visual' && (
           <div className="inspector-section">
             <div className="inspector-section-title">Transform</div>
             
@@ -199,6 +379,30 @@ export const Inspector = () => {
                 onChange={(e) => updateClipTransform(selectedClip.id, { scale: Number(e.target.value) })}
                 style={{ width: '100%', cursor: 'pointer' }}
               />
+            </div>
+
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '1rem' }}>
+              {([
+                { axis: 'x' as const, label: 'X', value: selectedClip.transform?.x ?? selectedClip.animation?.x ?? 50 },
+                { axis: 'y' as const, label: 'Y', value: selectedClip.transform?.y ?? selectedClip.animation?.y ?? 50 },
+              ]).map(control => (
+                <div key={control.axis} style={{ flex: 1 }}>
+                  <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>{control.label} Position</div>
+                  <input
+                    type="number"
+                    min={-50}
+                    max={150}
+                    step={1}
+                    value={Number(control.value.toFixed(1))}
+                    onChange={event => updateClipPosition(
+                      selectedClip.id,
+                      control.axis === 'x' ? Number(event.target.value) : selectedClip.transform?.x ?? selectedClip.animation?.x ?? 50,
+                      control.axis === 'y' ? Number(event.target.value) : selectedClip.transform?.y ?? selectedClip.animation?.y ?? 50,
+                    )}
+                    style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                  />
+                </div>
+              ))}
             </div>
 
             {/* Rotation */}
@@ -274,13 +478,106 @@ export const Inspector = () => {
             >
               Reset Transform
             </button>
+
+            <div className="inspector-section-title" style={{ marginTop: '1rem' }}>Crop</div>
+            {(['left', 'right', 'top', 'bottom'] as const).map(edge => (
+              <div key={edge} className="inspector-control-group" style={{ marginBottom: '0.75rem' }}>
+                <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                  <span className="inspector-label" style={{ textTransform: 'capitalize' }}>{edge}</span>
+                  <span className="inspector-value">{selectedClip.crop?.[edge] ?? 0}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={45}
+                  value={selectedClip.crop?.[edge] ?? 0}
+                  onChange={event => updateClipCrop(selectedClip.id, { [edge]: Number(event.target.value) })}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            ))}
+
+            <button
+              className="btn-secondary"
+              style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.7rem' }}
+              onClick={() => updateClipCrop(selectedClip.id, { left: 0, right: 0, top: 0, bottom: 0 })}
+            >
+              Reset Crop
+            </button>
+
+            <div className="inspector-section-title" style={{ marginTop: '1rem' }}>Speed</div>
+            <div className="inspector-control-group" style={{ marginBottom: '0.8rem' }}>
+              <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                <span className="inspector-label">Rate</span>
+                <span className="inspector-value">{(selectedClip.speed?.rate ?? 1).toFixed(2)}x</span>
+              </div>
+              <input
+                type="range"
+                min={0.25}
+                max={4}
+                step={0.05}
+                value={selectedClip.speed?.rate ?? 1}
+                onChange={event => updateClipSpeed(selectedClip.id, { rate: Number(event.target.value) })}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div className="speed-preset-grid">
+              {[0.5, 1, 1.5, 2].map(rate => (
+                <button key={rate} className="btn-secondary" onClick={() => updateClipSpeed(selectedClip.id, { rate })}>
+                  {rate}x
+                </button>
+              ))}
+            </div>
+            <div className="toggle-row-grid">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selectedClip.speed?.reverse ?? false}
+                  onChange={event => updateClipSpeed(selectedClip.id, { reverse: event.target.checked })}
+                />
+                Reverse
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selectedClip.speed?.freezeFrame ?? false}
+                  onChange={event => updateClipSpeed(selectedClip.id, { freezeFrame: event.target.checked })}
+                />
+                Freeze frame
+              </label>
+            </div>
+            <select
+              value={selectedClip.speed?.curvePreset ?? 'constant'}
+              onChange={event => updateClipSpeed(selectedClip.id, { curvePreset: event.target.value as NonNullable<typeof selectedClip.speed>['curvePreset'] })}
+              style={{ width: '100%', marginTop: '0.5rem', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+            >
+              <option value="constant">Constant</option>
+              <option value="ramp_up">Ramp Up</option>
+              <option value="ramp_down">Ramp Down</option>
+            </select>
           </div>
         )}
 
         {/* Color Grading Controls */}
-        {selectedClip && selectedClip.type === 'visual' && (
+        {displayedTab === 'color' && selectedClip && selectedClip.type === 'visual' && (
           <div className="inspector-section">
             <div className="inspector-section-title">Color Grading</div>
+
+            <div className="inspector-subsection-label">Looks</div>
+            <div className="color-look-grid">
+              {COLOR_LOOK_PRESETS.map(preset => (
+                <button
+                  key={preset.id}
+                  className="btn-secondary"
+                  onClick={() => {
+                    updateClipColor(selectedClip.id, preset.color);
+                    updateClipEffects(selectedClip.id, preset.effects);
+                  }}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
 
             {([
               { key: 'brightness', label: 'Brightness', min: 0, max: 200, unit: '%' },
@@ -288,6 +585,11 @@ export const Inspector = () => {
               { key: 'saturation', label: 'Saturation', min: 0, max: 200, unit: '%' },
               { key: 'exposure',   label: 'Exposure',   min: -100, max: 100, unit: '' },
               { key: 'temperature',label: 'Temperature',min: -100, max: 100, unit: '' },
+              { key: 'highlights', label: 'Highlights', min: -100, max: 100, unit: '' },
+              { key: 'shadows', label: 'Shadows', min: -100, max: 100, unit: '' },
+              { key: 'red', label: 'Red', min: -100, max: 100, unit: '' },
+              { key: 'green', label: 'Green', min: -100, max: 100, unit: '' },
+              { key: 'blue', label: 'Blue', min: -100, max: 100, unit: '' },
             ] as const).map(({ key, label, min, max, unit }) => {
               const val = selectedClip.color?.[key] ?? (key === 'brightness' || key === 'contrast' || key === 'saturation' ? 100 : 0);
               return (
@@ -307,18 +609,276 @@ export const Inspector = () => {
               );
             })}
 
+            <div className="inspector-subsection-label" style={{ marginTop: '0.35rem' }}>Finishing</div>
+            {([
+              { key: 'blur', label: 'Blur', min: 0, max: 20, step: 0.5, unit: 'px' },
+              { key: 'sharpen', label: 'Sharpen', min: 0, max: 100, step: 1, unit: '%' },
+              { key: 'vignette', label: 'Vignette', min: 0, max: 100, step: 1, unit: '%' },
+              { key: 'clarity', label: 'Clarity', min: -100, max: 100, step: 1, unit: '%' },
+            ] as const).map(({ key, label, min, max, step, unit }) => {
+              const val = selectedClip.effects?.[key] ?? 0;
+              return (
+                <div key={key} className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+                  <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                    <span className="inspector-label">{label}</span>
+                    <span className="inspector-value">{Number(val.toFixed(1))}{unit}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={min}
+                    max={max}
+                    step={step}
+                    value={val}
+                    onChange={event => updateClipEffects(selectedClip.id, { [key]: Number(event.target.value) })}
+                    style={{ width: '100%', cursor: 'pointer' }}
+                  />
+                </div>
+              );
+            })}
+
+            <div className="inspector-subsection-label" style={{ marginTop: '0.35rem' }}>Overlays</div>
+            <select
+              value={selectedClip.effects?.overlayPreset ?? 'none'}
+              onChange={event => updateClipEffects(selectedClip.id, { overlayPreset: event.target.value as NonNullable<typeof selectedClip.effects>['overlayPreset'] })}
+              style={{ width: '100%', marginBottom: '0.6rem', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+            >
+              <option value="none">None</option>
+              <option value="glitch">Glitch</option>
+              <option value="vhs">VHS</option>
+              <option value="light_leak">Light Leak</option>
+            </select>
+            <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+              <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                <span className="inspector-label">Overlay Intensity</span>
+                <span className="inspector-value">{selectedClip.effects?.overlayIntensity ?? 0}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={selectedClip.effects?.overlayIntensity ?? 0}
+                onChange={event => updateClipEffects(selectedClip.id, { overlayIntensity: Number(event.target.value) })}
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            <div className="inspector-subsection-label" style={{ marginTop: '0.35rem' }}>Compositing</div>
+            <div className="transition-preset-grid">
+              {LAYOUT_PRESETS.map(preset => (
+                <button
+                  key={preset.id}
+                  className="btn-secondary"
+                  onClick={() => {
+                    updateClipCompositing(selectedClip.id, { layoutPreset: preset.id });
+                    updateClipTransform(selectedClip.id, { scale: preset.patch.scale });
+                    updateClipPosition(selectedClip.id, preset.patch.x, preset.patch.y);
+                  }}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.75rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Blend</div>
+                <select
+                  value={selectedClip.compositing?.blendMode ?? 'normal'}
+                  onChange={event => updateClipCompositing(selectedClip.id, { blendMode: event.target.value as NonNullable<typeof selectedClip.compositing>['blendMode'] })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="screen">Screen</option>
+                  <option value="multiply">Multiply</option>
+                  <option value="overlay">Overlay</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Mask</div>
+                <select
+                  value={selectedClip.compositing?.maskShape ?? 'none'}
+                  onChange={event => updateClipCompositing(selectedClip.id, { maskShape: event.target.value as NonNullable<typeof selectedClip.compositing>['maskShape'] })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                >
+                  <option value="none">None</option>
+                  <option value="circle">Circle</option>
+                  <option value="rounded">Rounded</option>
+                </select>
+              </div>
+            </div>
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.75rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Border</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={24}
+                  value={selectedClip.compositing?.borderWidth ?? 0}
+                  onChange={event => updateClipCompositing(selectedClip.id, { borderWidth: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Border Color</div>
+                <input
+                  type="color"
+                  value={selectedClip.compositing?.borderColor ?? '#ffffff'}
+                  onChange={event => updateClipCompositing(selectedClip.id, { borderColor: event.target.value })}
+                  style={{ width: '100%', height: '32px', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: 0 }}
+                />
+              </div>
+            </div>
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.75rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Corner Radius</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={160}
+                  value={selectedClip.compositing?.cornerRadius ?? 0}
+                  onChange={event => updateClipCompositing(selectedClip.id, { cornerRadius: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+            </div>
+
+            <div className="inspector-subsection-label" style={{ marginTop: '0.35rem' }}>Cleanup</div>
+            <div className="toggle-row-grid">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selectedClip.compositing?.chromaKeyEnabled ?? false}
+                  onChange={event => updateClipCompositing(selectedClip.id, { chromaKeyEnabled: event.target.checked })}
+                />
+                Chroma key
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selectedClip.compositing?.stabilization ?? false}
+                  onChange={event => updateClipCompositing(selectedClip.id, { stabilization: event.target.checked })}
+                />
+                Stabilize
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selectedClip.compositing?.backgroundRemoval ?? false}
+                  onChange={event => updateClipCompositing(selectedClip.id, { backgroundRemoval: event.target.checked })}
+                />
+                BG remove hook
+              </label>
+            </div>
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.75rem', marginTop: '0.65rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Key Color</div>
+                <input
+                  type="color"
+                  value={selectedClip.compositing?.chromaKeyColor ?? '#00ff00'}
+                  onChange={event => updateClipCompositing(selectedClip.id, { chromaKeyColor: event.target.value })}
+                  style={{ width: '100%', height: '32px', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: 0 }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Similarity</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={selectedClip.compositing?.chromaKeySimilarity ?? 0.2}
+                  onChange={event => updateClipCompositing(selectedClip.id, { chromaKeySimilarity: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+            </div>
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.75rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Spill</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={selectedClip.compositing?.spillSuppression ?? 0}
+                  onChange={event => updateClipCompositing(selectedClip.id, { spillSuppression: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Edge Feather</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={selectedClip.compositing?.edgeFeather ?? 0}
+                  onChange={event => updateClipCompositing(selectedClip.id, { edgeFeather: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+            </div>
+
+            <div className="inspector-subsection-label" style={{ marginTop: '0.35rem' }}>Transitions</div>
+            <div className="transition-preset-grid">
+              {TRANSITION_PRESETS.map(preset => (
+                <button
+                  key={preset.id}
+                  className={`btn-secondary ${selectedClip.transition?.type === preset.id ? 'active' : ''}`}
+                  onClick={() => updateClipTransition(selectedClip.id, {
+                    type: preset.id,
+                    duration: preset.id === 'cut' ? 0 : Math.max(0.25, selectedClip.transition?.duration ?? 0.35),
+                  })}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <div className="inspector-control-group">
+              <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
+                <span className="inspector-label">Transition Duration</span>
+                <span className="inspector-value">{(selectedClip.transition?.duration ?? 0).toFixed(2)}s</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={2}
+                step={0.05}
+                value={selectedClip.transition?.duration ?? 0}
+                onChange={event => updateClipTransition(selectedClip.id, { duration: Number(event.target.value) })}
+                style={{ width: '100%' }}
+              />
+            </div>
+
             <button
               className="btn-secondary"
               style={{ width: '100%', marginTop: '0.5rem', fontSize: '0.7rem' }}
-              onClick={() => updateClipColor(selectedClip.id, { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 })}
+              onClick={() => {
+                updateClipColor(selectedClip.id, { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0, highlights: 0, shadows: 0, red: 0, green: 0, blue: 0 });
+                updateClipEffects(selectedClip.id, { blur: 0, sharpen: 0, vignette: 0, clarity: 0, overlayPreset: 'none', overlayIntensity: 0 });
+                updateClipCompositing(selectedClip.id, { ...{
+                  blendMode: 'normal',
+                  layoutPreset: 'free',
+                  borderWidth: 0,
+                  borderColor: '#ffffff',
+                  maskShape: 'none',
+                  cornerRadius: 0,
+                  chromaKeyEnabled: false,
+                  chromaKeyColor: '#00ff00',
+                  chromaKeySimilarity: 0.2,
+                  spillSuppression: 0,
+                  edgeFeather: 0,
+                  stabilization: false,
+                  backgroundRemoval: false,
+                } });
+              }}
             >
-              Reset Colors
+              Reset Color & Effects
             </button>
           </div>
         )}
 
         {/* Audio Controls — shown for every clip type */}
-        {selectedClip && (
+        {displayedTab === 'audio' && selectedClip && (
           <div className="inspector-section">
             <div className="inspector-section-title">Audio</div>
 
@@ -366,6 +926,16 @@ export const Inspector = () => {
                 onChange={(e) => updateClipAudio(selectedClip.id, { fadeIn: Number(e.target.value) })}
                 style={{ width: '100%', cursor: 'pointer' }}
               />
+              <select
+                value={selectedClip.audio?.fadeInCurve ?? 'linear'}
+                onChange={event => updateClipAudio(selectedClip.id, { fadeInCurve: event.target.value as NonNullable<typeof selectedClip.audio>['fadeInCurve'] })}
+                style={{ width: '100%', marginTop: '0.4rem', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+              >
+                <option value="linear">Linear</option>
+                <option value="ease_in">Ease In</option>
+                <option value="ease_out">Ease Out</option>
+                <option value="smooth">Smooth</option>
+              </select>
             </div>
 
             {/* Fade Out */}
@@ -380,12 +950,40 @@ export const Inspector = () => {
                 onChange={(e) => updateClipAudio(selectedClip.id, { fadeOut: Number(e.target.value) })}
                 style={{ width: '100%', cursor: 'pointer' }}
               />
+              <select
+                value={selectedClip.audio?.fadeOutCurve ?? 'linear'}
+                onChange={event => updateClipAudio(selectedClip.id, { fadeOutCurve: event.target.value as NonNullable<typeof selectedClip.audio>['fadeOutCurve'] })}
+                style={{ width: '100%', marginTop: '0.4rem', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+              >
+                <option value="linear">Linear</option>
+                <option value="ease_in">Ease In</option>
+                <option value="ease_out">Ease Out</option>
+                <option value="smooth">Smooth</option>
+              </select>
             </div>
+
+            {selectedClip.type === 'audio' && (
+              <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+                <button
+                  className="btn-secondary"
+                  style={{ width: '100%' }}
+                  onClick={() => {
+                    const count = createBeatMarkersFromClip(selectedClip.id);
+                    setAudioStatus(count > 0 ? `Added ${count} beat marker${count === 1 ? '' : 's'}.` : 'No strong beat candidates found on this clip.');
+                  }}
+                >
+                  Create Beat Markers
+                </button>
+                {audioStatus && (
+                  <div className="inspector-helper-text">{audioStatus}</div>
+                )}
+              </div>
+            )}
 
             <button
               className="btn-secondary"
               style={{ width: '100%', fontSize: '0.7rem' }}
-              onClick={() => updateClipAudio(selectedClip.id, { volume: 100, mute: false, fadeIn: 0, fadeOut: 0 })}
+              onClick={() => updateClipAudio(selectedClip.id, { volume: 100, mute: false, fadeIn: 0, fadeOut: 0, fadeInCurve: 'linear', fadeOutCurve: 'linear' })}
             >
               Reset Audio
             </button>
@@ -393,7 +991,7 @@ export const Inspector = () => {
         )}
 
         {/* Keyframe Controls */}
-        {selectedClip && keyframeProperties.length > 0 && (
+        {displayedTab === 'animation' && selectedClip && keyframeProperties.length > 0 && (
           <div className="inspector-section">
             <div className="inspector-section-title">Keyframes</div>
             <div className="inspector-row" style={{ marginBottom: '0.65rem' }}>
@@ -414,6 +1012,49 @@ export const Inspector = () => {
               ))}
             </div>
 
+            <div className="motion-preset-grid">
+              {([
+                { id: 'push_in' as const, label: 'Push In' },
+                { id: 'pop' as const, label: 'Pop' },
+                { id: 'drift' as const, label: 'Drift' },
+              ]).map(preset => (
+                <button
+                  key={preset.id}
+                  className="btn-secondary"
+                  onClick={() => applyMotionPreset(selectedClip.id, preset.id)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="keyframe-clipboard-actions">
+              <button className="btn-secondary" onClick={() => copyKeyframes(selectedClip.id)}>
+                Copy Keyframes
+              </button>
+              <button className="btn-secondary" disabled={!copiedKeyframes?.length} onClick={() => pasteKeyframes(selectedClip.id)}>
+                Paste Keyframes
+              </button>
+            </div>
+
+            {sortedKeyframes.length > 1 && (
+              <div className="keyframe-curve-preview">
+                <svg viewBox="0 0 100 42" preserveAspectRatio="none" aria-label="Keyframe curve preview">
+                  {keyframeProperties.map(property => {
+                    const frames = sortedKeyframes.filter(keyframe => keyframe.property === property);
+                    if (frames.length < 2) return null;
+                    const meta = KEYFRAME_META[property];
+                    const points = frames.map(keyframe => {
+                      const x = (keyframe.time / Math.max(selectedClip.duration, 0.001)) * 100;
+                      const y = 40 - ((keyframe.value - meta.min) / Math.max(1, meta.max - meta.min)) * 36;
+                      return `${x},${Math.max(2, Math.min(40, y))}`;
+                    }).join(' ');
+                    return <polyline key={property} points={points} />;
+                  })}
+                </svg>
+              </div>
+            )}
+
             {sortedKeyframes.length === 0 ? (
               <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', textAlign: 'center', padding: '0.5rem 0' }}>
                 No keyframes on this clip
@@ -423,7 +1064,7 @@ export const Inspector = () => {
                 {sortedKeyframes.map(keyframe => {
                   const meta = KEYFRAME_META[keyframe.property];
                   return (
-                    <div key={keyframe.id} style={{ display: 'grid', gridTemplateColumns: '1fr 64px 70px 28px', gap: '0.35rem', alignItems: 'center' }}>
+                    <div key={keyframe.id} style={{ display: 'grid', gridTemplateColumns: '1fr 64px 70px 92px 28px', gap: '0.35rem', alignItems: 'center' }}>
                       <span className="inspector-label">{meta.label}</span>
                       <input
                         aria-label={`${meta.label} keyframe time`}
@@ -435,6 +1076,16 @@ export const Inspector = () => {
                         onChange={e => updateKeyframe(selectedClip.id, keyframe.id, { time: Number(e.target.value) })}
                         style={{ width: '100%', padding: '0.28rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '5px', color: 'var(--text-primary)', fontSize: '0.7rem' }}
                       />
+                      <select
+                        aria-label={`${meta.label} keyframe easing`}
+                        value={keyframe.easing}
+                        onChange={event => updateKeyframe(selectedClip.id, keyframe.id, { easing: event.target.value as KeyframeEasing })}
+                        style={{ width: '100%', padding: '0.28rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '5px', color: 'var(--text-primary)', fontSize: '0.7rem' }}
+                      >
+                        {EASING_OPTIONS.map(option => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
                       <input
                         aria-label={`${meta.label} keyframe value`}
                         type="number"
@@ -463,9 +1114,46 @@ export const Inspector = () => {
         )}
 
         {/* Text Clip Controls */}
-        {selectedClip?.type === 'text' && selectedClip.textData && (
+        {displayedTab === 'basic' && selectedClip?.type === 'text' && selectedClip.textData && (
           <div className="inspector-section">
             <div className="inspector-section-title">Text</div>
+
+            <div className="text-preset-grid">
+              {TEXT_PRESETS.map(preset => (
+                <button
+                  key={preset.id}
+                  className="btn-secondary"
+                  onClick={() => updateClipText(selectedClip.id, preset.patch)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+              <div className="inspector-label" style={{ marginBottom: '0.35rem' }}>Title Animation</div>
+              <div className="text-preset-grid">
+                {TITLE_ANIMATION_PRESETS.map(preset => (
+                  <button
+                    key={preset.id}
+                    className={`btn-secondary ${selectedClip.textData?.titleAnimation === preset.id ? 'active' : ''}`}
+                    onClick={() => {
+                      updateClipText(selectedClip.id, { titleAnimation: preset.id });
+                      if (preset.id === 'pop' || preset.id === 'drift') {
+                        applyMotionPreset(selectedClip.id, preset.id === 'pop' ? 'pop' : 'drift');
+                      } else if (preset.id === 'slide_up') {
+                        addKeyframe(selectedClip.id, 'y', 0, Math.min(100, (selectedClip.textData?.y ?? 50) + 12));
+                        addKeyframe(selectedClip.id, 'y', Math.min(0.45, selectedClip.duration), selectedClip.textData?.y ?? 50);
+                        addKeyframe(selectedClip.id, 'opacity', 0, 0);
+                        addKeyframe(selectedClip.id, 'opacity', Math.min(0.35, selectedClip.duration), 100);
+                      }
+                    }}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Content */}
             <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
@@ -541,6 +1229,29 @@ export const Inspector = () => {
               </div>
             </div>
 
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.9rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Caption Mode</div>
+                <select
+                  value={selectedClip.textData.captionMode ?? 'standard'}
+                  onChange={event => updateClipText(selectedClip.id, { captionMode: event.target.value as NonNullable<typeof selectedClip.textData>['captionMode'] })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                >
+                  <option value="standard">Standard</option>
+                  <option value="karaoke">Karaoke</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Highlight</div>
+                <input
+                  type="color"
+                  value={selectedClip.textData.highlightColor ?? '#f7d26a'}
+                  onChange={event => updateClipText(selectedClip.id, { highlightColor: event.target.value })}
+                  style={{ width: '100%', height: '32px', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: 0 }}
+                />
+              </div>
+            </div>
+
             {/* Position X / Y */}
             <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
               <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
@@ -563,6 +1274,21 @@ export const Inspector = () => {
                 style={{ width: '100%' }} />
             </div>
 
+            <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
+              <div className="inspector-label" style={{ marginBottom: '0.35rem' }}>Safe Placement</div>
+              <div className="safe-placement-grid">
+                <button className="btn-secondary" onClick={() => updateClipText(selectedClip.id, { x: 50, y: 22, align: 'center' })}>
+                  Top Safe
+                </button>
+                <button className="btn-secondary" onClick={() => updateClipText(selectedClip.id, { x: 50, y: 50, align: 'center' })}>
+                  Center
+                </button>
+                <button className="btn-secondary" onClick={() => updateClipText(selectedClip.id, { x: 50, y: 82, align: 'center' })}>
+                  Lower Safe
+                </button>
+              </div>
+            </div>
+
             {/* Background Opacity */}
             <div className="inspector-control-group" style={{ marginBottom: '0.9rem' }}>
               <div className="inspector-row" style={{ paddingBottom: '0.2rem' }}>
@@ -580,11 +1306,202 @@ export const Inspector = () => {
                   style={{ flex: 1 }} />
               </div>
             </div>
+
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.9rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Box Padding</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={60}
+                  value={selectedClip.textData.boxPadding ?? 14}
+                  onChange={event => updateClipText(selectedClip.id, { boxPadding: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Box Radius</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={60}
+                  value={selectedClip.textData.boxRadius ?? 10}
+                  onChange={event => updateClipText(selectedClip.id, { boxRadius: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+            </div>
+
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.9rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Max Width</div>
+                <input
+                  type="number"
+                  min={20}
+                  max={100}
+                  value={selectedClip.textData.maxWidthPercent ?? 82}
+                  onChange={event => updateClipText(selectedClip.id, { maxWidthPercent: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Chars / Line</div>
+                <input
+                  type="number"
+                  min={8}
+                  max={80}
+                  value={selectedClip.textData.maxCharsPerLine ?? 28}
+                  onChange={event => updateClipText(selectedClip.id, { maxCharsPerLine: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+            </div>
+
+            <div className="inspector-section-title" style={{ marginTop: '1rem' }}>Outline & Shadow</div>
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.9rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Stroke</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={12}
+                  value={selectedClip.textData.strokeWidth ?? 0}
+                  onChange={event => updateClipText(selectedClip.id, { strokeWidth: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Stroke Color</div>
+                <input
+                  type="color"
+                  value={selectedClip.textData.strokeColor ?? '#000000'}
+                  onChange={event => updateClipText(selectedClip.id, { strokeColor: event.target.value })}
+                  style={{ width: '100%', height: '32px', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: 0 }}
+                />
+              </div>
+            </div>
+
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.9rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Shadow Color</div>
+                <input
+                  type="color"
+                  value={selectedClip.textData.shadowColor ?? '#000000'}
+                  onChange={event => updateClipText(selectedClip.id, { shadowColor: event.target.value })}
+                  style={{ width: '100%', height: '32px', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: 0 }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Shadow Opacity</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={selectedClip.textData.shadowOpacity ?? 0.6}
+                  onChange={event => updateClipText(selectedClip.id, { shadowOpacity: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+            </div>
+
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.9rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Shadow Blur</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={40}
+                  value={selectedClip.textData.shadowBlur ?? 6}
+                  onChange={event => updateClipText(selectedClip.id, { shadowBlur: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Shadow X</div>
+                <input
+                  type="number"
+                  min={-40}
+                  max={40}
+                  value={selectedClip.textData.shadowOffsetX ?? 0}
+                  onChange={event => updateClipText(selectedClip.id, { shadowOffsetX: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+            </div>
+
+            <div className="inspector-row" style={{ gap: '0.5rem', marginBottom: '0.9rem' }}>
+              <div style={{ flex: 1 }}>
+                <div className="inspector-label" style={{ marginBottom: '0.25rem' }}>Shadow Y</div>
+                <input
+                  type="number"
+                  min={-40}
+                  max={40}
+                  value={selectedClip.textData.shadowOffsetY ?? 3}
+                  onChange={event => updateClipText(selectedClip.id, { shadowOffsetY: Number(event.target.value) })}
+                  style={{ width: '100%', padding: '0.35rem', background: 'var(--surface-3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-primary)' }}
+                />
+              </div>
+              <div style={{ flex: 1 }} />
+            </div>
+          </div>
+        )}
+
+        {displayedTab === 'assist' && (
+          <div className="inspector-section">
+            <div className="inspector-section-title">Transcript Assist</div>
+            <div className="assist-actions">
+              <button
+                className="btn-secondary"
+                disabled={transcriptInsights.length === 0}
+                onClick={() => {
+                  addMarkers(transcriptInsightsToMarkers(transcriptInsights));
+                  setAssistStatus(transcriptInsights.length > 0
+                    ? `Added ${transcriptInsights.length} review marker${transcriptInsights.length === 1 ? '' : 's'}.`
+                    : 'No transcript findings to mark.');
+                }}
+              >
+                Add Review Markers
+              </button>
+              <button
+                className="btn-secondary"
+                disabled={!selectedClip || captions.length === 0}
+                onClick={() => {
+                  const count = splitSelectedClipAtCaptionBoundaries();
+                  setAssistStatus(count > 0
+                    ? `Split selected clip at ${count} caption boundar${count === 1 ? 'y' : 'ies'}.`
+                    : 'No caption boundaries fall inside the selected clip.');
+                }}
+              >
+                Split At Captions
+              </button>
+            </div>
+            {assistStatus && <div className="inspector-helper-text">{assistStatus}</div>}
+
+            {transcriptInsights.length === 0 ? (
+              <div className="inspector-tab-empty">Generate a transcript to review filler words, silence gaps, and hook risks.</div>
+            ) : (
+              <div className="assist-insight-list">
+                {transcriptInsights.map(insight => (
+                  <div key={insight.id} className={`assist-insight kind-${insight.kind}`}>
+                    <div>
+                      <strong>{insight.title}</strong>
+                      <span>{formatDuration(insight.time)}</span>
+                    </div>
+                    <p>{insight.detail}</p>
+                    <button className="btn-secondary" onClick={() => setPlayheadTime(insight.time)}>
+                      Jump
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         {/* Transcript and Export Section */}
-        <div style={{ marginTop: 'auto', paddingTop: '1.5rem' }}>
+        {displayedTab === 'captions' && (
+        <div style={{ marginTop: 'auto', paddingTop: '0.25rem' }}>
           <div className="inspector-section-title">Transcript</div>
           {exportStatus && (
             <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', textAlign: 'center' }}>
@@ -634,9 +1551,10 @@ export const Inspector = () => {
             </button>
           )}
         </div>
+        )}
 
         {/* Captions Section */}
-        {captions.length > 0 && (
+        {displayedTab === 'captions' && captions.length > 0 && (
           <div className="inspector-section" style={{ marginTop: '1rem' }}>
             <div className="inspector-section-title">Captions</div>
             <button
@@ -662,6 +1580,23 @@ export const Inspector = () => {
               ))}
             </div>
           </div>
+        )}
+
+        {displayedTab !== 'basic' && (
+          <>
+            {displayedTab === 'animation' && !selectedClip && (
+              <div className="inspector-tab-empty">Select a clip to edit animation.</div>
+            )}
+            {displayedTab === 'audio' && !selectedClip && (
+              <div className="inspector-tab-empty">Select a clip to edit audio.</div>
+            )}
+            {displayedTab === 'color' && selectedClip?.type !== 'visual' && (
+              <div className="inspector-tab-empty">Select a visual clip to adjust color.</div>
+            )}
+            {displayedTab === 'assist' && captions.length === 0 && (
+              <div className="inspector-tab-empty">Generate a transcript to unlock assist tools.</div>
+            )}
+          </>
         )}
       </div>
     </div>

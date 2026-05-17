@@ -2,6 +2,7 @@ import { useRef, useState, useMemo } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { useEditorStore } from '../../store/editorStore';
 import type { MediaAsset } from '../../types';
+import { StatusState } from '../ui/StatusState';
 
 interface DraggableAssetProps {
   asset: MediaAsset;
@@ -243,18 +244,21 @@ export const MediaPool = () => {
             <DraggableAsset key={`asset-${asset.id}`} asset={asset} viewMode={viewMode} />
           ))}
           {assets.length === 0 && (
-            <div className="empty-state">
+            <StatusState
+              title="No media yet"
+              body="Drop files here or click Import Media."
+              icon={
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
                 <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
                 <line x1="7" y1="2" x2="7" y2="22"></line>
                 <line x1="17" y1="2" x2="17" y2="22"></line>
                 <line x1="2" y1="12" x2="22" y2="12"></line>
               </svg>
-              Drop files here or click Import
-            </div>
+              }
+            />
           )}
           {assets.length > 0 && filteredAssets.length === 0 && (
-            <div className="empty-state">No results found</div>
+            <StatusState title="No results found" body="Try a different search or media filter." />
           )}
         </div>
       </div>

@@ -71,6 +71,28 @@ export type ContentTrendInput = {
   status?: ContentTrendStatus;
 };
 
+export type TrendSource = {
+  key: string;
+  displayName: string;
+  sourceType: string;
+  requiresCredentials: boolean;
+  status: string;
+};
+
+export type TrendRssImportInput = {
+  feedUrl: string;
+  sourceName?: string;
+  maxItems?: number;
+  platform?: PlatformTarget | null;
+};
+
+export type TrendImportResult = {
+  provider: string;
+  importedCount: number;
+  skippedCount: number;
+  trends: ContentTrend[];
+};
+
 export type CompetitorContentStatus = 'active' | 'archived';
 
 export type CompetitorContent = {
@@ -187,6 +209,77 @@ export type PromptTemplateInput = {
   status?: PromptTemplateStatus;
 };
 
+export type CharacterProfileStatus = 'active' | 'archived';
+
+export type CharacterProfile = {
+  id: string;
+  profileId: string;
+  name: string;
+  role: string;
+  description: string;
+  visualTraits: string[];
+  wardrobe: string[];
+  voiceNotes: string;
+  promptAnchor: string;
+  negativePrompt: string;
+  referenceAssetIds: string[];
+  status: CharacterProfileStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CharacterProfileInput = {
+  name: string;
+  role?: string;
+  description?: string;
+  visualTraits?: string[];
+  wardrobe?: string[];
+  voiceNotes?: string;
+  promptAnchor?: string;
+  negativePrompt?: string;
+  referenceAssetIds?: string[];
+  status?: CharacterProfileStatus;
+};
+
+export type CharacterPromptPack = {
+  characterId: string;
+  prompt: string;
+  negativePrompt: string;
+  notes: string[];
+};
+
+export type CommentTheme = {
+  label: string;
+  count: number;
+  examples: string[];
+};
+
+export type CommentAnalysisSummary = {
+  totalComments: number;
+  sentimentCounts: Record<'positive' | 'neutral' | 'negative', number>;
+  recurringThemes: CommentTheme[];
+  topQuestions: string[];
+  contentRequests: string[];
+  suggestedActions: string[];
+};
+
+export type CommentAnalysisRun = {
+  id: string;
+  profileId: string;
+  platform: PlatformTarget | null;
+  sourceLabel: string;
+  comments: string[];
+  summary: CommentAnalysisSummary;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CommentAnalysisInput = {
+  comments: string[];
+  platform?: PlatformTarget | null;
+  sourceLabel?: string;
+};
+
 export type CalendarItemStatus = 'planned' | 'drafting' | 'ready' | 'published' | 'archived';
 
 export type CalendarItem = {
@@ -281,6 +374,109 @@ export type PackagingGenerationResult = {
   titles: TitleCandidate[];
   thumbnailConcepts: ThumbnailConcept[];
   usedLlmMode: string;
+};
+
+export type RepurposeInput = {
+  sourceTitle?: string;
+  transcript: string;
+  platform?: PlatformTarget | null;
+  targetDurationSeconds?: number;
+  maxCandidates?: number;
+};
+
+export type RepurposeCandidate = {
+  title: string;
+  hook: string;
+  excerpt: string;
+  startSentence: number;
+  endSentence: number;
+  estimatedDurationSeconds: number;
+  reason: string;
+};
+
+export type RepurposeResult = {
+  candidates: RepurposeCandidate[];
+};
+
+export type PublishingDestinationStatus = 'not_connected' | 'manual_only' | 'connected' | 'error';
+export type PublishJobStatus = 'draft' | 'scheduled' | 'ready' | 'dispatched' | 'published' | 'failed' | 'archived';
+
+export type PublishingProvider = {
+  key: string;
+  displayName: string;
+  supportsOauth: boolean;
+  supportsLivePublish: boolean;
+  supportsScheduling: boolean;
+  status: string;
+  readyForOauth: boolean;
+  configurationIssues: string[];
+};
+
+export type PublishingDestination = {
+  id: string;
+  profileId: string;
+  platform: PlatformTarget;
+  status: PublishingDestinationStatus;
+  externalAccountId: string | null;
+  displayName: string;
+  tokenReference: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PublishingDestinationInput = {
+  status: PublishingDestinationStatus;
+  externalAccountId?: string | null;
+  displayName?: string;
+  tokenReference?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type PublishingPackageInput = {
+  script: string;
+  title?: string;
+  topic?: string;
+  platform?: PlatformTarget | null;
+};
+
+export type PublishingPackage = {
+  title: string;
+  description: string;
+  postCopy: string;
+  hashtags: string[];
+  callToAction: string;
+  platformNotes: string[];
+};
+
+export type PublishJob = {
+  id: string;
+  profileId: string;
+  platform: PlatformTarget;
+  title: string;
+  package: PublishingPackage;
+  scheduledAt: string | null;
+  calendarItemId: string | null;
+  projectId: string | null;
+  status: PublishJobStatus;
+  externalPostId: string | null;
+  providerStatus: string;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PublishJobInput = {
+  platform: PlatformTarget;
+  title: string;
+  package: PublishingPackage;
+  scheduledAt?: string | null;
+  calendarItemId?: string | null;
+  projectId?: string | null;
+  status?: PublishJobStatus;
+  externalPostId?: string | null;
+  providerStatus?: string;
+  error?: string | null;
 };
 
 export type Script = {

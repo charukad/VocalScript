@@ -1,5 +1,6 @@
 import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
+import { ArrowDown, ArrowUp, Eye, EyeOff, LockKeyhole } from 'lucide-react';
 import { useEditorStore } from '../../store/editorStore';
 import { DraggableClip } from './DraggableClip';
 import { TimelineToolbar } from './TimelineToolbar';
@@ -12,7 +13,7 @@ interface TrackProps {
 }
 
 const Track = ({ track, timelineWidth }: TrackProps) => {
-  const { clips, zoom, removeClip, setSelectedClip, updateTrack } = useEditorStore();
+  const { clips, tracks, zoom, removeClip, setSelectedClip, updateTrack, moveTrack } = useEditorStore();
   const { setNodeRef, isOver } = useDroppable({
     id: track.id,
     data: { type: 'timeline-track', trackType: track.type },
@@ -23,11 +24,17 @@ const Track = ({ track, timelineWidth }: TrackProps) => {
   const isVisual = track.type === 'visual';
   const isText = track.type === 'text';
   const trackColor = isText ? '#fbbf24' : isVisual ? '#a78bfa' : '#60a5fa';
+  const orderedSiblings = tracks
+    .filter(candidate => candidate.type === track.type)
+    .sort((a, b) => track.type === 'audio' ? a.order - b.order : b.order - a.order);
+  const siblingIndex = orderedSiblings.findIndex(candidate => candidate.id === track.id);
+  const canMoveUp = siblingIndex > 0;
+  const canMoveDown = siblingIndex >= 0 && siblingIndex < orderedSiblings.length - 1;
 
   return (
     <div 
       ref={setNodeRef}
-      className={`timeline-track ${isOver ? 'track-hover' : ''}`}
+      className={`timeline-track ${isOver ? 'track-hover' : ''} ${track.visible === false ? 'track-hidden' : ''}`}
       style={{ 
         backgroundColor: isOver ? 'rgba(0, 122, 204, 0.08)' : undefined
       }}
@@ -38,8 +45,39 @@ const Track = ({ track, timelineWidth }: TrackProps) => {
           <span className="track-title" style={{ color: trackColor }}>
             {track.name}
           </span>
+          <div className="track-order-controls">
+            <button
+              className="track-order-btn"
+              title="Move Track Up"
+              disabled={!canMoveUp}
+              onClick={(event) => {
+                event.stopPropagation();
+                moveTrack(track.id, 'up');
+              }}
+            >
+              <ArrowUp size={11} />
+            </button>
+            <button
+              className="track-order-btn"
+              title="Move Track Down"
+              disabled={!canMoveDown}
+              onClick={(event) => {
+                event.stopPropagation();
+                moveTrack(track.id, 'down');
+              }}
+            >
+              <ArrowDown size={11} />
+            </button>
+          </div>
         </div>
         <div className="track-controls">
+          <button
+            className={`track-ctrl-btn ${track.visible === false ? 'active' : ''}`}
+            title={track.visible === false ? 'Show Track' : 'Hide Track'}
+            onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { visible: track.visible === false }); }}
+          >
+            {track.visible === false ? <EyeOff size={11} /> : <Eye size={11} />}
+          </button>
           <button
             className={`track-ctrl-btn ${track.muted ? 'active' : ''}`}
             title="Mute Track"
@@ -59,10 +97,7 @@ const Track = ({ track, timelineWidth }: TrackProps) => {
             title="Lock Track"
             onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { locked: !track.locked }); }}
           >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-            </svg>
+            <LockKeyhole size={11} />
           </button>
         </div>
       </div>
@@ -76,7 +111,7 @@ const Track = ({ track, timelineWidth }: TrackProps) => {
 };
 
 export const TimelinePanel = () => {
-  const { tracks, clips, zoom, setZoom } = useEditorStore();
+  const { tracks, clips, zoom, setZoom, snapGuideTime } = useEditorStore();
 
   const maxTime = clips.reduce((max, clip) => {
     const end = clip.startTime + clip.duration;
@@ -106,6 +141,9 @@ export const TimelinePanel = () => {
       <TimelineToolbar />
       <div className="timeline-tracks-container">
         <TimelineRuler timelineWidth={timelineWidth} />
+        {snapGuideTime !== null && (
+          <div className="timeline-snap-guide" style={{ left: `${120 + snapGuideTime * zoom}px` }} />
+        )}
         
         {/* Visual Tracks */}
         {sortedTracks.visualTracks.map(track => (

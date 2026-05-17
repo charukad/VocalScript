@@ -1,22 +1,44 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
-  --bg-app: #141414;
-  --bg-panel: #1e1e1e;
-  --bg-header: #252526;
-  --bg-track: #2d2d30;
-  --bg-item: #3e3e42;
-  --surface-2: var(--bg-panel);
-  --surface-3: var(--bg-item);
-  --border-color: #333333;
-  --text-primary: #cccccc;
-  --text-secondary: #858585;
-  --text-highlight: #ffffff;
-  --accent-color: #007acc;
-  --accent-hover: #005f9e;
-  --success-color: #89d185;
-  --error-color: #f48771;
-  --panel-radius: 6px;
+  --bg-app: #0f1115;
+  --bg-panel: #151920;
+  --bg-header: #191e27;
+  --bg-track: #202631;
+  --bg-item: #252d39;
+  --surface-1: #12161c;
+  --surface-2: #181d25;
+  --surface-3: #222a35;
+  --surface-hover: #2a3442;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text-primary: #d8dee8;
+  --text-secondary: #8f98a8;
+  --text-muted: #6f7888;
+  --text-highlight: #f7f9fc;
+  --accent-color: #5b8def;
+  --accent-hover: #78a2ff;
+  --accent-soft: rgba(91, 141, 239, 0.16);
+  --success-color: #78c58d;
+  --warning-color: #f2c46d;
+  --error-color: #f07f75;
+  --panel-radius: 8px;
+  --control-radius: 7px;
+  --shadow-soft: 0 14px 30px rgba(0, 0, 0, 0.24);
+  --shadow-raised: 0 18px 45px rgba(0, 0, 0, 0.34);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 15px;
+  --motion-fast: 120ms ease;
+  --motion-base: 180ms ease;
+  --topbar-height: 64px;
 }
 
 * {
@@ -42,15 +64,15 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--bg-panel);
+  background: var(--surface-1);
 }
 ::-webkit-scrollbar-thumb {
-  background: #424242;
+  background: #343d4b;
   border-radius: 5px;
-  border: 2px solid var(--bg-panel);
+  border: 2px solid var(--surface-1);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4f4f4f;
+  background: #465264;
 }
 
 button {

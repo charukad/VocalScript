@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -23,11 +24,14 @@ from backend.src.domain.models.analytics import (
 )
 from backend.src.domain.models.ab_testing import Experiment
 from backend.src.domain.models.brand_kit import BrandKit
+from backend.src.domain.models.character_consistency import CharacterProfile
+from backend.src.domain.models.comments import CommentAnalysisRun
 from backend.src.domain.models.content_calendar import CalendarItem
 from backend.src.domain.models.competitor import CompetitorContent
 from backend.src.domain.models.content_profile import ContentProfile
 from backend.src.domain.models.content_studio import ContentIdea, ContentTrend, NarrationLine, Script, ScriptVersion
 from backend.src.domain.models.agent import AgentRun, WorkflowRun
+from backend.src.domain.models.publishing import PublishJob, PublishingDestination
 from backend.src.domain.models.project import ProjectDetail, ProjectSummary
 from backend.src.domain.models.prompt_library import PromptTemplate
 
@@ -90,24 +94,39 @@ class SQLiteStore:
             folder_path = project.folder_path
         return Path(database_path) if database_path else Path(folder_path) / PROJECT_DATABASE_NAME
 
-    def _registry_connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _registry_connect(self):
         connection = sqlite3.connect(self.registry_database_path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
-    def _project_connect(self, database_path: Path) -> sqlite3.Connection:
+    @contextmanager
+    def _project_connect(self, database_path: Path):
         database_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(database_path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
-    def _project_read_only_connect(self, database_path: Path) -> sqlite3.Connection:
+    @contextmanager
+    def _project_read_only_connect(self, database_path: Path):
         connection = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _initialize_registry(self) -> None:
         with self._lock, self._registry_connect() as connection:
@@ -207,6 +226,19 @@ class SQLiteStore:
                 CREATE INDEX IF NOT EXISTS idx_prompt_templates_profile
                     ON prompt_templates(profile_id, status, updated_at DESC);
 
+                CREATE TABLE IF NOT EXISTS character_profiles (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    character_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_character_profiles_profile
+                    ON character_profiles(profile_id, status, updated_at DESC);
+
                 CREATE TABLE IF NOT EXISTS calendar_items (
                     id TEXT PRIMARY KEY,
                     profile_id TEXT NOT NULL,
@@ -242,6 +274,19 @@ class SQLiteStore:
 
                 CREATE INDEX IF NOT EXISTS idx_experiments_profile
                     ON experiments(profile_id, status, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS comment_analysis_runs (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    platform TEXT,
+                    source_label TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    run_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_comment_analysis_runs_profile
+                    ON comment_analysis_runs(profile_id, created_at DESC);
 
                 CREATE TABLE IF NOT EXISTS content_ideas (
                     id TEXT PRIMARY KEY,
@@ -514,6 +559,44 @@ class SQLiteStore:
                 CREATE INDEX IF NOT EXISTS idx_competitor_content_profile
                     ON competitor_content(profile_id, status, updated_at DESC);
 
+                CREATE TABLE IF NOT EXISTS publishing_destinations (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'not_connected',
+                    external_account_id TEXT,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    token_reference TEXT,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    destination_json TEXT NOT NULL,
+                    UNIQUE(profile_id, platform)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_publishing_destinations_profile
+                    ON publishing_destinations(profile_id, platform);
+
+                CREATE TABLE IF NOT EXISTS publish_jobs (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    scheduled_at TEXT,
+                    calendar_item_id TEXT,
+                    project_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    external_post_id TEXT,
+                    provider_status TEXT NOT NULL DEFAULT 'placeholder',
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    job_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_publish_jobs_profile
+                    ON publish_jobs(profile_id, status, updated_at DESC);
+
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
                 VALUES (1, CURRENT_TIMESTAMP);
 
@@ -539,7 +622,7 @@ class SQLiteStore:
                 VALUES (8, CURRENT_TIMESTAMP);
 
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
-                VALUES (5, CURRENT_TIMESTAMP);
+                VALUES (9, CURRENT_TIMESTAMP);
                 """
             )
             self._ensure_columns(
@@ -948,6 +1031,57 @@ class SQLiteStore:
             ).fetchone()
         return self._brand_kit_from_json(row["kit_json"]) if row else None
 
+    def upsert_character_profile(self, character: CharacterProfile) -> None:
+        payload = character.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO character_profiles (
+                    id, profile_id, name, status, created_at, updated_at, character_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    name = excluded.name,
+                    status = excluded.status,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    character_json = excluded.character_json
+                """,
+                (
+                    character.id,
+                    character.profile_id,
+                    character.name,
+                    character.status,
+                    character.created_at,
+                    character.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_character_profile(self, character_id: str) -> Optional[CharacterProfile]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute(
+                "SELECT character_json FROM character_profiles WHERE id = ?",
+                (character_id,),
+            ).fetchone()
+        return self._character_profile_from_json(row["character_json"]) if row else None
+
+    def list_character_profiles(self, profile_id: str, include_archived: bool = False) -> List[CharacterProfile]:
+        query = "SELECT character_json FROM character_profiles WHERE profile_id = ?"
+        params: list[Any] = [profile_id]
+        if not include_archived:
+            query += " AND status <> ?"
+            params.append("archived")
+        query += " ORDER BY updated_at DESC, created_at DESC"
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            character
+            for row in rows
+            if (character := self._character_profile_from_json(row["character_json"]))
+        ]
+
     def upsert_prompt_template(self, template: PromptTemplate) -> None:
         payload = template.model_dump(by_alias=True)
         with self._lock, self._registry_connect() as connection:
@@ -1130,6 +1264,50 @@ class SQLiteStore:
             experiment
             for row in rows
             if (experiment := self._experiment_from_json(row["experiment_json"]))
+        ]
+
+    def upsert_comment_analysis_run(self, run: CommentAnalysisRun) -> None:
+        payload = run.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO comment_analysis_runs (
+                    id, profile_id, platform, source_label, created_at, updated_at, run_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    platform = excluded.platform,
+                    source_label = excluded.source_label,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    run_json = excluded.run_json
+                """,
+                (
+                    run.id,
+                    run.profile_id,
+                    run.platform,
+                    run.source_label,
+                    run.created_at,
+                    run.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def list_comment_analysis_runs(self, profile_id: str) -> List[CommentAnalysisRun]:
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT run_json FROM comment_analysis_runs
+                WHERE profile_id = ?
+                ORDER BY created_at DESC, updated_at DESC
+                """,
+                (profile_id,),
+            ).fetchall()
+        return [
+            run
+            for row in rows
+            if (run := self._comment_analysis_run_from_json(row["run_json"]))
         ]
 
     def upsert_content_idea(self, idea: ContentIdea) -> None:
@@ -1886,6 +2064,140 @@ class SQLiteStore:
             item
             for row in rows
             if (item := self._competitor_content_from_json(row["content_json"]))
+        ]
+
+    def upsert_publishing_destination(self, destination: PublishingDestination) -> None:
+        payload = destination.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO publishing_destinations (
+                    id, profile_id, platform, status, external_account_id, display_name,
+                    token_reference, metadata_json, created_at, updated_at, destination_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    platform = excluded.platform,
+                    status = excluded.status,
+                    external_account_id = excluded.external_account_id,
+                    display_name = excluded.display_name,
+                    token_reference = excluded.token_reference,
+                    metadata_json = excluded.metadata_json,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    destination_json = excluded.destination_json
+                """,
+                (
+                    destination.id,
+                    destination.profile_id,
+                    destination.platform,
+                    destination.status,
+                    destination.external_account_id,
+                    destination.display_name,
+                    destination.token_reference,
+                    _json_dumps(destination.metadata),
+                    destination.created_at,
+                    destination.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_publishing_destination(
+        self,
+        profile_id: str,
+        platform: str,
+    ) -> Optional[PublishingDestination]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute(
+                """
+                SELECT destination_json FROM publishing_destinations
+                WHERE profile_id = ? AND platform = ?
+                """,
+                (profile_id, platform),
+            ).fetchone()
+        return self._publishing_destination_from_json(row["destination_json"]) if row else None
+
+    def list_publishing_destinations(self, profile_id: str) -> List[PublishingDestination]:
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT destination_json FROM publishing_destinations
+                WHERE profile_id = ?
+                ORDER BY platform ASC
+                """,
+                (profile_id,),
+            ).fetchall()
+        return [
+            destination
+            for row in rows
+            if (destination := self._publishing_destination_from_json(row["destination_json"]))
+        ]
+
+    def upsert_publish_job(self, job: PublishJob) -> None:
+        payload = job.model_dump(by_alias=True)
+        with self._lock, self._registry_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO publish_jobs (
+                    id, profile_id, platform, title, scheduled_at, calendar_item_id, project_id,
+                    status, external_post_id, provider_status, error, created_at, updated_at, job_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    platform = excluded.platform,
+                    title = excluded.title,
+                    scheduled_at = excluded.scheduled_at,
+                    calendar_item_id = excluded.calendar_item_id,
+                    project_id = excluded.project_id,
+                    status = excluded.status,
+                    external_post_id = excluded.external_post_id,
+                    provider_status = excluded.provider_status,
+                    error = excluded.error,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    job_json = excluded.job_json
+                """,
+                (
+                    job.id,
+                    job.profile_id,
+                    job.platform,
+                    job.title,
+                    job.scheduled_at,
+                    job.calendar_item_id,
+                    job.project_id,
+                    job.status,
+                    job.external_post_id,
+                    job.provider_status,
+                    job.error,
+                    job.created_at,
+                    job.updated_at,
+                    _json_dumps(payload),
+                ),
+            )
+
+    def get_publish_job(self, job_id: str) -> Optional[PublishJob]:
+        with self._lock, self._registry_connect() as connection:
+            row = connection.execute(
+                "SELECT job_json FROM publish_jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+        return self._publish_job_from_json(row["job_json"]) if row else None
+
+    def list_publish_jobs(self, profile_id: str, include_archived: bool = False) -> List[PublishJob]:
+        query = "SELECT job_json FROM publish_jobs WHERE profile_id = ?"
+        params: list[Any] = [profile_id]
+        if not include_archived:
+            query += " AND status <> ?"
+            params.append("archived")
+        query += " ORDER BY updated_at DESC, created_at DESC"
+        with self._lock, self._registry_connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            job
+            for row in rows
+            if (job := self._publish_job_from_json(row["job_json"]))
         ]
 
     def replace_profile_learnings(self, profile_id: str, learnings: List[ProfileLearning]) -> None:
@@ -3095,6 +3407,18 @@ class SQLiteStore:
         except ValueError:
             return None
 
+    def _character_profile_from_json(self, raw: str) -> Optional[CharacterProfile]:
+        try:
+            return CharacterProfile(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _comment_analysis_run_from_json(self, raw: str) -> Optional[CommentAnalysisRun]:
+        try:
+            return CommentAnalysisRun(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
     def _brand_kit_from_json(self, raw: str) -> Optional[BrandKit]:
         try:
             return BrandKit(**_json_loads(raw, {}))
@@ -3116,6 +3440,18 @@ class SQLiteStore:
     def _experiment_from_json(self, raw: str) -> Optional[Experiment]:
         try:
             return Experiment(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _publishing_destination_from_json(self, raw: str) -> Optional[PublishingDestination]:
+        try:
+            return PublishingDestination(**_json_loads(raw, {}))
+        except ValueError:
+            return None
+
+    def _publish_job_from_json(self, raw: str) -> Optional[PublishJob]:
+        try:
+            return PublishJob(**_json_loads(raw, {}))
         except ValueError:
             return None
 

@@ -1,7 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import type { TimelineClip } from '../../types';
 import { getKeyframedValue } from '../../lib/utils/keyframes';
+import { CanvasOverlay } from '../../features/canvas/CanvasOverlay';
+import { StatusState } from '../ui/StatusState';
 
 const formatTimecode = (seconds: number): string => {
   const h = Math.floor(seconds / 3600);
@@ -11,14 +13,48 @@ const formatTimecode = (seconds: number): string => {
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}:${String(f).padStart(2,'0')}`;
 };
 
+const applyFadeCurve = (progress: number, curve: NonNullable<TimelineClip['audio']>['fadeInCurve'] = 'linear') => {
+  const safeProgress = Math.max(0, Math.min(1, progress));
+  switch (curve) {
+    case 'ease_in':
+      return safeProgress ** 2;
+    case 'ease_out':
+      return 1 - ((1 - safeProgress) ** 2);
+    case 'smooth':
+      return safeProgress * safeProgress * (3 - 2 * safeProgress);
+    case 'linear':
+    default:
+      return safeProgress;
+  }
+};
+
 export const PreviewWindow = () => {
-  const { clips, tracks, playheadTime, setPlayheadTime, isPlaying, isProcessing, exportStatus, srtContent, mediaUrl, togglePlayback, setIsPlaying } = useEditorStore();
+  const {
+    clips,
+    tracks,
+    selectedClipId,
+    playheadTime,
+    setPlayheadTime,
+    isPlaying,
+    isProcessing,
+    exportStatus,
+    srtContent,
+    mediaUrl,
+    togglePlayback,
+    setIsPlaying,
+    updateClipPosition,
+    updateClipTransform,
+  } = useEditorStore();
   
   const animationRef = useRef<number | null>(null);
+  const previewContentRef = useRef<HTMLDivElement>(null);
   const lastUpdateRef = useRef<number>(0);
   const audioRefs = useRef<{ [id: string]: HTMLAudioElement }>({});
   const videoRefs = useRef<{ [id: string]: HTMLVideoElement }>({});
   const pendingPlays = useRef<{ [id: string]: boolean }>({});
+  const [showGrid, setShowGrid] = useState(false);
+  const [showRulers, setShowRulers] = useState(false);
+  const [showSafeArea, setShowSafeArea] = useState(true);
   
   // Memoize object URLs to prevent continuous reloading
   const objectUrlsRef = useRef<Record<string, string>>({});
@@ -41,8 +77,9 @@ export const PreviewWindow = () => {
   };
 
   const buildCssFilter = (clip: TimelineClip): string => {
-    const c = clip.color;
-    if (!c) return '';
+    const c = clip.color ?? { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 };
+    const effects = clip.effects;
+    if (!clip.color && !effects) return '';
     // brightness & contrast: CSS expects % (100% = normal)
     // saturation: CSS expects % (100% = normal)
     // exposure: treat as brightness offset (-100..100 mapped to 0..2)
@@ -50,17 +87,23 @@ export const PreviewWindow = () => {
     const brightnessVal = ((c.brightness / 100) * exposureMult);
     // temperature: hue-rotate trick — warm (+) shifts hue slightly positive, cool (-) negative
     const hueShift = c.temperature * 0.3; // subtle: ±30deg at extremes
-    return [
+    const clarityBoost = 1 + ((effects?.clarity ?? 0) / 200);
+    const filters = [
       `brightness(${brightnessVal.toFixed(3)})`,
-      `contrast(${(c.contrast / 100).toFixed(3)})`,
+      `contrast(${((c.contrast / 100) * clarityBoost).toFixed(3)})`,
       `saturate(${(c.saturation / 100).toFixed(3)})`,
       `hue-rotate(${hueShift.toFixed(1)}deg)`,
-    ].join(' ');
+    ];
+    if ((effects?.blur ?? 0) > 0) filters.push(`blur(${effects!.blur}px)`);
+    if ((effects?.sharpen ?? 0) > 0) {
+      filters.push(`contrast(${(1 + effects!.sharpen / 250).toFixed(3)})`);
+    }
+    return filters.join(' ');
   };
 
   const isTrackActive = (trackId: string) => {
     const track = tracks.find(t => t.id === trackId);
-    if (!track || track.muted) return false;
+    if (!track || track.muted || track.visible === false) return false;
     const hasSoloForType = tracks.some(t => t.type === track.type && t.solo);
     return !hasSoloForType || Boolean(track.solo);
   };
@@ -78,22 +121,54 @@ export const PreviewWindow = () => {
     const scale = getKeyframedValue(clip, 'scale', playheadTime, clip.transform?.scale ?? 100);
     const rotation = getKeyframedValue(clip, 'rotation', playheadTime, clip.transform?.rotation ?? 0);
     const opacity = getKeyframedValue(clip, 'opacity', playheadTime, clip.transform?.opacity ?? 100);
-    const x = getKeyframedValue(clip, 'x', playheadTime, clip.animation?.x ?? 50);
-    const y = getKeyframedValue(clip, 'y', playheadTime, clip.animation?.y ?? 50);
+    const x = getKeyframedValue(clip, 'x', playheadTime, clip.transform?.x ?? clip.animation?.x ?? 50);
+    const y = getKeyframedValue(clip, 'y', playheadTime, clip.transform?.y ?? clip.animation?.y ?? 50);
     return {
       left: `${x}%`,
       top: `${y}%`,
       transform: `translate(-50%, -50%) scale(${scale / 100}) rotate(${rotation}deg) scaleX(${clip.transform?.flipX ? -1 : 1}) scaleY(${clip.transform?.flipY ? -1 : 1})`,
       opacity: Math.max(0, Math.min(1, opacity / 100)),
+      clipPath: clip.crop
+        ? `inset(${clip.crop.top}% ${clip.crop.right}% ${clip.crop.bottom}% ${clip.crop.left}%)`
+        : undefined,
+      mixBlendMode: clip.compositing?.blendMode === 'normal' ? undefined : clip.compositing?.blendMode,
+      border: clip.compositing?.borderWidth
+        ? `${clip.compositing.borderWidth}px solid ${clip.compositing.borderColor}`
+        : undefined,
+      borderRadius: clip.compositing?.maskShape === 'circle'
+        ? '50%'
+        : clip.compositing?.maskShape === 'rounded'
+          ? `${clip.compositing.cornerRadius}px`
+          : clip.compositing?.borderWidth
+            ? '4px'
+            : undefined,
     };
   };
   const getVisualZIndex = (clip: TimelineClip): number => Math.max(1, activeVisualClips.findIndex(item => item.id === clip.id) + 1);
+  const selectedClip = clips.find(clip => clip.id === selectedClipId) ?? null;
+  const canEditSelectedClip = Boolean(
+    selectedClip
+    && (selectedClip.type === 'visual' || selectedClip.type === 'text')
+    && playheadTime >= selectedClip.startTime
+    && playheadTime <= selectedClip.startTime + selectedClip.duration
+    && isTrackActive(selectedClip.trackId)
+  );
 
   const maxTime = clips.reduce((max, clip) => {
     const end = clip.startTime + clip.duration;
     if (isNaN(end) || !isFinite(end)) return max;
     return Math.max(max, end);
   }, 0);
+
+  const getMediaTime = (clip: TimelineClip, timelineTime: number): number => {
+    const relative = Math.max(0, timelineTime - clip.startTime);
+    const rate = clip.speed?.rate ?? 1;
+    if (clip.speed?.freezeFrame) return clip.mediaOffset || 0;
+    if (clip.speed?.reverse) {
+      return Math.max(0, (clip.mediaOffset || 0) + Math.max(0, clip.duration - relative) * rate);
+    }
+    return (clip.mediaOffset || 0) + relative * rate;
+  };
 
   // Playback Loop
   useEffect(() => {
@@ -124,6 +199,11 @@ export const PreviewWindow = () => {
 
             const isWithinClip = currentPlayhead >= clip.startTime && currentPlayhead <= clip.startTime + clip.duration;
             if (isWithinClip) {
+              const expectedTime = getMediaTime(clip, currentPlayhead);
+              const speedRate = clip.speed?.rate ?? 1;
+              if (!clip.speed?.reverse && !clip.speed?.freezeFrame && mediaEl.playbackRate !== speedRate) {
+                mediaEl.playbackRate = speedRate;
+              }
               // --- Volume Envelope ---
               const baseVol = getKeyframedValue(clip, 'volume', currentPlayhead, clip.audio?.volume ?? 100) / 100;
               const relTime = currentPlayhead - clip.startTime; // position within clip
@@ -134,18 +214,25 @@ export const PreviewWindow = () => {
               let envMultiplier = 1.0;
               if (fadeIn > 0 && relTime < fadeIn) {
                 // Ramp up: 0 → 1 over fadeIn seconds
-                envMultiplier = Math.min(1, relTime / fadeIn);
+                envMultiplier = Math.min(1, applyFadeCurve(relTime / fadeIn, clip.audio?.fadeInCurve));
               }
               if (fadeOut > 0 && relTime > clipDur - fadeOut) {
                 // Ramp down: 1 → 0 over fadeOut seconds
                 const fadeOutProgress = (clipDur - relTime) / fadeOut;
-                envMultiplier = Math.min(envMultiplier, Math.max(0, fadeOutProgress));
+                envMultiplier = Math.min(
+                  envMultiplier,
+                  Math.max(0, applyFadeCurve(fadeOutProgress, clip.audio?.fadeOutCurve)),
+                );
               }
               const targetVol = Math.max(0, Math.min(1, baseVol * envMultiplier));
               if (Math.abs(mediaEl.volume - targetVol) > 0.005) mediaEl.volume = targetVol;
 
-              if (mediaEl.paused && !mediaEl.ended && !pendingPlays.current[clip.id]) {
-                const expectedTime = currentPlayhead - clip.startTime + (clip.mediaOffset || 0);
+              if (clip.speed?.reverse || clip.speed?.freezeFrame) {
+                if (!mediaEl.paused) mediaEl.pause();
+                if (Math.abs(mediaEl.currentTime - expectedTime) > 0.5) {
+                  mediaEl.currentTime = expectedTime;
+                }
+              } else if (mediaEl.paused && !mediaEl.ended && !pendingPlays.current[clip.id]) {
                 if (Math.abs(mediaEl.currentTime - expectedTime) > 0.5) {
                   mediaEl.currentTime = expectedTime;
                 }
@@ -185,7 +272,7 @@ export const PreviewWindow = () => {
         const mediaEl = clip.type === 'audio' ? audioRefs.current[clip.id] : videoRefs.current[clip.id];
         if (mediaEl) {
           if (playheadTime >= clip.startTime && playheadTime <= clip.startTime + clip.duration) {
-             mediaEl.currentTime = playheadTime - clip.startTime + (clip.mediaOffset || 0);
+             mediaEl.currentTime = getMediaTime(clip, playheadTime);
           }
         }
       });
@@ -198,12 +285,9 @@ export const PreviewWindow = () => {
   return (
     <div className="preview-window">
       <div className="panel-header">Live Preview</div>
-      <div className="preview-content">
+      <div ref={previewContentRef} className="preview-content">
         {isProcessing ? (
-          <div className="status-indicator">
-            <div className="spinner"></div>
-            <div style={{ color: 'var(--text-secondary)' }}>{exportStatus || 'Processing...'}</div>
-          </div>
+          <StatusState title={exportStatus || 'Processing...'} tone="loading" />
         ) : (
           <>
             {/* Render all videos visibly but toggle display so they are controlled by the central sync loop */}
@@ -220,7 +304,6 @@ export const PreviewWindow = () => {
                   maxWidth: '100%', 
                   maxHeight: '100%',
                   objectFit: 'contain',
-                  borderRadius: '4px',
                   zIndex: getVisualZIndex(clip),
                   ...getVisualStyle(clip),
                   filter: buildCssFilter(clip),
@@ -241,7 +324,6 @@ export const PreviewWindow = () => {
                   maxWidth: '100%',
                   maxHeight: '100%',
                   objectFit: 'contain',
-                  borderRadius: '4px',
                   zIndex: getVisualZIndex(clip),
                   ...getVisualStyle(clip),
                   filter: buildCssFilter(clip),
@@ -249,6 +331,34 @@ export const PreviewWindow = () => {
                 }} 
               />
             ))}
+
+            {activeVisualClips
+              .filter(clip => (clip.effects?.vignette ?? 0) > 0)
+              .map(clip => (
+                <div
+                  key={`vignette-${clip.id}`}
+                  className="preview-vignette-overlay"
+                  style={{
+                    ...getVisualStyle(clip),
+                    zIndex: getVisualZIndex(clip) + 0.25,
+                    opacity: Math.max(0, Math.min(0.92, (clip.effects?.vignette ?? 0) / 100)),
+                  }}
+                />
+              ))}
+
+            {activeVisualClips
+              .filter(clip => clip.effects?.overlayPreset && clip.effects.overlayPreset !== 'none')
+              .map(clip => (
+                <div
+                  key={`overlay-${clip.id}`}
+                  className={`preview-effect-overlay preset-${clip.effects?.overlayPreset}`}
+                  style={{
+                    ...getVisualStyle(clip),
+                    zIndex: getVisualZIndex(clip) + 0.35,
+                    opacity: Math.max(0, Math.min(1, (clip.effects?.overlayIntensity ?? 0) / 100)),
+                  }}
+                />
+              ))}
 
             {/* Text Overlays */}
             {clips
@@ -259,6 +369,12 @@ export const PreviewWindow = () => {
                 const rotation = getKeyframedValue(clip, 'rotation', playheadTime, clip.transform?.rotation ?? 0);
                 const x = getKeyframedValue(clip, 'x', playheadTime, td.x);
                 const y = getKeyframedValue(clip, 'y', playheadTime, td.y);
+                const shadowColor = td.shadowColor ?? '#000000';
+                const shadowOpacity = td.shadowOpacity ?? 0.6;
+                const shadowHex = Math.round(Math.max(0, Math.min(1, shadowOpacity)) * 255).toString(16).padStart(2, '0');
+                const words = td.content.trim().split(/\s+/).filter(Boolean);
+                const clipProgress = Math.max(0, Math.min(1, (playheadTime - clip.startTime) / Math.max(clip.duration, 0.001)));
+                const highlightedWords = Math.max(1, Math.ceil(words.length * clipProgress));
                 return (
                   <div
                     key={clip.id}
@@ -276,21 +392,56 @@ export const PreviewWindow = () => {
                       backgroundColor: td.bgOpacity > 0
                         ? `${td.bgColor}${Math.round(td.bgOpacity * 255).toString(16).padStart(2, '0')}`
                         : 'transparent',
-                      padding: td.bgOpacity > 0 ? '0.2em 0.4em' : '0',
-                      borderRadius: td.bgOpacity > 0 ? '4px' : '0',
+                      padding: td.bgOpacity > 0 ? `${td.boxPadding ?? 14}px` : '0',
+                      borderRadius: td.bgOpacity > 0 ? `${td.boxRadius ?? 10}px` : '0',
                       opacity: getKeyframedValue(clip, 'opacity', playheadTime, clip.transform?.opacity ?? 100) / 100,
                       whiteSpace: 'pre-wrap',
-                      maxWidth: '90%',
+                      maxWidth: `${td.maxWidthPercent ?? 82}%`,
                       pointerEvents: 'none',
-                      textShadow: td.bgOpacity === 0 ? '0 1px 4px rgba(0,0,0,0.8)' : 'none',
+                      textShadow: shadowOpacity > 0
+                        ? `${td.shadowOffsetX ?? 0}px ${td.shadowOffsetY ?? 3}px ${td.shadowBlur ?? 6}px ${shadowColor}${shadowHex}`
+                        : 'none',
+                      WebkitTextStroke: `${td.strokeWidth ?? 0}px ${td.strokeColor ?? '#000000'}`,
                       zIndex: 100 + (clip.animation?.order ?? 0),
                     }}
                   >
-                    {td.content}
+                    {td.captionMode === 'karaoke' && words.length > 0
+                      ? words.map((word, index) => (
+                          <span
+                            key={`${clip.id}-word-${index}`}
+                            className={index < highlightedWords ? 'karaoke-word active' : 'karaoke-word'}
+                            style={index < highlightedWords ? { color: td.highlightColor ?? '#f7d26a' } : undefined}
+                          >
+                            {word}{index < words.length - 1 ? ' ' : ''}
+                          </span>
+                        ))
+                      : td.content}
                   </div>
                 );
               })
             }
+
+            {canEditSelectedClip && selectedClip && (
+              <CanvasOverlay
+                clip={selectedClip}
+                playheadTime={playheadTime}
+                containerRef={previewContentRef}
+                showGrid={showGrid}
+                showRulers={showRulers}
+                showSafeArea={showSafeArea}
+                onToggleGrid={() => setShowGrid(current => !current)}
+                onToggleRulers={() => setShowRulers(current => !current)}
+                onToggleSafeArea={() => setShowSafeArea(current => !current)}
+                onMove={(x, y) => updateClipPosition(selectedClip.id, x, y)}
+                onScale={(scale) => updateClipTransform(selectedClip.id, { scale })}
+                onCrop={(updates) => useEditorStore.getState().updateClipCrop(selectedClip.id, updates)}
+                onReset={() => {
+                  updateClipPosition(selectedClip.id, 50, selectedClip.type === 'text' ? selectedClip.textData?.y ?? 85 : 50);
+                  updateClipTransform(selectedClip.id, { scale: 100, rotation: 0, opacity: 100, flipX: false, flipY: false });
+                  useEditorStore.getState().updateClipCrop(selectedClip.id, { left: 0, right: 0, top: 0, bottom: 0 });
+                }}
+              />
+            )}
 
             {/* If no visuals but exported media exists */}
             {!hasActiveVisuals && srtContent && mediaUrl && (
@@ -305,15 +456,18 @@ export const PreviewWindow = () => {
 
             {/* No Visuals Placeholder */}
             {!hasActiveVisuals && !srtContent && (
-              <div className="no-visual-placeholder">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--text-secondary)', opacity: 0.4 }}>
-                  <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
-                  <line x1="7" y1="2" x2="7" y2="22"></line>
-                  <line x1="17" y1="2" x2="17" y2="22"></line>
-                  <line x1="2" y1="12" x2="22" y2="12"></line>
-                </svg>
-                <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', opacity: 0.6 }}>No visuals at current time</span>
-              </div>
+              <StatusState
+                title="No visuals at current time"
+                body="Move the playhead or add a clip to the timeline."
+                icon={
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--text-secondary)', opacity: 0.4 }}>
+                    <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+                    <line x1="7" y1="2" x2="7" y2="22"></line>
+                    <line x1="17" y1="2" x2="17" y2="22"></line>
+                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                  </svg>
+                }
+              />
             )}
 
             {/* Subtitles Preview */}

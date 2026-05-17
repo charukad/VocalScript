@@ -125,6 +125,16 @@ const capabilityText = (capability: ProviderCapability): string => {
   return `${capability.provider}: ${enabled.length ? enabled.join(', ') : 'detecting'}`;
 };
 
+const providerDisplayName = (provider: ProviderName): string => {
+  if (provider === 'google_ai_studio') return 'Google AI Studio';
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
+};
+
+const defaultAdapterPrompt = (provider: ProviderName): string =>
+  provider === 'google_ai_studio'
+    ? 'Read this sentence clearly for a NeuralScribe adapter test.'
+    : 'NeuralScribe adapter test image, simple blue geometric logo, no text';
+
 const healthLabel = (health: ProviderHealthSnapshot): string =>
   `${health.provider}: ${health.status.replaceAll('_', ' ')}`;
 
@@ -228,6 +238,7 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
   const [jobWorkerAssignments, setJobWorkerAssignments] = React.useState<Record<string, string>>({});
   const [manualMediaUrls, setManualMediaUrls] = React.useState<Record<string, string>>({});
   const [adapterTestPrompts, setAdapterTestPrompts] = React.useState<Record<string, string>>({});
+  const [adapterTestProviders, setAdapterTestProviders] = React.useState<Record<string, ProviderName>>({});
   const [autoFallbackEnabled, setAutoFallbackEnabled] = React.useState(false);
   const [selectedJobId, setSelectedJobId] = React.useState<string | null>(null);
   const [extendPrompts, setExtendPrompts] = React.useState<Record<string, string>>({});
@@ -1165,6 +1176,12 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
             const connectedNow = isWorkerConnectedNow(worker);
             const nicknameDraft = workerNicknames[worker.workerId] ?? worker.nickname ?? '';
             const adapterPromptDraft = adapterTestPrompts[worker.workerId] ?? '';
+            const availableAdapterProviders = worker.providers.filter(provider =>
+              runnableBridgeProviders.includes(provider)
+            );
+            const adapterTestProvider = adapterTestProviders[worker.workerId]
+              ?? availableAdapterProviders[0]
+              ?? 'meta';
             const workerAdapterTests = adapterTestsByWorker.get(worker.workerId) ?? [];
             return (
             <article key={worker.workerId} className={`bridge-worker-card status-${worker.status}`}>
@@ -1269,7 +1286,18 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                 </div>
               )}
               <label className="bridge-worker-adapter-test">
-                <span>Full Test Prompt</span>
+                <span>Adapter Test</span>
+                <select
+                  value={adapterTestProvider}
+                  onChange={event => setAdapterTestProviders(previous => ({
+                    ...previous,
+                    [worker.workerId]: event.target.value as ProviderName,
+                  }))}
+                >
+                  {availableAdapterProviders.map(provider => (
+                    <option key={provider} value={provider}>{providerDisplayName(provider)}</option>
+                  ))}
+                </select>
                 <input
                   value={adapterPromptDraft}
                   onChange={event => setAdapterTestPrompts(previous => ({
@@ -1323,17 +1351,20 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                 </button>
                 <button
                   className="btn-secondary"
-                  onClick={() => void runWorkerAction(`adapter-${worker.workerId}`, () => runBrowserBridgeAdapterTest(worker.workerId))}
+                  onClick={() => void runWorkerAction(`adapter-${worker.workerId}`, () => runBrowserBridgeAdapterTest(worker.workerId, {
+                    provider: adapterTestProvider,
+                  }))}
                   disabled={!connectedNow || actionId === `adapter-${worker.workerId}`}
                 >
-                  {actionId === `adapter-${worker.workerId}` ? 'Testing...' : 'Test Meta'}
+                  {actionId === `adapter-${worker.workerId}` ? 'Testing...' : `Test ${providerDisplayName(adapterTestProvider)}`}
                 </button>
                 <button
                   className="btn-secondary"
                   onClick={() => {
-                    if (!window.confirm('Run a full Meta adapter test? This submits the prompt in this Chrome profile.')) return;
+                    if (!window.confirm(`Run a full ${providerDisplayName(adapterTestProvider)} adapter test? This submits the prompt in this Chrome profile.`)) return;
                     void runWorkerAction(`adapter-full-${worker.workerId}`, () => runBrowserBridgeAdapterTest(worker.workerId, {
-                      fullTestPrompt: adapterPromptDraft || 'NeuralScribe adapter test image, simple blue geometric logo, no text',
+                      provider: adapterTestProvider,
+                      fullTestPrompt: adapterPromptDraft || defaultAdapterPrompt(adapterTestProvider),
                       submitFullTest: true,
                     }));
                   }}

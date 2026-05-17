@@ -31,11 +31,11 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Phase 6: Agent System MVP
 - `[x]` Phase 7: Storyboard and Viral Visual Planner Upgrade
 - `[x]` Phase 8: Narration Line System
-- `[/]` Phase 9: Google AI Studio Audio Bridge
+- `[x]` Phase 9: Google AI Studio Audio Bridge
 - `[x]` Phase 10: AI Timeline Builder
 - `[x]` Phase 11: Analytics Integration Foundation
 - `[x]` Phase 12: Analytics Agent and Learning Agent
-- `[/]` Phase 13: Advanced Creator Features
+- `[!]` Phase 13: Advanced Creator Features
 
 ## Phase 0: Repository Inspection and Safety
 
@@ -228,17 +228,17 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Generalize provider/job modeling for audio/voice jobs.
 - `[x]` Add voice job creation and result storage endpoints.
 - `[x]` Extend bridge protocol/capabilities for voice generation.
-- `[/]` Add Google AI Studio provider adapter/content script.
+- `[x]` Add Google AI Studio provider adapter/content script.
 - `[x]` Support `full_script` generation mode.
 - `[x]` Support preferred `line_by_line` generation mode.
-- `[/]` Add audio result reporting and backend import flow.
+- `[x]` Add audio result reporting and backend import flow.
 - `[x]` Add frontend voice job status UI.
 - `[x]` Auto-import completed narration audio and optionally place clips on the timeline.
 
 ### Phase 9 Acceptance Checks
 
 - `[x]` Voice jobs can be created, claimed, completed, and failed locally.
-- `[/]` Generated narration audio appears in NeuralScribe assets.
+- `[x]` Generated narration audio appears in NeuralScribe assets locally.
 - `[x]` Line-by-line outputs can be placed in order on the timeline locally.
 - `[!]` Live Google AI Studio selector/audio validation still needs a signed-in provider session.
 
@@ -290,28 +290,71 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 ## Phase 13: Advanced Creator Features
 
 - `[x]` Competitor content analyzer with manual local observations and summary insights.
-- `[ ]` Trend radar with external data sources.
+- `[x]` Trend radar with external RSS/Atom feed import, provider readiness visibility, and local/manual fallback paths.
 - `[x]` Thumbnail/title generator with local fallback options and LLM-ready structured output.
 - `[x]` Auto caption designer with branded preset generation and timeline clip application.
 - `[x]` Brand kit with profile-scoped creative defaults and packaging integration.
 - `[x]` Prompt library with profile-scoped reusable templates and archive support.
-- `[ ]` Character consistency system.
+- `[x]` Character consistency system with reusable profile-scoped character records and prompt packs.
 - `[x]` Content calendar with profile-scoped scheduling and idea/script links.
 - `[x]` A/B testing support for local experiment planning, variants, winners, and metrics capture.
-- `[ ]` Comment analyzer.
-- `[ ]` Long-video-to-shorts repurposing.
-- `[ ]` Publishing package generator.
-- `[ ]` Direct publishing/scheduling APIs.
+- `[x]` Comment analyzer with manual import, sentiment/theme/question summaries, and saved analysis runs.
+- `[x]` Long-video-to-shorts repurposing with local transcript-to-candidate extraction.
+- `[x]` Publishing package generator with platform-ready copy, hashtags, CTA, and notes.
+- `[!]` Direct publishing/scheduling APIs: local destination state, provider descriptors, scheduled job queue, and dispatch contract are implemented; live OAuth-backed provider publishing remains blocked on real credentials/provider setup.
+
+## Remaining Work Execution Plan
+
+### Batch A: Local Insight Systems
+
+- `[x]` Extend trend radar beyond manual/local suggestions with external-source import support and provider-status visibility.
+- `[x]` Add profile-scoped character consistency records plus reusable prompt packs.
+- `[x]` Add comment analysis for manually imported comments with sentiment, themes, questions, and content-request summaries.
+
+### Batch B: Repurposing And Packaging
+
+- `[x]` Add long-video-to-shorts repurposing suggestions from pasted transcripts/scripts.
+- `[x]` Add publishing package generation for titles, descriptions, post copy, hashtags, and platform notes.
+
+### Batch C: Publishing Foundations
+
+- `[x]` Add publishing provider descriptors and profile-level destination state.
+- `[x]` Add local publish-job/schedule models and APIs that can queue future external provider work without storing raw secrets.
+- `[x]` Add Publishing UI that exposes package generation, provider readiness, and scheduled publish jobs.
+- `[x]` Mark any live provider work that still needs OAuth credentials or signed-in platform sessions as blocked instead of overstating completeness.
+
+### Batch D: Verification And Closeout
+
+- `[x]` Add focused backend coverage for every new service/API slice.
+- `[x]` Re-run backend tests, backend compile verification, and frontend production build.
+- `[x]` Re-check Content Studio tabs in the browser after the new views land.
+- `[x]` Update Phase 13 statuses and the risks/unknowns section to reflect what is genuinely finished versus externally blocked.
+
+## Final Completion Plan
+
+### Batch E: Local Closeout
+
+- `[x]` Close SQLite connections reliably so the backend test suite no longer emits repeated `ResourceWarning`s.
+- `[x]` Add configuration-aware publishing provider readiness so blocked providers explain what is missing.
+- `[x]` Add dispatch preflight checks for provider readiness, destination connection, and token-reference presence.
+- `[x]` Surface the richer publishing readiness state in Content Studio.
+
+### Batch F: External Completion
+
+- `[!]` Validate Google AI Studio selectors and real audio capture in a signed-in browser session.
+- `[!]` Configure real OAuth credentials, secure token references, and provider approvals before claiming live direct publishing is complete.
 
 ## Current Risks And Unknowns To Resolve Early
 
 - Current generation jobs only model `image` and `video`; voice jobs will need either a generalized media/job type or a separate queue contract.
 - `ProjectDetail` stores a broad JSON `state` blob while SQLite also persists normalized per-project tables; new profile/project links need a clear source-of-truth rule.
 - The app currently has no project-owned automated tests visible outside dependency folders, so regression checks will need to be added or documented.
-- The active bridge is provider-aware but currently only wires a runnable Meta adapter; adding Google AI Studio will test how cleanly the provider abstraction scales.
-- Google AI Studio live automation remains the main external unknown: the local queue/import path is implemented, but final provider selectors and real audio capture still need validation inside an authenticated AI Studio session.
+- The active bridge now supports provider-aware adapter testing for Meta and Google AI Studio; live Google AI Studio validation still depends on an authenticated provider session.
+- Google AI Studio live automation remains the main external unknown: the local queue/import path, adapter-test path, and audio result reporting are implemented, but final selectors and real audio capture still need validation inside an authenticated AI Studio session.
+- SQLite connection lifecycle cleanup is complete; the backend suite now runs without the earlier repeated connection warnings.
 - Content Studio introduces app-level navigation beyond the current editor-first shell, so route/layout decisions should be made before large UI work starts.
 - Analytics credentials need a secure storage plan before real OAuth-backed integrations are claimed as complete.
+- Live publishing remains intentionally blocked until OAuth-backed provider integrations and secure token handling are implemented; local scheduling/job state exists, but no provider is falsely reported as dispatch-ready.
 
 ## MVP Definition Of Done
 

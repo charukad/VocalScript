@@ -30,7 +30,17 @@ export type TimelineTrack = {
   muted?: boolean;
   solo?: boolean;
   locked?: boolean;
+  visible?: boolean;
 };
+
+export type TimelineMarker = {
+  id: string;
+  time: number;
+  label: string;
+  color?: string;
+};
+
+export type AudioFadeCurve = 'linear' | 'ease_in' | 'ease_out' | 'smooth';
 
 export type TextData = {
   content: string;
@@ -44,20 +54,36 @@ export type TextData = {
   y: number;            // % from top (0–100)
   bgColor: string;      // hex with opacity
   bgOpacity: number;    // 0–1
+  shadowColor: string;
+  shadowOpacity: number;
+  shadowBlur: number;
+  shadowOffsetX: number;
+  shadowOffsetY: number;
+  strokeColor: string;
+  strokeWidth: number;
+  boxPadding: number;
+  boxRadius: number;
+  maxWidthPercent: number;
+  maxCharsPerLine: number;
+  titleAnimation?: 'none' | 'pop' | 'slide_up' | 'drift';
+  captionMode?: 'standard' | 'karaoke';
+  highlightColor?: string;
 };
 
 export type KeyframeProperty = 'scale' | 'rotation' | 'opacity' | 'x' | 'y' | 'volume';
+export type KeyframeEasing = 'linear' | 'ease_in' | 'ease_out' | 'ease_in_out';
 
 export type Keyframe = {
   id: string;
   property: KeyframeProperty;
   time: number;         // seconds from clip start
   value: number;
-  easing: 'linear';
+  easing: KeyframeEasing;
 };
 
 export type TimelineClip = {
   id: string;
+  groupId?: string | null;
   assetId: string;
   trackId: string;
   file: File;
@@ -69,8 +95,16 @@ export type TimelineClip = {
     scale: number;
     rotation: number;
     opacity?: number;
+    x?: number;
+    y?: number;
     flipX: boolean;
     flipY: boolean;
+  };
+  crop?: {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
   };
   color?: {
     brightness: number;
@@ -78,12 +112,52 @@ export type TimelineClip = {
     saturation: number;
     exposure: number;
     temperature: number;
+    highlights?: number;
+    shadows?: number;
+    red?: number;
+    green?: number;
+    blue?: number;
+  };
+  effects?: {
+    blur: number;
+    sharpen: number;
+    vignette: number;
+    clarity: number;
+    overlayPreset?: 'none' | 'glitch' | 'vhs' | 'light_leak';
+    overlayIntensity?: number;
+  };
+  speed?: {
+    rate: number;
+    reverse: boolean;
+    freezeFrame: boolean;
+    curvePreset?: 'constant' | 'ramp_up' | 'ramp_down';
+  };
+  transition?: {
+    type: 'cut' | 'fade' | 'crossfade' | 'slide_left' | 'slide_right' | 'wipe';
+    duration: number;
+  };
+  compositing?: {
+    blendMode: 'normal' | 'screen' | 'multiply' | 'overlay';
+    layoutPreset: 'free' | 'pip_top_right' | 'pip_bottom_left' | 'split_left' | 'split_right';
+    borderWidth: number;
+    borderColor: string;
+    maskShape: 'none' | 'circle' | 'rounded';
+    cornerRadius: number;
+    chromaKeyEnabled: boolean;
+    chromaKeyColor: string;
+    chromaKeySimilarity: number;
+    spillSuppression: number;
+    edgeFeather: number;
+    stabilization: boolean;
+    backgroundRemoval: boolean;
   };
   audio?: {
     volume: number;
     mute: boolean;
     fadeIn: number;
     fadeOut: number;
+    fadeInCurve?: AudioFadeCurve;
+    fadeOutCurve?: AudioFadeCurve;
   };
   textData?: TextData;
   keyframes?: Keyframe[];
