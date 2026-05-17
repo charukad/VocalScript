@@ -531,17 +531,21 @@ class FFmpegMediaCompiler(IMediaCompiler):
                 "-map", "[video_final]",
                 "-map", "[audio_final]",
                 "-c:v", "libx264",
-                "-crf", str(blueprint.crf),
                 "-preset", "fast",
                 "-c:a", "aac",
                 "-b:a", "192k"
             ])
+            if blueprint.video_bitrate_mbps:
+                cmd.extend(["-b:v", f"{blueprint.video_bitrate_mbps}M"])
+            else:
+                cmd.extend(["-crf", str(blueprint.crf)])
         else:
             cmd.extend(["-map", "[audio_final]", "-c:a", "libmp3lame"])
 
         cmd.append(output_path)
 
         logger.info(f"=== FFmpeg filter_complex:\n" + "\n".join(f"  [{i}] {f}" for i, f in enumerate(filter_complex)))
+        logger.info(f"=== Requested acceleration mode: {blueprint.hardware_acceleration}")
         logger.info(f"=== FFmpeg full command: {' '.join(cmd)}")
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)

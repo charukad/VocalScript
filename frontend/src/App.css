@@ -97,6 +97,11 @@
   color: var(--warning-color);
 }
 
+.save-pill.warning {
+  background: rgba(235, 124, 96, 0.12);
+  color: var(--error-color);
+}
+
 .project-name-input,
 .project-meta-select {
   min-width: 0;
@@ -2489,6 +2494,163 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+.workflow-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.workflow-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.workflow-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-highlight);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.workflow-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--panel-radius);
+  background: var(--bg-item);
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.workflow-card strong,
+.workflow-card span,
+.review-comment p {
+  overflow-wrap: anywhere;
+}
+
+.workflow-card span,
+.workflow-hint,
+.review-comment span {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.workflow-card.compact {
+  flex: 1;
+}
+
+.workflow-card.file-card {
+  cursor: pointer;
+}
+
+.workflow-card.file-card input {
+  display: none;
+}
+
+.workflow-inline,
+.workflow-row,
+.workflow-compare-grid {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.workflow-inline.stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.workflow-inline input,
+.workflow-inline textarea,
+.workflow-compare-grid select {
+  min-width: 0;
+  width: 100%;
+  background: var(--bg-app);
+  border: 1px solid var(--border-color);
+  border-radius: var(--control-radius);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.workflow-inline input,
+.workflow-compare-grid select {
+  height: 32px;
+  padding: 0 0.6rem;
+}
+
+.workflow-inline textarea {
+  min-height: 68px;
+  resize: vertical;
+  padding: 0.55rem 0.6rem;
+}
+
+.workflow-row .btn-icon {
+  flex: 0 0 auto;
+}
+
+.workflow-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workflow-segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.workflow-segmented button {
+  min-height: 32px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--control-radius);
+  background: var(--bg-item);
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.workflow-segmented button.active {
+  border-color: rgba(91, 141, 239, 0.7);
+  background: rgba(91, 141, 239, 0.14);
+  color: var(--text-primary);
+}
+
+.review-comment {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--panel-radius);
+  background: var(--bg-item);
+}
+
+.review-comment.resolved {
+  opacity: 0.68;
+}
+
+.review-comment > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.review-comment p {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.review-comment-actions {
+  display: flex;
+  gap: var(--space-2);
 }
 
 /* Compact upload zone */

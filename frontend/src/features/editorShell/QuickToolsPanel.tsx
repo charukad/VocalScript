@@ -4,7 +4,7 @@ import type { EditorToolId } from './types';
 import { StatusState } from '../../components/ui/StatusState';
 
 type QuickToolsPanelProps = {
-  activeTool: Exclude<EditorToolId, 'media' | 'ai' | 'templates'>;
+  activeTool: Exclude<EditorToolId, 'media' | 'ai' | 'templates' | 'workflow'>;
 };
 
 const transitionTypes = [

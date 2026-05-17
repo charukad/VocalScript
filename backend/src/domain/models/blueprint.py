@@ -120,5 +120,8 @@ class TimelineBlueprint(BaseModel):
     width: int = 1920
     height: int = 1080
     crf: int = 23
+    video_bitrate_mbps: Optional[float] = None
+    container: Literal["mp4", "mov"] = "mp4"
+    hardware_acceleration: Literal["auto", "software"] = "auto"
     audio_only: bool = False
     tracks: List[TrackBlueprint]

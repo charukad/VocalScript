@@ -22,7 +22,9 @@ export const Navbar = ({ onOpenBridgeMonitor, onOpenContentProfiles }: NavbarPro
     projectContentProfileId,
     projectTargetPlatform,
     projectStatus,
+    lastSavedAt,
     isSavingProject,
+    missingMedia,
     setProjectName,
     setProjectContentProfileId,
     setProjectTargetPlatform,
@@ -32,6 +34,10 @@ export const Navbar = ({ onOpenBridgeMonitor, onOpenContentProfiles }: NavbarPro
   const { profiles, loadProfiles } = useContentProfileStore();
   const visualAsset = assets.find(a => a.type === 'visual');
   const exportedAudioOnly = mediaUrl?.endsWith('.mp3');
+  const exportedMov = mediaUrl?.endsWith('.mov');
+  const savedLabel = lastSavedAt
+    ? `Saved ${new Date(lastSavedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    : 'Ready';
 
   useEffect(() => {
     void loadProfiles();
@@ -82,8 +88,11 @@ export const Navbar = ({ onOpenBridgeMonitor, onOpenContentProfiles }: NavbarPro
         <div className="topbar-project-meta">
           <span className={`save-pill ${isSavingProject ? 'saving' : ''}`}>
             <Save size={12} />
-            {isSavingProject ? 'Saving' : 'Ready'}
+            {isSavingProject ? 'Saving' : savedLabel}
           </span>
+          {missingMedia.length > 0 && (
+            <span className="save-pill warning">{missingMedia.length} missing media</span>
+          )}
           <span
             className="project-folder"
             title={currentProject?.generatedMediaPath || projectStatus || 'Save the project to create a media folder'}
@@ -104,7 +113,7 @@ export const Navbar = ({ onOpenBridgeMonitor, onOpenContentProfiles }: NavbarPro
           Bridge
         </Button>
         {mediaUrl && (
-          <a href={mediaUrl} download={exportedAudioOnly || !visualAsset ? "export.mp3" : "export.mp4"} className="ui-button ui-button-ghost topbar-link-button">
+          <a href={mediaUrl} download={exportedAudioOnly || !visualAsset ? "export.mp3" : exportedMov ? "export.mov" : "export.mp4"} className="ui-button ui-button-ghost topbar-link-button">
             <Download size={15} />
             {exportedAudioOnly || !visualAsset ? "Audio" : "Video"}
           </a>

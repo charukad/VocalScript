@@ -498,6 +498,9 @@ type TimelineBlueprint = {
   width: number;
   height: number;
   crf: number;
+  video_bitrate_mbps?: number | null;
+  container: 'mp4' | 'mov';
+  hardware_acceleration: 'auto' | 'software';
   audio_only: boolean;
   tracks: TrackBlueprint[];
 };
@@ -518,13 +521,37 @@ export const exportTimeline = async (
     throw new Error("Timeline is empty");
   }
 
+  const exportStart = settings.rangeMode === 'custom'
+    ? Math.max(0, Math.min(settings.rangeStart, settings.rangeEnd))
+    : 0;
+  const exportEnd = settings.rangeMode === 'custom'
+    ? Math.max(settings.rangeStart, settings.rangeEnd)
+    : Number.POSITIVE_INFINITY;
+  const exportClips = clips.flatMap(clip => {
+    const clipStart = clip.startTime;
+    const clipEnd = clip.startTime + clip.duration;
+    if (clipEnd <= exportStart || clipStart >= exportEnd) return [];
+    const clippedStart = Math.max(clipStart, exportStart);
+    const clippedEnd = Math.min(clipEnd, exportEnd);
+    const trimmedLeft = Math.max(0, exportStart - clipStart);
+    return [{
+      ...clip,
+      startTime: clippedStart - exportStart,
+      duration: Math.max(0.1, clippedEnd - clippedStart),
+      mediaOffset: (clip.mediaOffset || 0) + trimmedLeft,
+    }];
+  });
+  if (exportClips.length === 0) {
+    throw new Error("No clips fall inside the selected export range");
+  }
+
   // 1. Build Blueprint
   const activeTracks = tracks.filter(t => isTrackActive(t, tracks));
   const blueprintTracks: TrackBlueprint[] = activeTracks.map(t => ({
     id: t.id,
     name: t.name,
     type: t.type,
-    clips: clips
+    clips: exportClips
       .filter(c => c.trackId === t.id)
       .map(c => ({
         file_id: c.id + '_' + c.file.name, // Ensure unique IDs 
@@ -573,6 +600,7 @@ export const exportTimeline = async (
   const resMap: Record<string, { w: number; h: number }> = {
     '720p':  { w: 1280, h: 720  },
     '1080p': { w: 1920, h: 1080 },
+    '2k':    { w: 2560, h: 1440 },
     '4k':    { w: 3840, h: 2160 },
   };
   const base = resMap[settings.resolution] ?? resMap['1080p'];
@@ -584,10 +612,13 @@ export const exportTimeline = async (
   const crf = crfMap[settings.quality] ?? 23;
 
   const blueprint: TimelineBlueprint = {
-    fps: 30,
+    fps: settings.fps,
     width,
     height,
     crf,
+    video_bitrate_mbps: settings.bitrateMbps > 0 ? settings.bitrateMbps : null,
+    container: settings.container,
+    hardware_acceleration: settings.hardwareAcceleration,
     audio_only: settings.format === 'audio',
     tracks: blueprintTracks
   };
@@ -596,7 +627,7 @@ export const exportTimeline = async (
   const formData = new FormData();
   formData.append('blueprint', JSON.stringify(blueprint));
   
-  clips.forEach(clip => {
+  exportClips.forEach(clip => {
     // Text clips use a placeholder file — skip them, they need no FFmpeg input
     if (clip.type === 'text') return;
     // We pass the unique file_id as the filename so the backend can map it

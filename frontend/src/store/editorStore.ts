@@ -20,8 +20,13 @@ import type {
   GenerationJob,
   Keyframe,
   KeyframeProperty,
+  MissingMediaRecord,
+  ProjectApprovalState,
   ProjectDetail,
   ProjectSummary,
+  ProjectVersion,
+  ProjectVersionSummary,
+  ReviewComment,
   PlatformTarget,
   StoryboardScene,
   StoryboardSettings,
@@ -178,6 +183,19 @@ const DEFAULT_ANIMATION_SETTINGS: AnimationSettings = {
 
 const DEFAULT_PROJECT_NAME = 'Untitled Project';
 const PROJECT_POINTER_KEY = 'neuralscribe.currentProject';
+const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
+  resolution: '1080p',
+  aspectRatio: '16:9',
+  quality: 'standard',
+  format: 'video',
+  fps: 30,
+  bitrateMbps: 16,
+  container: 'mp4',
+  rangeMode: 'full',
+  rangeStart: 0,
+  rangeEnd: 0,
+  hardwareAcceleration: 'auto',
+};
 
 type StoryboardSource = {
   id: string;
@@ -204,6 +222,11 @@ type SerializableAsset = Omit<MediaAsset, 'file' | 'thumbnailUrl' | 'waveform' |
   fileName: string;
   fileType: string;
   fileSize: number;
+};
+
+type StoredMissingMediaRecord = MissingMediaRecord & {
+  asset: SerializableAsset;
+  clips: SerializableClip[];
 };
 
 const HISTORY_LIMIT = 50;
@@ -421,6 +444,7 @@ export type EditorState = {
   projectScriptId: string | null;
   availableProjects: ProjectSummary[];
   projectStatus: string | null;
+  lastSavedAt: string | null;
   isSavingProject: boolean;
   isLoadingProjects: boolean;
   setProjectName: (name: string) => void;
@@ -438,11 +462,22 @@ export type EditorState = {
   loadProjectFromPath: (path: string) => Promise<void>;
   newProject: () => void;
   saveProject: () => Promise<ProjectSummary | null>;
+  projectVersions: ProjectVersion[];
+  createProjectVersion: (label?: string) => void;
+  restoreProjectVersion: (versionId: string) => Promise<void>;
+  approvalState: ProjectApprovalState;
+  setApprovalState: (state: ProjectApprovalState) => void;
+  reviewComments: ReviewComment[];
+  addReviewComment: (time: number, text: string) => void;
+  updateReviewComment: (id: string, updates: Partial<Pick<ReviewComment, 'text' | 'status'>>) => void;
+  removeReviewComment: (id: string) => void;
 
   // Media Pool
   assets: MediaAsset[];
+  missingMedia: StoredMissingMediaRecord[];
   addAssets: (files: File[]) => Promise<void>;
   removeAsset: (id: string) => void;
+  relinkMissingMedia: (assetId: string, file: File) => Promise<void>;
 
   // Timeline Tracks
   tracks: TimelineTrack[];
@@ -595,13 +630,30 @@ export type EditorState = {
   buildAnimatedTimeline: () => void;
 };
 
-const buildProjectSnapshot = (state: EditorState): Record<string, unknown> => ({
+const summarizeProjectSnapshot = (state: Pick<
+  EditorState,
+  'assets' | 'clips' | 'markers' | 'reviewComments'
+>): ProjectVersionSummary => ({
+  assetCount: state.assets.length,
+  clipCount: state.clips.length,
+  markerCount: state.markers.length,
+  commentCount: state.reviewComments.length,
+  durationSeconds: state.clips.reduce((max, clip) => Math.max(max, clip.startTime + clip.duration), 0),
+});
+
+const buildCoreProjectSnapshot = (state: EditorState): Record<string, unknown> => ({
   version: 1,
   savedAt: new Date().toISOString(),
   project: state.currentProject ? projectSummary(state.currentProject) : null,
-  assets: state.assets.map(serializeAsset),
+  assets: [
+    ...state.assets.map(serializeAsset),
+    ...state.missingMedia.map(record => record.asset),
+  ],
   tracks: state.tracks,
-  clips: state.clips.map(serializeClip),
+  clips: [
+    ...state.clips.map(serializeClip),
+    ...state.missingMedia.flatMap(record => record.clips),
+  ],
   markers: state.markers,
   captions: state.captions,
   exportSettings: state.exportSettings,
@@ -616,6 +668,13 @@ const buildProjectSnapshot = (state: EditorState): Record<string, unknown> => ({
   animationAssetLibrary: state.animationAssetLibrary,
   animationAssetJobs: state.animationAssetJobs,
   currentAnimationBatchId: state.currentAnimationBatchId,
+});
+
+const buildProjectSnapshot = (state: EditorState): Record<string, unknown> => ({
+  ...buildCoreProjectSnapshot(state),
+  approvalState: state.approvalState,
+  reviewComments: state.reviewComments,
+  projectVersions: state.projectVersions,
 });
 
 const projectMetadata = (state: Pick<
@@ -1163,6 +1222,22 @@ const hydrateSavedAsset = async (asset: SerializableAsset): Promise<MediaAsset |
   }
 };
 
+const makeMissingMediaRecord = (
+  asset: SerializableAsset,
+  savedClips: SerializableClip[],
+): StoredMissingMediaRecord => {
+  const clips = savedClips.filter(clip => clip.assetId === asset.id && !clip.generation?.jobId);
+  return {
+    assetId: asset.id,
+    fileName: asset.fileName,
+    fileType: asset.fileType,
+    fileSize: asset.fileSize,
+    clipCount: clips.length,
+    asset,
+    clips,
+  };
+};
+
 const persistProjectAssets = async (
   projectId: string,
   assets: MediaAsset[],
@@ -1248,9 +1323,13 @@ const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<
   }
   const restoredAssets: MediaAsset[] = [];
   const restoredAssetsById = new Map<string, MediaAsset>();
+  const missingMedia: StoredMissingMediaRecord[] = [];
   for (const savedAsset of savedAssets) {
     const restoredAsset = await hydrateSavedAsset(savedAsset);
-    if (!restoredAsset) continue;
+    if (!restoredAsset) {
+      missingMedia.push(makeMissingMediaRecord(savedAsset, savedClips));
+      continue;
+    }
     restoredAssets.push(restoredAsset);
     restoredAssetsById.set(restoredAsset.id, restoredAsset);
   }
@@ -1321,7 +1400,9 @@ const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<
     projectPlannedDescription: summary.plannedDescription,
     projectScriptId: summary.scriptId,
     projectStatus: `Loaded project: ${summary.name}`,
+    lastSavedAt: summary.updatedAt,
     assets: restoredAssets,
+    missingMedia,
     tracks,
     clips: restoredClips,
     markers,
@@ -1331,7 +1412,7 @@ const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<
     historyPast: [],
     historyFuture: [],
     captions,
-    exportSettings: saved?.exportSettings ?? { resolution: '1080p', aspectRatio: '16:9', quality: 'standard', format: 'video' },
+    exportSettings: { ...DEFAULT_EXPORT_SETTINGS, ...(saved?.exportSettings ?? {}) },
     storyboardSettings: { ...DEFAULT_STORYBOARD_SETTINGS, ...(saved?.storyboardSettings ?? {}) },
     storyboardScenes,
     currentGenerationBatchId: saved?.currentGenerationBatchId ?? null,
@@ -1343,6 +1424,11 @@ const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<
     animationAssetLibrary,
     animationAssetJobs,
     currentAnimationBatchId: saved?.currentAnimationBatchId ?? null,
+    projectVersions: Array.isArray(saved?.projectVersions) ? saved.projectVersions as ProjectVersion[] : [],
+    approvalState: ['draft', 'in_review', 'approved', 'changes_requested'].includes(saved?.approvalState)
+      ? saved.approvalState as ProjectApprovalState
+      : 'draft',
+    reviewComments: Array.isArray(saved?.reviewComments) ? saved.reviewComments as ReviewComment[] : [],
     isGeneratingAnimationPlan: false,
     isSyncingAnimationAssets: false,
     animationStatus: null,
@@ -1804,9 +1890,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   projectScriptId: null,
   availableProjects: rememberedProject ? [rememberedProject] : [],
   projectStatus: 'Create or load a project to start.',
+  lastSavedAt: rememberedProject?.updatedAt ?? null,
   isSavingProject: false,
   isLoadingProjects: false,
-  setProjectName: (name) => set({ projectName: name }),
+  setProjectName: (name) => {
+    set({ projectName: name });
+    if (get().currentProject) scheduleProjectAutosave(get);
+  },
   setProjectDirectory: (directory) => set({ projectDirectory: directory }),
   setProjectContentProfileId: (projectContentProfileId) => {
     set({ projectContentProfileId });
@@ -1886,7 +1976,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         projectScriptId: project.scriptId,
         availableProjects: [project, ...state.availableProjects.filter(existing => existing.id !== project.id)],
         projectStatus: `Project created: ${project.folderPath}`,
+        lastSavedAt: project.updatedAt,
         assets: [],
+        missingMedia: [],
         tracks: makeDefaultTracks(),
         clips: [],
         markers: [],
@@ -1907,6 +1999,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         animationAssetJobs: [],
         currentAnimationBatchId: null,
         animationStatus: null,
+        projectVersions: [],
+        approvalState: 'draft',
+        reviewComments: [],
       } as Partial<EditorState>);
       return project;
     } catch (err: any) {
@@ -1981,7 +2076,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       projectPlannedDescription: '',
       projectScriptId: null,
       projectStatus: 'Choose a directory and create a project to start.',
+      lastSavedAt: null,
       assets: [],
+      missingMedia: [],
       tracks: makeDefaultTracks(),
       clips: [],
       markers: [],
@@ -2014,6 +2111,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       isGeneratingAnimationPlan: false,
       isSyncingAnimationAssets: false,
       animationStatus: null,
+      projectVersions: [],
+      approvalState: 'draft',
+      reviewComments: [],
     } as Partial<EditorState>);
   },
   saveProject: async () => {
@@ -2031,6 +2131,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         currentProject: savedProject,
         projectName: savedProject.name,
         projectStatus: `Project saved to ${savedProject.folderPath}`,
+        lastSavedAt: savedProject.updatedAt,
       });
       return savedProject;
     } catch (err: any) {
@@ -2042,9 +2143,104 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set({ isSavingProject: false });
     }
   },
+  projectVersions: [],
+  createProjectVersion: (label) => {
+    const state = get();
+    const nextVersion: ProjectVersion = {
+      id: makeId(),
+      label: label?.trim() || `Version ${state.projectVersions.length + 1}`,
+      createdAt: new Date().toISOString(),
+      summary: summarizeProjectSnapshot(state),
+      snapshot: buildCoreProjectSnapshot(state),
+    };
+    set(current => ({
+      projectVersions: [nextVersion, ...current.projectVersions],
+      projectStatus: `Saved ${nextVersion.label}.`,
+    }));
+    scheduleProjectAutosave(get, 100);
+  },
+  restoreProjectVersion: async (versionId) => {
+    const state = get();
+    const version = state.projectVersions.find(candidate => candidate.id === versionId);
+    const project = state.currentProject;
+    if (!version || !project) return;
+    const confirmed = window.confirm(`Restore ${version.label}? Your current workspace will be replaced, but existing saved versions will remain available.`);
+    if (!confirmed) return;
+    const restored = await restoreProjectWorkspace({
+      ...project,
+      state: version.snapshot,
+    });
+    set(current => ({
+      ...restored,
+      projectVersions: current.projectVersions,
+      reviewComments: current.reviewComments,
+      approvalState: current.approvalState,
+      projectStatus: `Restored ${version.label}.`,
+    }));
+    scheduleProjectAutosave(get, 100);
+  },
+  approvalState: 'draft',
+  setApprovalState: (approvalState) => {
+    set({ approvalState, projectStatus: `Approval state: ${approvalState.replace(/_/g, ' ')}.` });
+    scheduleProjectAutosave(get, 100);
+  },
+  reviewComments: [],
+  addReviewComment: (time, text) => {
+    const cleanText = text.trim();
+    if (!cleanText) return;
+    const normalizedTime = Math.max(0, time);
+    const markerId = makeId();
+    const comment: ReviewComment = {
+      id: makeId(),
+      markerId,
+      time: normalizedTime,
+      text: cleanText,
+      status: 'open',
+      author: 'Local reviewer',
+      createdAt: new Date().toISOString(),
+    };
+    set(state => ({
+      reviewComments: [...state.reviewComments, comment].sort((a, b) => a.time - b.time || a.createdAt.localeCompare(b.createdAt)),
+      markers: [...state.markers, {
+        id: markerId,
+        time: normalizedTime,
+        label: `Review: ${cleanText.slice(0, 28)}`,
+        color: '#7fe4c3',
+      }].sort((a, b) => a.time - b.time),
+    }));
+    scheduleProjectAutosave(get, 100);
+  },
+  updateReviewComment: (id, updates) => {
+    set(state => {
+      const nextComments = state.reviewComments.map(comment => comment.id === id ? { ...comment, ...updates } : comment);
+      const updated = nextComments.find(comment => comment.id === id);
+      return {
+        reviewComments: nextComments,
+        markers: updated?.markerId && typeof updates.text === 'string'
+          ? state.markers.map(marker => marker.id === updated.markerId
+            ? { ...marker, label: `Review: ${updates.text!.trim().slice(0, 28)}` }
+            : marker)
+          : state.markers,
+      };
+    });
+    scheduleProjectAutosave(get, 100);
+  },
+  removeReviewComment: (id) => {
+    set(state => {
+      const removed = state.reviewComments.find(comment => comment.id === id);
+      return {
+        reviewComments: state.reviewComments.filter(comment => comment.id !== id),
+        markers: removed?.markerId
+          ? state.markers.filter(marker => marker.id !== removed.markerId)
+          : state.markers,
+      };
+    });
+    scheduleProjectAutosave(get, 100);
+  },
 
   // --- Media Pool ---
   assets: [],
+  missingMedia: [],
   addAssets: async (files: File[]) => {
     const newAssets: MediaAsset[] = [];
     const project = get().currentProject;
@@ -2106,12 +2302,79 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }
     set(state => ({ assets: [...state.assets, ...newAssets] }));
+    if (newAssets.length > 0 && get().currentProject) scheduleProjectAutosave(get, 100);
   },
   removeAsset: (id: string) => {
     set(state => ({
       assets: state.assets.filter(a => a.id !== id),
       clips: state.clips.filter(c => c.assetId !== id)
     }));
+    if (get().currentProject) scheduleProjectAutosave(get, 100);
+  },
+  relinkMissingMedia: async (assetId, file) => {
+    const missing = get().missingMedia.find(record => record.assetId === assetId);
+    if (!missing) return;
+
+    let mediaKind: MediaAsset['mediaKind'] | null = null;
+    let type: MediaType = 'visual';
+    if (file.type.startsWith('audio/') || file.name.match(/\.(mp3|wav|m4a|flac|ogg|aac)$/i)) {
+      mediaKind = 'audio';
+      type = 'audio';
+    } else if (file.type.startsWith('video/') || file.name.match(/\.(mp4|mov|mkv|avi|webm)$/i)) {
+      mediaKind = 'video';
+      type = 'visual';
+    } else if (file.type.startsWith('image/') || file.name.match(/\.(jpg|jpeg|png|webp|gif)$/i)) {
+      mediaKind = 'image';
+      type = 'visual';
+    }
+    if (!mediaKind) {
+      alert('Choose an audio, video, or image file to relink this media.');
+      return;
+    }
+
+    const duration = await getMediaDuration(file, type).catch(() => mediaKind === 'image' ? 10 : undefined);
+    const restoredAsset: MediaAsset = {
+      id: missing.assetId,
+      file,
+      type,
+      mediaKind,
+      duration,
+      sourceUrl: missing.asset.sourceUrl,
+      localPath: missing.asset.localPath,
+      thumbnailUrl: await generateThumbnail(file, mediaKind),
+    };
+    if (mediaKind === 'audio') {
+      restoredAsset.waveform = await generateWaveform(file, 1000).catch(() => undefined);
+    } else if (mediaKind === 'video' && duration && duration > 0 && duration !== Infinity) {
+      const framesCount = Math.min(50, Math.max(5, Math.ceil(duration / 2)));
+      restoredAsset.filmstrip = await generateFilmstrip(file, duration, framesCount).catch(() => undefined);
+    }
+
+    const project = get().currentProject;
+    if (project) {
+      try {
+        const saved = await uploadProjectAsset(project.id, restoredAsset.id, file);
+        restoredAsset.sourceUrl = saved.url;
+        restoredAsset.localPath = saved.localPath;
+      } catch (error) {
+        console.warn('Could not save relinked media immediately.', error);
+      }
+    }
+
+    const restoredClips = missing.clips.map(savedClip => ({
+      ...savedClip,
+      file,
+    } as TimelineClip));
+    set(state => ({
+      ...withHistory(state),
+      assets: [...state.assets, restoredAsset],
+      missingMedia: state.missingMedia.filter(record => record.assetId !== assetId),
+      clips: [...state.clips, ...restoredClips],
+      selectedClipId: restoredClips[0]?.id ?? state.selectedClipId,
+      selectedClipIds: restoredClips[0]?.id ? [restoredClips[0].id] : state.selectedClipIds,
+      projectStatus: `Relinked ${file.name}.`,
+    }));
+    scheduleProjectAutosave(get, 100);
   },
 
   // --- Timeline Tracks ---
@@ -3198,10 +3461,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   // --- Export Modal ---
   showExportModal: false,
-  exportSettings: { resolution: '1080p', aspectRatio: '16:9', quality: 'standard', format: 'video' },
+  exportSettings: DEFAULT_EXPORT_SETTINGS,
   openExportModal: () => set({ showExportModal: true }),
   closeExportModal: () => set({ showExportModal: false }),
-  setExportSettings: (settings) => set(state => ({ exportSettings: { ...state.exportSettings, ...settings } })),
+  setExportSettings: (settings) => {
+    set(state => ({ exportSettings: { ...state.exportSettings, ...settings } }));
+    if (get().currentProject) scheduleProjectAutosave(get);
+  },
 
   // --- Export ---
   isProcessing: false,

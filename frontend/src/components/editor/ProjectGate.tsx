@@ -178,6 +178,10 @@ export const ProjectGate = ({ onOpenContentProfiles }: ProjectGateProps) => {
                   disabled={isLoadingProjects}
                 >
                   <strong>{project.name}</strong>
+                  <span>{project.plannedTitle || project.videoType || project.targetPlatform || 'No project metadata yet'}</span>
+                  <span>
+                    Updated {new Date(project.updatedAt).toLocaleDateString()} at {new Date(project.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  </span>
                   <span>{project.folderPath}</span>
                 </button>
               ))}

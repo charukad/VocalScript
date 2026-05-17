@@ -1,6 +1,7 @@
 import {
   AudioLines,
   Captions,
+  ClipboardCheck,
   Clapperboard,
   Image,
   Layers3,
@@ -25,7 +26,8 @@ const toolRailItems: ToolRailItem[] = [
   { id: 'captions', label: 'Captions', icon: Captions, enabled: true },
   { id: 'effects', label: 'Effects', icon: Sparkles, enabled: true },
   { id: 'transitions', label: 'Transitions', icon: Layers3, enabled: true },
-  { id: 'templates', label: 'Templates', icon: Clapperboard, enabled: false },
+  { id: 'templates', label: 'Templates', icon: Clapperboard, enabled: true },
+  { id: 'workflow', label: 'Workflow', icon: ClipboardCheck, enabled: true },
   { id: 'ai', label: 'AI Tools', icon: WandSparkles, enabled: true },
 ];
 

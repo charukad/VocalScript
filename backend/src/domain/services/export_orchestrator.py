@@ -67,7 +67,7 @@ class ExportOrchestrator:
                 t.type in {"visual", "text"} and len(t.clips) > 0
                 for t in blueprint.tracks
             )
-            output_ext = ".mp4" if has_video_layers else ".mp3"
+            output_ext = f".{blueprint.container}" if has_video_layers else ".mp3"
             output_path = os.path.join(self.output_dir, f"export_{session_id}{output_ext}")
             
             # 1. Compile Media

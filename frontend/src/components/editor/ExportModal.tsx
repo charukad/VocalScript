@@ -3,6 +3,7 @@ import { useEditorStore } from '../../store/editorStore';
 const RESOLUTIONS = [
   { value: '720p',  label: '720p HD',    w: 1280, h: 720  },
   { value: '1080p', label: '1080p FHD',  w: 1920, h: 1080 },
+  { value: '2k',    label: '2K QHD',     w: 2560, h: 1440 },
   { value: '4k',    label: '4K UHD',     w: 3840, h: 2160 },
 ] as const;
 
@@ -19,10 +20,10 @@ const QUALITIES = [
 ] as const;
 
 const PRESETS = [
-  { label: 'YouTube', settings: { resolution: '1080p', aspectRatio: '16:9', quality: 'standard', format: 'video' } },
-  { label: 'Shorts', settings: { resolution: '1080p', aspectRatio: '9:16', quality: 'standard', format: 'video' } },
-  { label: 'Square', settings: { resolution: '1080p', aspectRatio: '1:1', quality: 'standard', format: 'video' } },
-  { label: 'Audio', settings: { resolution: '1080p', aspectRatio: '16:9', quality: 'standard', format: 'audio' } },
+  { label: 'YouTube', settings: { resolution: '1080p', aspectRatio: '16:9', quality: 'standard', format: 'video', fps: 30, bitrateMbps: 16, container: 'mp4' } },
+  { label: 'Shorts', settings: { resolution: '1080p', aspectRatio: '9:16', quality: 'standard', format: 'video', fps: 30, bitrateMbps: 16, container: 'mp4' } },
+  { label: 'Square', settings: { resolution: '1080p', aspectRatio: '1:1', quality: 'standard', format: 'video', fps: 30, bitrateMbps: 16, container: 'mp4' } },
+  { label: 'Audio', settings: { resolution: '1080p', aspectRatio: '16:9', quality: 'standard', format: 'audio', fps: 30, bitrateMbps: 0, container: 'mp4' } },
 ] as const;
 
 export const ExportModal = () => {
@@ -31,6 +32,7 @@ export const ExportModal = () => {
   } = useEditorStore();
 
   const res = RESOLUTIONS.find(r => r.value === exportSettings.resolution) ?? RESOLUTIONS[1];
+  const timelineDuration = clips.reduce((max, clip) => Math.max(max, clip.startTime + clip.duration), 0);
 
   return (
     <div
@@ -44,7 +46,7 @@ export const ExportModal = () => {
       <div
         style={{
           background: 'var(--surface-2)', border: '1px solid var(--border-color)',
-          borderRadius: '12px', padding: '2rem', width: '480px', maxWidth: '95vw',
+          borderRadius: '12px', padding: '2rem', width: '560px', maxWidth: '95vw',
           boxShadow: '0 24px 80px rgba(0,0,0,0.6)'
         }}
         onClick={e => e.stopPropagation()}
@@ -181,12 +183,111 @@ export const ExportModal = () => {
           </div>
         </div>
 
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', marginBottom: '1.5rem', opacity: exportSettings.format === 'audio' ? 0.45 : 1 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+            FPS
+            <select
+              value={exportSettings.fps}
+              onChange={event => setExportSettings({ fps: Number(event.target.value) as typeof exportSettings.fps })}
+              disabled={exportSettings.format === 'audio'}
+            >
+              {[24, 30, 60].map(fps => <option key={fps} value={fps}>{fps} fps</option>)}
+            </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+            Container
+            <select
+              value={exportSettings.container}
+              onChange={event => setExportSettings({ container: event.target.value as typeof exportSettings.container })}
+              disabled={exportSettings.format === 'audio'}
+            >
+              <option value="mp4">MP4</option>
+              <option value="mov">MOV</option>
+            </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+            Video bitrate
+            <input
+              type="number"
+              min={0}
+              max={120}
+              step={1}
+              value={exportSettings.bitrateMbps}
+              onChange={event => setExportSettings({ bitrateMbps: Math.max(0, Number(event.target.value) || 0) })}
+              disabled={exportSettings.format === 'audio'}
+            />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+            Encode mode
+            <select
+              value={exportSettings.hardwareAcceleration}
+              onChange={event => setExportSettings({ hardwareAcceleration: event.target.value as typeof exportSettings.hardwareAcceleration })}
+              disabled={exportSettings.format === 'audio'}
+            >
+              <option value="auto">Auto</option>
+              <option value="software">Software</option>
+            </select>
+          </label>
+        </div>
+
+        <div style={{ marginBottom: '1.75rem' }}>
+          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Export Range
+          </label>
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: exportSettings.rangeMode === 'custom' ? '0.75rem' : 0 }}>
+            {(['full', 'custom'] as const).map(rangeMode => (
+              <button
+                key={rangeMode}
+                onClick={() => setExportSettings({
+                  rangeMode,
+                  ...(rangeMode === 'custom' && exportSettings.rangeEnd <= exportSettings.rangeStart
+                    ? { rangeEnd: Number(timelineDuration.toFixed(2)) }
+                    : {}),
+                })}
+                style={{
+                  flex: 1, padding: '0.6rem', borderRadius: '8px', cursor: 'pointer',
+                  border: `2px solid ${exportSettings.rangeMode === rangeMode ? 'var(--accent-color)' : 'var(--border-color)'}`,
+                  background: exportSettings.rangeMode === rangeMode ? 'rgba(99,54,255,0.15)' : 'var(--surface-3)',
+                  color: exportSettings.rangeMode === rangeMode ? 'var(--accent-color)' : 'var(--text-secondary)',
+                  fontSize: '0.8rem', fontWeight: 600, textTransform: 'capitalize'
+                }}
+              >
+                {rangeMode === 'full' ? 'Full timeline' : 'Custom range'}
+              </button>
+            ))}
+          </div>
+          {exportSettings.rangeMode === 'custom' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                Start (s)
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={exportSettings.rangeStart}
+                  onChange={event => setExportSettings({ rangeStart: Math.max(0, Number(event.target.value) || 0) })}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                End (s)
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={exportSettings.rangeEnd}
+                  onChange={event => setExportSettings({ rangeEnd: Math.max(0, Number(event.target.value) || 0) })}
+                />
+              </label>
+            </div>
+          )}
+        </div>
+
         {/* Summary + Export */}
         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1.25rem' }}>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-            Output: <strong style={{ color: 'var(--text-primary)' }}>{exportSettings.format === 'audio' ? 'MP3 audio' : res.label}</strong> · {exportSettings.format === 'audio' ? 'audio only' : exportSettings.aspectRatio} · {exportSettings.quality} quality
+            Output: <strong style={{ color: 'var(--text-primary)' }}>{exportSettings.format === 'audio' ? 'MP3 audio' : `${res.label} ${exportSettings.container.toUpperCase()}`}</strong> · {exportSettings.format === 'audio' ? 'audio only' : `${exportSettings.aspectRatio} · ${exportSettings.fps} fps`} · {exportSettings.quality} quality
             <br />
-            {clips.length} clip{clips.length !== 1 ? 's' : ''} in sequence
+            {clips.length} clip{clips.length !== 1 ? 's' : ''} in sequence · {exportSettings.rangeMode === 'custom' ? `${exportSettings.rangeStart}s to ${exportSettings.rangeEnd}s` : 'full timeline'}
           </div>
           {exportStatus && (
             <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>

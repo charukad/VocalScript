@@ -18,6 +18,7 @@ Upgrade the editor into a modern creator workspace with CapCut-like editing dept
 - `EDITOR_PHASES_3_4_COMBINED_PLAN.md` is the active combined execution plan for the next canvas + motion milestone.
 - `EDITOR_PHASES_5_6_COMBINED_PLAN.md` is the active combined execution plan for the next text + finishing milestone.
 - `EDITOR_PHASES_7_8_COMBINED_PLAN.md` is the active combined execution plan for the next audio + assist milestone.
+- `EDITOR_PHASES_9_10_COMBINED_PLAN.md` is the active combined execution plan for the next templates + workflow milestone.
 - `EDITOR_PHASES_1_6_CLOSURE_PLAN.md` records the consolidated closure pass for all remaining editor work through Phase 6.
 - Older files such as `MISSING_FEATURE_TASKS.md`, `IMPROVEMENT_TASKS.md`, and `project_information.md` remain useful historical references, but this file should drive the new editor roadmap.
 - Existing project compatibility, export, transcription, AI generation, Content Studio, and browser bridge flows must remain working while this roadmap is implemented.
@@ -33,8 +34,8 @@ Upgrade the editor into a modern creator workspace with CapCut-like editing dept
 - `[/]` Phase 6: Effects, Color, And Compositing
 - `[x]` Phase 7: Audio System Upgrade
 - `[/]` Phase 8: AI-Assisted Editing
-- `[ ]` Phase 9: Templates, Assets, Export, And Reliability
-- `[ ]` Phase 10: Collaboration And Advanced Workflow
+- `[/]` Phase 9: Templates, Assets, Export, And Reliability
+- `[/]` Phase 10: Collaboration And Advanced Workflow
 
 ## Phase 0: Planning And Baseline Alignment
 
@@ -258,58 +259,46 @@ Upgrade the editor into a modern creator workspace with CapCut-like editing dept
 - `[x]` Add one-click multi-platform variants.
 - `[!]` Add smart reframing / subject tracking planning. Requires a real visual-analysis layer to identify and follow subjects.
 
-### Acceptance Checks
+### Phase 8 Acceptance Checks
 
 - `[x]` AI creates useful reviewable edits without silently changing user work.
 - `[x]` Manual editing remains first-class.
 
 ## Phase 9: Templates, Assets, Export, And Reliability
 
-### Templates And Assets
+- `[x]` Add reusable reels, shorts, and creator workflow templates.
+- `[x]` Add reusable style packs and local custom template saving.
+- `[x]` Add local asset-library and recovery affordances around existing imported media.
+- `[x]` Surface autosave state more clearly.
+- `[x]` Add manual project version history.
+- `[x]` Improve recent-project metadata in the project gate.
+- `[x]` Detect missing media and support asset relinking.
+- `[!]` Add proxy media planning. Requires a media-derivative/cache pipeline that does not exist yet.
+- `[!]` Add render cache planning. Requires render graph invalidation and cache storage work that does not exist yet.
+- `[x]` Add 2K/4K presets, FPS selection, bitrate control, MP4/MOV options, custom export ranges, and hardware-acceleration hooks.
 
-- `[ ]` Add reusable reels templates.
-- `[ ]` Add reusable shorts templates.
-- `[ ]` Add custom template saving.
-- `[ ]` Add reusable style packs.
-- `[ ]` Add stock/local asset library integration.
+### Phase 9 Acceptance Checks
 
-### Reliability
-
-- `[ ]` Add autosave.
-- `[ ]` Add version history.
-- `[ ]` Add recent projects improvements.
-- `[ ]` Add missing media detection.
-- `[ ]` Add asset relinking.
-- `[ ]` Add proxy media planning.
-- `[ ]` Add render cache planning.
-
-### Export
-
-- `[ ]` Add 2K and 4K presets.
-- `[ ]` Add FPS selection.
-- `[ ]` Add bitrate control.
-- `[ ]` Add MP4/MOV format options.
-- `[ ]` Add export range selection.
-- `[ ]` Add hardware-acceleration hooks where available.
-
-### Acceptance Checks
-
-- `[ ]` Projects are safer to resume.
-- `[ ]` Repeated creator workflows are materially faster.
-- `[ ]` Export options cover common creator needs.
+- `[x]` Templates are usable from the editor shell.
+- `[x]` Missing project media can be detected and relinked without rebuilding the timeline manually.
+- `[x]` Recent projects expose useful metadata.
+- `[x]` Export can target custom ranges and the expanded output settings.
 
 ## Phase 10: Collaboration And Advanced Workflow
 
-- `[ ]` Add review comments on the timeline.
-- `[ ]` Add approval states.
-- `[ ]` Add shareable draft links.
-- `[ ]` Add team asset libraries.
-- `[ ]` Add version compare.
-- `[ ]` Add role-aware collaboration support.
+- `[x]` Add review comments on the timeline.
+- `[x]` Add project approval states.
+- `[!]` Add real shareable draft links. Requires project sync/share endpoints and access control.
+- `[!]` Add team asset libraries. Requires shared storage, identity, and permissions.
+- `[x]` Add local version compare support.
+- `[!]` Add role-aware collaboration support. Requires authentication, users, and authorization.
 
-### Acceptance Checks
+### Phase 10 Acceptance Checks
 
-- `[ ]` Team workflows work without weakening solo/local-first use.
+- `[x]` Review comments persist with the project and surface on the timeline.
+- `[x]` Project approval state persists locally.
+- `[x]` Saved versions can be compared locally.
+- `[!]` Multi-user collaboration remains blocked until auth, sharing, and sync infrastructure are introduced.
 
 ## First Milestone: Modern Editor Foundation
 

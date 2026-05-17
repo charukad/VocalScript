@@ -208,10 +208,53 @@ export type TimelineClip = {
 };
 
 export type ExportSettings = {
-  resolution: '720p' | '1080p' | '4k';
+  resolution: '720p' | '1080p' | '2k' | '4k';
   aspectRatio: '16:9' | '9:16' | '1:1';
   quality: 'high' | 'standard' | 'compressed';
   format: 'video' | 'audio';
+  fps: 24 | 30 | 60;
+  bitrateMbps: number;
+  container: 'mp4' | 'mov';
+  rangeMode: 'full' | 'custom';
+  rangeStart: number;
+  rangeEnd: number;
+  hardwareAcceleration: 'auto' | 'software';
+};
+
+export type MissingMediaRecord = {
+  assetId: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  clipCount: number;
+};
+
+export type ReviewComment = {
+  id: string;
+  markerId?: string;
+  time: number;
+  text: string;
+  status: 'open' | 'resolved';
+  author: string;
+  createdAt: string;
+};
+
+export type ProjectApprovalState = 'draft' | 'in_review' | 'approved' | 'changes_requested';
+
+export type ProjectVersionSummary = {
+  assetCount: number;
+  clipCount: number;
+  markerCount: number;
+  commentCount: number;
+  durationSeconds: number;
+};
+
+export type ProjectVersion = {
+  id: string;
+  label: string;
+  createdAt: string;
+  summary: ProjectVersionSummary;
+  snapshot: Record<string, unknown>;
 };
 
 export type CaptionSegment = {
