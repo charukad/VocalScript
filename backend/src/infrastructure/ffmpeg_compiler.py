@@ -103,6 +103,53 @@ def _hex_to_rgba(ImageColor, color: str, alpha: float = 1.0) -> tuple[int, int, 
     return (*rgb, max(0, min(255, int(alpha * 255))))
 
 class FFmpegMediaCompiler(IMediaCompiler):
+    def _has_keyframes(self, clip, property_name: str) -> bool:
+        return any(keyframe.property == property_name for keyframe in (clip.keyframes or []))
+
+    def _keyframe_expr(
+        self,
+        clip,
+        property_name: str,
+        fallback: float,
+        scale: float = 1.0,
+        time_var: str = "t",
+    ) -> str:
+        frames = sorted(
+            (
+                keyframe
+                for keyframe in (clip.keyframes or [])
+                if keyframe.property == property_name and math.isfinite(keyframe.time) and math.isfinite(keyframe.value)
+            ),
+            key=lambda keyframe: keyframe.time,
+        )
+        if not frames:
+            return f"{fallback * scale:.6f}"
+        if len(frames) == 1:
+            return f"{frames[0].value * scale:.6f}"
+
+        def value(keyframe) -> str:
+            return f"{keyframe.value * scale:.6f}"
+
+        def progress(previous, next_frame) -> str:
+            span = max(0.001, next_frame.time - previous.time)
+            raw = f"(({time_var}-{previous.time:.6f})/{span:.6f})"
+            if previous.easing == "ease_in":
+                return f"pow({raw},2)"
+            if previous.easing == "ease_out":
+                return f"(1-pow(1-{raw},2))"
+            if previous.easing == "ease_in_out":
+                return f"if(lt({raw},0.5),2*pow({raw},2),1-pow(-2*{raw}+2,2)/2)"
+            return raw
+
+        expr = value(frames[-1])
+        for previous, next_frame in reversed(list(zip(frames, frames[1:]))):
+            segment_progress = progress(previous, next_frame)
+            segment_value = (
+                f"({value(previous)}+({value(next_frame)}-{value(previous)})*({segment_progress}))"
+            )
+            expr = f"if(lte({time_var},{next_frame.time:.6f}),{segment_value},{expr})"
+        return f"if(lte({time_var},{frames[0].time:.6f}),{value(frames[0])},{expr})"
+
     def _render_text_overlay(self, td, blueprint: TimelineBlueprint, output_path: str, index: int) -> str:
         Image, ImageColor, ImageDraw, ImageFilter, ImageFont = _load_pillow()
 
@@ -248,7 +295,13 @@ class FFmpegMediaCompiler(IMediaCompiler):
                     "acompressor=threshold=0.12:ratio=3:attack=20:release=250",
                     "loudnorm=I=-16:LRA=11:TP=-1.5",
                 ])
-            processing_filters.append(f"volume={effective_volume:.3f}")
+            if clip.audio.mute:
+                processing_filters.append("volume=0.000")
+            elif self._has_keyframes(clip, "volume"):
+                volume_expr = self._keyframe_expr(clip, "volume", clip.audio.volume, scale=0.01, time_var="t")
+                processing_filters.append(f"volume='{volume_expr}':eval=frame")
+            else:
+                processing_filters.append(f"volume={effective_volume:.3f}")
             filter_complex.append(f"[{in_idx}:a]{','.join(processing_filters)}[{node_prefix}_v]")
             fade_node = f"{node_prefix}_v"
             if clip.audio.fadeIn > 0:
@@ -380,29 +433,47 @@ class FFmpegMediaCompiler(IMediaCompiler):
                 timing_filters.append("setsar=1")
                 filter_complex.append(f"[{in_idx}:v]{','.join(timing_filters)}[v_base_{i}]")
 
-                # 2. Transforms (flip, rotate, zoom)
+                # 2. Transforms (flip, rotate, zoom, animated opacity)
+                out_node = f"v_base_{i}"
                 tf_filters = []
                 if clip.transform.flipX:
                     tf_filters.append("hflip")
                 if clip.transform.flipY:
                     tf_filters.append("vflip")
-                if clip.transform.rotation != 0:
-                    tf_filters.append(
-                        f"rotate={clip.transform.rotation}*PI/180:c=black@0"
-                        f":ow='max(iw,ih)':oh='max(iw,ih)'"
-                    )
-                scale_factor = clip.transform.scale / 100.0
-                if scale_factor != 1.0:
-                    tf_filters.append(f"scale=iw*{scale_factor}:ih*{scale_factor}")
-
-                opacity = max(0.0, min(1.0, clip.transform.opacity / 100.0))
-                if opacity < 1.0:
-                    tf_filters.append(f"format=rgba,colorchannelmixer=aa={opacity:.3f}")
-
-                out_node = f"v_base_{i}"
                 if tf_filters:
                     filter_complex.append(f"[{out_node}]{','.join(tf_filters)}[v_tf_{i}]")
                     out_node = f"v_tf_{i}"
+
+                rotation_expr = self._keyframe_expr(clip, "rotation", clip.transform.rotation, time_var="t")
+                if clip.transform.rotation != 0 or self._has_keyframes(clip, "rotation"):
+                    filter_complex.append(
+                        f"[{out_node}]"
+                        f"rotate='{rotation_expr}*PI/180':c=black@0:ow='max(iw,ih)':oh='max(iw,ih)'"
+                        f"[v_rot_{i}]"
+                    )
+                    out_node = f"v_rot_{i}"
+
+                scale_expr = self._keyframe_expr(clip, "scale", clip.transform.scale, scale=0.01, time_var="t")
+                if clip.transform.scale != 100 or self._has_keyframes(clip, "scale"):
+                    filter_complex.append(
+                        f"[{out_node}]scale=w='iw*({scale_expr})':h='ih*({scale_expr})':eval=frame[v_scale_{i}]"
+                    )
+                    out_node = f"v_scale_{i}"
+
+                opacity = max(0.0, min(1.0, clip.transform.opacity / 100.0))
+                if self._has_keyframes(clip, "opacity"):
+                    opacity_expr = self._keyframe_expr(clip, "opacity", clip.transform.opacity, scale=0.01, time_var="T")
+                    filter_complex.append(
+                        f"[{out_node}]format=rgba,"
+                        f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*({opacity_expr})'"
+                        f"[v_opacity_{i}]"
+                    )
+                    out_node = f"v_opacity_{i}"
+                elif opacity < 1.0:
+                    filter_complex.append(
+                        f"[{out_node}]format=rgba,colorchannelmixer=aa={opacity:.3f}[v_opacity_{i}]"
+                    )
+                    out_node = f"v_opacity_{i}"
 
                 # 3. Color grading
                 br = (clip.color.brightness / 100.0) - 1.0
@@ -479,14 +550,30 @@ class FFmpegMediaCompiler(IMediaCompiler):
                     filter_complex.append(f"[{out_node}]{','.join(color_filters)}[v_color_{i}]")
                     out_node = f"v_color_{i}"
 
+                transition_duration = max(0.0, min(clip.duration / 2, clip.transition.duration))
+                if transition_duration > 0 and clip.transition.type in {"fade", "crossfade"}:
+                    filter_complex.append(
+                        f"[{out_node}]format=rgba,"
+                        f"fade=t=in:st=0:d={transition_duration:.3f}:alpha=1[v_fade_in_{i}]"
+                    )
+                    out_node = f"v_fade_in_{i}"
+                    if clip.transition.type == "fade":
+                        fade_out_start = max(0.0, clip.duration - transition_duration)
+                        filter_complex.append(
+                            f"[{out_node}]"
+                            f"fade=t=out:st={fade_out_start:.3f}:d={transition_duration:.3f}:alpha=1[v_fade_out_{i}]"
+                        )
+                        out_node = f"v_fade_out_{i}"
+
                 # Overlay onto canvas
                 next_out = f"base_{i+1}"
-                overlay_x = max(-0.5, min(1.5, clip.transform.x / 100.0))
-                overlay_y = max(-0.5, min(1.5, clip.transform.y / 100.0))
+                local_t = f"(t-{clip.start_time:.6f})"
+                overlay_x = self._keyframe_expr(clip, "x", clip.transform.x, scale=0.01, time_var=local_t)
+                overlay_y = self._keyframe_expr(clip, "y", clip.transform.y, scale=0.01, time_var=local_t)
                 filter_complex.append(
                     f"[{last_out}][{out_node}]"
-                    f"overlay=x='({blueprint.width}-w)*{overlay_x:.4f}':"
-                    f"y='({blueprint.height}-h)*{overlay_y:.4f}':"
+                    f"overlay=x='({blueprint.width}-w)*({overlay_x})':"
+                    f"y='({blueprint.height}-h)*({overlay_y})':"
                     f"enable='between(t,{clip.start_time},{clip.start_time + clip.duration})'"
                     f"[{next_out}]"
                 )

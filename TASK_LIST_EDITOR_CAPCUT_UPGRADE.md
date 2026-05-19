@@ -19,6 +19,7 @@ Upgrade the editor into a modern creator workspace with CapCut-like editing dept
 - `EDITOR_PHASES_5_6_COMBINED_PLAN.md` is the active combined execution plan for the next text + finishing milestone.
 - `EDITOR_PHASES_7_8_COMBINED_PLAN.md` is the active combined execution plan for the next audio + assist milestone.
 - `EDITOR_PHASES_9_10_COMBINED_PLAN.md` is the active combined execution plan for the next templates + workflow milestone.
+- `EDITOR_RENDER_PLANNING_CONTINUATION_PLAN.md` is the active continuation plan for export-side animation/render planning.
 - `EDITOR_PHASES_1_6_CLOSURE_PLAN.md` records the consolidated closure pass for all remaining editor work through Phase 6.
 - Older files such as `MISSING_FEATURE_TASKS.md`, `IMPROVEMENT_TASKS.md`, and `project_information.md` remain useful historical references, but this file should drive the new editor roadmap.
 - Existing project compatibility, export, transcription, AI generation, Content Studio, and browser bridge flows must remain working while this roadmap is implemented.
@@ -157,7 +158,10 @@ Upgrade the editor into a modern creator workspace with CapCut-like editing dept
 - `[x]` Add graph editor or curve controls.
 - `[x]` Add reusable motion presets.
 - `[x]` Support copy/paste of keyframes.
-- `[!]` Apply all supported keyframes during export. Requires the planned render-planning layer for time-varying FFmpeg filter graphs.
+- `[/]` Apply all supported keyframes during export. Visual transform and audio volume keyframe export is being added; text keyframe export still needs the text render-planning pass.
+- `[x]` Export visual scale, rotation, opacity, x, and y keyframes through FFmpeg filter expressions.
+- `[x]` Export audio volume keyframes for audio clips and embedded video audio.
+- `[!]` Export text x/y/opacity keyframes. Requires a text-layer render-planning pass instead of static full-canvas PNG overlays.
 
 ### Speed
 
@@ -169,7 +173,7 @@ Upgrade the editor into a modern creator workspace with CapCut-like editing dept
 
 ### Acceptance Checks
 
-- `[!]` Preview and export agree for transforms and supported motion. Static transform export now exists; animated keyframe export remains blocked by render-planning work.
+- `[/]` Preview and export agree for transforms and supported motion. Visual transform and audio volume keyframe export now exist; text animation and speed-curve export remain blocked.
 - `[x]` Users can create common social-video motion styles quickly.
 
 ## Phase 5: Text, Captions, And Titles
@@ -227,7 +231,7 @@ Upgrade the editor into a modern creator workspace with CapCut-like editing dept
 ### Acceptance Checks
 
 - `[/]` Users can produce polished edits without leaving NeuralScribe.
-- `[/]` Export supports the selected effect stack. Static crop, opacity, speed, reverse, freeze frame, borders, chroma key, stabilization, and expanded color controls export; LUTs, animated masks, preview overlays, blend modes, and transitions still need render-planning work.
+- `[/]` Export supports the selected effect stack. Static crop, opacity, speed, reverse, freeze frame, borders, chroma key, stabilization, expanded color controls, visual keyframes, audio volume keyframes, and fade/crossfade alpha transitions export; LUTs, animated masks, preview overlays, blend modes, slide/wipe transitions, and text keyframes still need render-planning work.
 
 ## Phase 7: Audio System Upgrade
 
@@ -307,7 +311,7 @@ Upgrade the editor into a modern creator workspace with CapCut-like editing dept
 - `[x]` Timeline markers, duplicate clip, groups, visibility, and ripple delete are implemented.
 - `[ ]` Preview canvas supports direct transform handles and safe areas.
 - `[ ]` Inspector tabs are implemented.
-- `[ ]` Position keyframes export correctly.
+- `[x]` Visual position keyframes export correctly.
 - `[ ]` Captions are styleable enough for social video work.
 
 ## Recommended First Sprint

@@ -432,6 +432,10 @@ type ClipBlueprint = {
     freezeFrame: boolean;
     curvePreset?: 'constant' | 'ramp_up' | 'ramp_down';
   };
+  transition: {
+    type: 'cut' | 'fade' | 'crossfade' | 'slide_left' | 'slide_right' | 'wipe';
+    duration: number;
+  };
   compositing: {
     blendMode: 'normal' | 'screen' | 'multiply' | 'overlay';
     layoutPreset: 'free' | 'pip_top_right' | 'pip_bottom_left' | 'split_left' | 'split_right';
@@ -484,6 +488,13 @@ type ClipBlueprint = {
     maxWidthPercent: number;
     maxCharsPerLine: number;
   } | null;
+  keyframes?: Array<{
+    id: string;
+    property: 'scale' | 'rotation' | 'opacity' | 'x' | 'y' | 'volume';
+    time: number;
+    value: number;
+    easing: 'linear' | 'ease_in' | 'ease_out' | 'ease_in_out';
+  }>;
 };
 
 type TrackBlueprint = {
@@ -564,6 +575,7 @@ export const exportTimeline = async (
         color: c.color || { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0, highlights: 0, shadows: 0, red: 0, green: 0, blue: 0 },
         effects: c.effects || { blur: 0, sharpen: 0, vignette: 0, clarity: 0, overlayPreset: 'none', overlayIntensity: 0 },
         speed: c.speed || { rate: 1, reverse: false, freezeFrame: false, curvePreset: 'constant' },
+        transition: c.transition || { type: 'cut', duration: 0 },
         compositing: c.compositing || {
           blendMode: 'normal',
           layoutPreset: 'free',
@@ -592,7 +604,8 @@ export const exportTimeline = async (
           duckingRole: 'none',
           autoDucking: true,
         },
-        text: c.textData || null
+        text: c.textData || null,
+        keyframes: c.keyframes || []
       }))
   }));
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 
 class TransformBlueprint(BaseModel):
@@ -41,6 +41,17 @@ class SpeedBlueprint(BaseModel):
     reverse: bool = False
     freezeFrame: bool = False
     curvePreset: Literal["constant", "ramp_up", "ramp_down"] = "constant"
+
+class TransitionBlueprint(BaseModel):
+    type: Literal["cut", "fade", "crossfade", "slide_left", "slide_right", "wipe"] = "cut"
+    duration: float = 0.0
+
+class KeyframeBlueprint(BaseModel):
+    id: str = ""
+    property: Literal["scale", "rotation", "opacity", "x", "y", "volume"]
+    time: float = 0.0
+    value: float = 0.0
+    easing: Literal["linear", "ease_in", "ease_out", "ease_in_out"] = "linear"
 
 class CompositingBlueprint(BaseModel):
     blendMode: Literal["normal", "screen", "multiply", "overlay"] = "normal"
@@ -105,9 +116,11 @@ class ClipBlueprint(BaseModel):
     color: ColorBlueprint = ColorBlueprint()
     effects: EffectsBlueprint = EffectsBlueprint()
     speed: SpeedBlueprint = SpeedBlueprint()
+    transition: TransitionBlueprint = TransitionBlueprint()
     compositing: CompositingBlueprint = CompositingBlueprint()
     audio: AudioBlueprint = AudioBlueprint()
     text: Optional[TextBlueprint] = None
+    keyframes: List[KeyframeBlueprint] = Field(default_factory=list)
 
 class TrackBlueprint(BaseModel):
     id: str
