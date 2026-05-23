@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import type { TimelineClip } from '../../types';
 import { useEditorStore } from '../../store/editorStore';
@@ -30,11 +30,13 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
   const validDuration = (isNaN(clip.duration) || !isFinite(clip.duration)) ? 5 : clip.duration;
   
   const isTrimmingRef = useRef(false);
+  const [isTrimming, setIsTrimming] = useState(false);
 
   // Helper for trimming
   const handleTrim = (e: React.PointerEvent, edge: 'left' | 'right') => {
     e.stopPropagation();
     isTrimmingRef.current = true;
+    setIsTrimming(true);
     
     const startX = e.clientX;
     const initialStartTime = clip.startTime;
@@ -75,7 +77,10 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       clearSnapGuide();
-      setTimeout(() => { isTrimmingRef.current = false; }, 100);
+      setTimeout(() => {
+        isTrimmingRef.current = false;
+        setIsTrimming(false);
+      }, 100);
     };
 
     window.addEventListener('pointermove', onPointerMove);
@@ -89,7 +94,7 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
   const style: React.CSSProperties = {
     left: `${clip.startTime * zoom}px`,
     width: `${clipWidth}px`,
-    transform: transform && !isTrimmingRef.current ? `translate3d(${transform.x}px, 0, 0)` : undefined,
+    transform: transform && !isTrimming ? `translate3d(${transform.x}px, 0, 0)` : undefined,
     zIndex: isDragging ? 100 : (isSelected ? 50 : 1),
     opacity: isDragging ? 0.8 : 1,
     backgroundColor: isTextClip ? '#4a3412' : isVisualClip ? '#2d1b6e' : '#0d385e',
@@ -192,8 +197,8 @@ export const DraggableClip = ({ clip, zoom, onRemove }: DraggableClipProps) => {
           }
         }
       }}
-      {...(isTrimmingRef.current ? {} : attributes)} 
-      {...(isTrimmingRef.current ? {} : listeners)}
+      {...(isTrimming ? {} : attributes)}
+      {...(isTrimming ? {} : listeners)}
     >
       {/* Background Visuals */}
       {clip.type === 'audio' ? renderWaveform() : isTextClip ? renderTextClip() : renderFilmstrip()}

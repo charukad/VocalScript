@@ -6,7 +6,7 @@ type StoryboardTabProps = {
   profileId: string;
 };
 
-export const StoryboardTab = ({ profileId: _profileId }: StoryboardTabProps) => {
+export const StoryboardTab = ({ profileId }: StoryboardTabProps) => {
   const {
     scripts,
     selectedScriptId,
@@ -48,7 +48,7 @@ export const StoryboardTab = ({ profileId: _profileId }: StoryboardTabProps) => 
   };
 
   return (
-    <div className="studio-storyboard-grid">
+    <div className="studio-storyboard-grid" data-profile-id={profileId}>
       <section className="studio-panel">
         <header>
           <h2>Scripts</h2>

@@ -45,7 +45,7 @@ const tabs: { id: StudioTab; label: string }[] = [
 
 export const ContentStudioLayout = () => {
   const { profiles, selectedProfileId, loadProfiles, selectProfile } = useContentProfileStore();
-  const { loadProfileWorkspace, error, isLoading } = useContentStudioStore();
+  const { loadProfileWorkspace, error, isLoading, selectedScriptId } = useContentStudioStore();
   const [activeTab, setActiveTab] = useState<StudioTab>('ideas');
 
   useEffect(() => {
@@ -94,7 +94,7 @@ export const ContentStudioLayout = () => {
           <div className="studio-empty studio-empty-large">Create or select a Content Profile to begin.</div>
         )}
         {selectedProfileId && (
-          <>
+          <section key={selectedProfileId}>
             {error && <div className="content-profile-error">{error}</div>}
             {isLoading && <div className="studio-empty studio-empty-large">Loading studio workspace...</div>}
             {!isLoading && activeTab === 'ideas' && <IdeasTab profileId={selectedProfileId} />}
@@ -102,20 +102,20 @@ export const ContentStudioLayout = () => {
             {!isLoading && activeTab === 'competitors' && <CompetitorsTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'brand_kit' && <BrandKitTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'characters' && <CharacterConsistencyTab profileId={selectedProfileId} />}
-            {!isLoading && activeTab === 'caption_designer' && <CaptionDesignerTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'caption_designer' && <CaptionDesignerTab key={selectedScriptId ?? 'caption-brief'} profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'prompt_library' && <PromptLibraryTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'content_calendar' && <ContentCalendarTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'ab_testing' && <ABTestingTab profileId={selectedProfileId} />}
-            {!isLoading && activeTab === 'script_lab' && <ScriptLabTab profileId={selectedProfileId} />}
-            {!isLoading && activeTab === 'packaging' && <PackagingTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'script_lab' && <ScriptLabTab key={selectedScriptId ?? 'script-lab'} profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'packaging' && <PackagingTab key={selectedScriptId ?? 'packaging'} profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'repurpose' && <RepurposeTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'storyboard' && <StoryboardTab profileId={selectedProfileId} />}
-            {!isLoading && activeTab === 'voice' && <VoiceTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'voice' && <VoiceTab key={selectedScriptId ?? 'voice'} profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'comments' && <CommentsTab profileId={selectedProfileId} />}
-            {!isLoading && activeTab === 'publishing' && <PublishingTab profileId={selectedProfileId} />}
+            {!isLoading && activeTab === 'publishing' && <PublishingTab key={selectedScriptId ?? 'publishing'} profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'analytics' && <AnalyticsTab profileId={selectedProfileId} />}
             {!isLoading && activeTab === 'agents' && <AgentsTab profileId={selectedProfileId} />}
-          </>
+          </section>
         )}
       </main>
     </div>

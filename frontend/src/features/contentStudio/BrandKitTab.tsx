@@ -24,10 +24,13 @@ export const BrandKitTab = ({ profileId }: BrandKitTabProps) => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-    getBrandKit(profileId)
-      .then(result => {
+    let ignore = false;
+    const loadBrandKit = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const result = await getBrandKit(profileId);
+        if (ignore) return;
         setBrandKit(result);
         setDraft({
           logoPath: result.logoPath,
@@ -40,9 +43,14 @@ export const BrandKitTab = ({ profileId }: BrandKitTabProps) => {
         setFontsText(toText(result.fontFamilies));
         setToneText(toText(result.toneKeywords));
         setAvoidText(toText(result.avoidKeywords));
-      })
-      .catch(error => setError(error instanceof Error ? error.message : 'Could not load brand kit'))
-      .finally(() => setIsLoading(false));
+      } catch (error) {
+        if (!ignore) setError(error instanceof Error ? error.message : 'Could not load brand kit');
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+    void loadBrandKit();
+    return () => { ignore = true; };
   }, [profileId]);
 
   const handleSave = async () => {

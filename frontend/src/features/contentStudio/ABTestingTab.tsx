@@ -68,30 +68,38 @@ export const ABTestingTab = ({ profileId }: ABTestingTabProps) => {
   );
 
   useEffect(() => {
-    setDraft(current => ({
-      ...current,
-      platform: current.platform && profile?.platforms.includes(current.platform)
-        ? current.platform
-        : profile?.platforms[0] ?? null,
-      scriptId: current.scriptId ?? selectedScript?.id ?? null,
-    }));
-  }, [profile, selectedScript?.id]);
-
-  useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-    listExperiments(profileId)
-      .then(response => setExperiments(response.experiments))
-      .catch(error => setError(error instanceof Error ? error.message : 'Could not load experiments'))
-      .finally(() => setIsLoading(false));
+    let ignore = false;
+    const loadExperiments = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await listExperiments(profileId);
+        if (!ignore) setExperiments(response.experiments);
+      } catch (error) {
+        if (!ignore) setError(error instanceof Error ? error.message : 'Could not load experiments');
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+    void loadExperiments();
+    return () => { ignore = true; };
   }, [profileId]);
+
+  const selectedPlatform = draft.platform && profile?.platforms.includes(draft.platform)
+    ? draft.platform
+    : profile?.platforms[0] ?? null;
+  const linkedScriptId = draft.scriptId ?? selectedScript?.id ?? null;
 
   const handleCreate = async () => {
     if (!draft.name.trim() || !draft.variantA.title.trim() || !draft.variantB.title.trim()) return;
     setIsSaving(true);
     setError(null);
     try {
-      const created = await createExperiment(profileId, draft);
+      const created = await createExperiment(profileId, {
+        ...draft,
+        platform: selectedPlatform,
+        scriptId: linkedScriptId,
+      });
       setExperiments(current => [created, ...current]);
       setDraft(current => ({
         ...current,
@@ -156,7 +164,7 @@ export const ABTestingTab = ({ profileId }: ABTestingTabProps) => {
         <label>
           Platform
           <select
-            value={draft.platform ?? ''}
+            value={selectedPlatform ?? ''}
             onChange={event => setDraft(current => ({
               ...current,
               platform: (event.target.value || null) as ExperimentInput['platform'],

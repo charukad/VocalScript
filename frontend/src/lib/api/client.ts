@@ -43,6 +43,8 @@ export type TranscriptionResponse = {
   sourceName: string;
 };
 
+export type TranscriptionLanguage = 'auto' | 'si' | 'en';
+
 export type StoryboardResponse = {
   scenes: StoryboardScene[];
   provider: ProviderName;
@@ -668,10 +670,12 @@ export const exportTimeline = async (
 
 export const transcribeMedia = async (
   file: File,
+  language: TranscriptionLanguage = 'auto',
   signal?: AbortSignal
 ): Promise<TranscriptionResponse> => {
   const formData = new FormData();
   formData.append('file', file);
+  if (language !== 'auto') formData.append('language', language);
 
   const response = await fetch(`${API_BASE_URL}/api/transcribe`, {
     method: 'POST',

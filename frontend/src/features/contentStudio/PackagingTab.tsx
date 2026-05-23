@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useContentProfileStore } from '../contentProfiles/contentProfileStore';
 import { generatePackaging } from './api';
 import { useContentStudioStore } from './contentStudioStore';
@@ -13,18 +13,13 @@ export const PackagingTab = ({ profileId }: PackagingTabProps) => {
   const { profiles } = useContentProfileStore();
   const profile = profiles.find(item => item.id === profileId) ?? null;
   const { selectedScript, updateScript, isSaving } = useContentStudioStore();
-  const [topic, setTopic] = useState('');
-  const [platform, setPlatform] = useState<PlatformTarget | ''>('');
+  const [topic, setTopic] = useState(profile?.contentType ?? '');
+  const [platform, setPlatform] = useState<PlatformTarget | ''>(profile?.platforms[0] ?? '');
   const [result, setResult] = useState<PackagingGenerationResult | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setTopic(profile?.contentType ?? '');
-    setPlatform(profile?.platforms[0] ?? '');
-    setResult(null);
-    setError(null);
-  }, [profile, selectedScript?.id]);
+  const selectedPlatform = platform || profile?.platforms[0] || '';
 
   const handleGenerate = async () => {
     if (!selectedScript?.content.trim()) return;
@@ -35,7 +30,7 @@ export const PackagingTab = ({ profileId }: PackagingTabProps) => {
         script: selectedScript.content,
         currentTitle: selectedScript.title,
         topic,
-        platform: platform || null,
+        platform: selectedPlatform || null,
       }));
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Could not generate packaging');
@@ -73,7 +68,7 @@ export const PackagingTab = ({ profileId }: PackagingTabProps) => {
             <label>
               Platform
               <select
-                value={platform}
+                value={selectedPlatform}
                 onChange={event => setPlatform(event.target.value as PlatformTarget)}
               >
                 {profile.platforms.map(option => (

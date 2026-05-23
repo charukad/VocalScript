@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useContentProfileStore } from '../contentProfiles/contentProfileStore';
 import { generateRepurposeCandidates } from './api';
 import type { RepurposeResult } from './types';
@@ -13,15 +13,13 @@ export const RepurposeTab = ({ profileId }: RepurposeTabProps) => {
   const profile = profiles.find(item => item.id === profileId) ?? null;
   const [sourceTitle, setSourceTitle] = useState('');
   const [transcript, setTranscript] = useState('');
-  const [platform, setPlatform] = useState<PlatformTarget | ''>('');
+  const [platform, setPlatform] = useState<PlatformTarget | ''>(profile?.platforms[0] ?? '');
   const [duration, setDuration] = useState(45);
   const [result, setResult] = useState<RepurposeResult | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setPlatform(profile?.platforms[0] ?? '');
-  }, [profile]);
+  const selectedPlatform = platform || profile?.platforms[0] || '';
 
   const handleGenerate = async () => {
     if (!transcript.trim()) return;
@@ -31,7 +29,7 @@ export const RepurposeTab = ({ profileId }: RepurposeTabProps) => {
       setResult(await generateRepurposeCandidates(profileId, {
         sourceTitle,
         transcript,
-        platform: platform || null,
+        platform: selectedPlatform || null,
         targetDurationSeconds: duration,
         maxCandidates: 5,
       }));
@@ -55,7 +53,7 @@ export const RepurposeTab = ({ profileId }: RepurposeTabProps) => {
         </label>
         <label>
           Platform
-          <select value={platform} onChange={event => setPlatform(event.target.value as PlatformTarget)}>
+          <select value={selectedPlatform} onChange={event => setPlatform(event.target.value as PlatformTarget)}>
             {(profile?.platforms ?? []).map(option => (
               <option key={option} value={option}>{option.replaceAll('_', ' ')}</option>
             ))}

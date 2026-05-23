@@ -53,40 +53,47 @@ export const CompetitorsTab = ({ profileId }: CompetitorsTabProps) => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setDraft(current => ({
-      ...current,
-      competitorName: current.competitorName || profile?.competitors[0] || '',
-      platform: profile?.platforms.includes(current.platform)
-        ? current.platform
-        : profile?.platforms[0] ?? 'youtube_shorts',
-    }));
-  }, [profile]);
-
-  useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-    Promise.all([
-      listCompetitorContent(profileId),
-      getCompetitorSummary(profileId),
-    ])
-      .then(([contentResponse, summaryResponse]) => {
+    let ignore = false;
+    const loadCompetitorData = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const [contentResponse, summaryResponse] = await Promise.all([
+          listCompetitorContent(profileId),
+          getCompetitorSummary(profileId),
+        ]);
+        if (ignore) return;
         setItems(contentResponse.items);
         setSummary(summaryResponse);
-      })
-      .catch(error => setError(error instanceof Error ? error.message : 'Could not load competitor data'))
-      .finally(() => setIsLoading(false));
+      } catch (error) {
+        if (!ignore) setError(error instanceof Error ? error.message : 'Could not load competitor data');
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+    void loadCompetitorData();
+    return () => { ignore = true; };
   }, [profileId]);
+
+  const selectedPlatform = profile?.platforms.includes(draft.platform)
+    ? draft.platform
+    : profile?.platforms[0] ?? 'youtube_shorts';
+  const selectedCompetitorName = draft.competitorName || profile?.competitors[0] || '';
 
   const refreshSummary = async () => {
     setSummary(await getCompetitorSummary(profileId));
   };
 
   const handleCreate = async () => {
-    if (!draft.competitorName.trim() || !draft.title.trim()) return;
+    if (!selectedCompetitorName.trim() || !draft.title.trim()) return;
     setIsSaving(true);
     setError(null);
     try {
-      const created = await createCompetitorContent(profileId, draft);
+      const created = await createCompetitorContent(profileId, {
+        ...draft,
+        competitorName: selectedCompetitorName,
+        platform: selectedPlatform,
+      });
       setItems(current => [created, ...current]);
       setDraft(current => ({
         ...current,
@@ -151,7 +158,7 @@ export const CompetitorsTab = ({ profileId }: CompetitorsTabProps) => {
         <label>
           Competitor
           <input
-            value={draft.competitorName}
+            value={selectedCompetitorName}
             onChange={event => setDraft(current => ({ ...current, competitorName: event.target.value }))}
             placeholder="Creator A"
           />
@@ -159,7 +166,7 @@ export const CompetitorsTab = ({ profileId }: CompetitorsTabProps) => {
         <label>
           Platform
           <select
-            value={draft.platform}
+            value={selectedPlatform}
             onChange={event => setDraft(current => ({
               ...current,
               platform: event.target.value as CompetitorContentInput['platform'],
@@ -244,7 +251,7 @@ export const CompetitorsTab = ({ profileId }: CompetitorsTabProps) => {
         <button
           className="btn-primary"
           onClick={() => void handleCreate()}
-          disabled={isSaving || !draft.competitorName.trim() || !draft.title.trim()}
+          disabled={isSaving || !selectedCompetitorName.trim() || !draft.title.trim()}
         >
           Save Observation
         </button>

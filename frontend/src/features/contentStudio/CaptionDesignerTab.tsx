@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useContentProfileStore } from '../contentProfiles/contentProfileStore';
 import { useEditorStore } from '../../store/editorStore';
 import { generateCaptionDesigns, updateBrandKit } from './api';
@@ -20,8 +20,10 @@ export const CaptionDesignerTab = ({ profileId }: CaptionDesignerTabProps) => {
   const profile = profiles.find(item => item.id === profileId) ?? null;
   const { selectedScript } = useContentStudioStore();
   const { applyCaptionDesignToCaptionClips } = useEditorStore();
-  const [sampleText, setSampleText] = useState('');
-  const [platform, setPlatform] = useState<PlatformTarget | ''>('');
+  const [sampleText, setSampleText] = useState(
+    firstSentence(selectedScript?.content ?? '') || 'Most creators miss the third signal in this chart.',
+  );
+  const [platform, setPlatform] = useState<PlatformTarget | ''>(profile?.platforms[0] ?? '');
   const [emphasis, setEmphasis] = useState<NonNullable<CaptionDesignInput['emphasis']>>('balanced');
   const [designs, setDesigns] = useState<CaptionDesignPreset[]>([]);
   const [selectedName, setSelectedName] = useState<string | null>(null);
@@ -30,14 +32,7 @@ export const CaptionDesignerTab = ({ profileId }: CaptionDesignerTabProps) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    setSampleText(firstSentence(selectedScript?.content ?? '') || 'Most creators miss the third signal in this chart.');
-    setPlatform(profile?.platforms[0] ?? '');
-    setDesigns([]);
-    setSelectedName(null);
-    setNotice(null);
-    setError(null);
-  }, [profile, selectedScript?.id]);
+  const selectedPlatform = platform || profile?.platforms[0] || '';
 
   const selectedDesign = useMemo(
     () => designs.find(design => design.name === selectedName) ?? designs[0] ?? null,
@@ -52,7 +47,7 @@ export const CaptionDesignerTab = ({ profileId }: CaptionDesignerTabProps) => {
     try {
       const response = await generateCaptionDesigns(profileId, {
         sampleText,
-        platform: platform || null,
+        platform: selectedPlatform || null,
         emphasis,
       });
       setDesigns(response.designs);
@@ -105,7 +100,7 @@ export const CaptionDesignerTab = ({ profileId }: CaptionDesignerTabProps) => {
         </label>
         <label>
           Platform
-          <select value={platform} onChange={event => setPlatform(event.target.value as PlatformTarget)}>
+          <select value={selectedPlatform} onChange={event => setPlatform(event.target.value as PlatformTarget)}>
             {profile.platforms.map(option => (
               <option key={option} value={option}>{option.replaceAll('_', ' ')}</option>
             ))}

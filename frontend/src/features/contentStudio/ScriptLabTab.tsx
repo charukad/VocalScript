@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { analyzeScript, rewriteScriptForVirality } from './api';
 import { useContentStudioStore } from './contentStudioStore';
 import type { ScriptAnalysis, ScriptInput, ScriptRewrite, ScriptVersionInput } from './types';
@@ -20,9 +20,9 @@ export const ScriptLabTab = ({ profileId }: ScriptLabTabProps) => {
     splitLines,
   } = useContentStudioStore();
   const [newScript, setNewScript] = useState<ScriptInput>({ title: '', content: '' });
-  const [draftTitle, setDraftTitle] = useState('');
-  const [draftContent, setDraftContent] = useState('');
-  const [analysis, setAnalysis] = useState<ScriptAnalysis | null>(null);
+  const [draftTitle, setDraftTitle] = useState(selectedScript?.title ?? '');
+  const [draftContent, setDraftContent] = useState(selectedScript?.content ?? '');
+  const [analysis, setAnalysis] = useState<ScriptAnalysis | null>(selectedScript?.latestAnalysis ?? null);
   const [rewrite, setRewrite] = useState<ScriptRewrite | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
@@ -31,14 +31,6 @@ export const ScriptLabTab = ({ profileId }: ScriptLabTabProps) => {
     content: '',
     selectAsFinal: false,
   });
-
-  useEffect(() => {
-    setDraftTitle(selectedScript?.title ?? '');
-    setDraftContent(selectedScript?.content ?? '');
-    setAnalysis(selectedScript?.latestAnalysis ?? null);
-    setRewrite(null);
-    setAnalysisError(null);
-  }, [selectedScript]);
 
   const handleCreateScript = async () => {
     if (!newScript.title.trim()) return;

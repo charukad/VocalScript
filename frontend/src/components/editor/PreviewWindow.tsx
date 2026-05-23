@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import type { TimelineClip } from '../../types';
 import { getKeyframedValue } from '../../lib/utils/keyframes';
@@ -56,25 +56,16 @@ export const PreviewWindow = () => {
   const [showRulers, setShowRulers] = useState(false);
   const [showSafeArea, setShowSafeArea] = useState(true);
   
-  // Memoize object URLs to prevent continuous reloading
-  const objectUrlsRef = useRef<Record<string, string>>({});
+  const objectUrls = useMemo(
+    () => new Map(clips.map(clip => [clip.id, URL.createObjectURL(clip.file)])),
+    [clips],
+  );
 
-  useEffect(() => {
-    const currentIds = new Set(clips.map(c => c.id));
-    Object.keys(objectUrlsRef.current).forEach(id => {
-      if (!currentIds.has(id)) {
-        URL.revokeObjectURL(objectUrlsRef.current[id]);
-        delete objectUrlsRef.current[id];
-      }
-    });
-  }, [clips]);
+  useEffect(() => () => {
+    objectUrls.forEach(url => URL.revokeObjectURL(url));
+  }, [objectUrls]);
 
-  const getObjectURL = (clip: TimelineClip) => {
-    if (!objectUrlsRef.current[clip.id]) {
-      objectUrlsRef.current[clip.id] = URL.createObjectURL(clip.file);
-    }
-    return objectUrlsRef.current[clip.id];
-  };
+  const getObjectURL = (clip: TimelineClip) => objectUrls.get(clip.id) ?? '';
 
   const buildCssFilter = (clip: TimelineClip): string => {
     const c = clip.color ?? { brightness: 100, contrast: 100, saturation: 100, exposure: 0, temperature: 0 };
@@ -101,21 +92,24 @@ export const PreviewWindow = () => {
     return filters.join(' ');
   };
 
-  const isTrackActive = (trackId: string) => {
+  const isTrackActive = useCallback((trackId: string) => {
     const track = tracks.find(t => t.id === trackId);
     if (!track || track.muted || track.visible === false) return false;
     const hasSoloForType = tracks.some(t => t.type === track.type && t.solo);
     return !hasSoloForType || Boolean(track.solo);
-  };
+  }, [tracks]);
 
-  const trackOrderById = new Map(tracks.map((track, index) => [track.id, track.order ?? index]));
-  const activeVisualClips = clips
+  const trackOrderById = useMemo(
+    () => new Map(tracks.map((track, index) => [track.id, track.order ?? index])),
+    [tracks],
+  );
+  const activeVisualClips = useMemo(() => clips
     .filter(c => c.type === 'visual' && isTrackActive(c.trackId) && playheadTime >= c.startTime && playheadTime <= c.startTime + c.duration)
     .sort((a, b) => {
       const trackDelta = (trackOrderById.get(a.trackId) ?? 0) - (trackOrderById.get(b.trackId) ?? 0);
       if (trackDelta !== 0) return trackDelta;
       return (a.animation?.order ?? 0) - (b.animation?.order ?? 0);
-    });
+    }), [clips, isTrackActive, playheadTime, trackOrderById]);
   const hasActiveVisuals = activeVisualClips.length > 0;
   const getVisualStyle = (clip: TimelineClip) => {
     const scale = getKeyframedValue(clip, 'scale', playheadTime, clip.transform?.scale ?? 100);
@@ -154,14 +148,14 @@ export const PreviewWindow = () => {
     && isTrackActive(selectedClip.trackId)
   );
 
-  const maxTime = clips.reduce((max, clip) => {
+  const maxTime = useMemo(() => clips.reduce((max, clip) => {
     const end = clip.startTime + clip.duration;
     if (isNaN(end) || !isFinite(end)) return max;
     return Math.max(max, end);
-  }, 0);
-  const narrationRanges = clips
+  }, 0), [clips]);
+  const narrationRanges = useMemo(() => clips
     .filter(clip => clip.audio?.duckingRole === 'narration' && isTrackActive(clip.trackId))
-    .map(clip => ({ start: clip.startTime, end: clip.startTime + clip.duration }));
+    .map(clip => ({ start: clip.startTime, end: clip.startTime + clip.duration })), [clips, isTrackActive]);
 
   const getMediaTime = (clip: TimelineClip, timelineTime: number): number => {
     const relative = Math.max(0, timelineTime - clip.startTime);
@@ -273,7 +267,7 @@ export const PreviewWindow = () => {
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
     };
-  }, [isPlaying, clips, tracks, setPlayheadTime, setIsPlaying, maxTime]);
+  }, [isPlaying, clips, setPlayheadTime, setIsPlaying, maxTime, isTrackActive, narrationRanges]);
 
   // Scrubbing when Paused
   useEffect(() => {

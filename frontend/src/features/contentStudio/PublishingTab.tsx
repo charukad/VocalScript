@@ -44,8 +44,8 @@ export const PublishingTab = ({ profileId }: PublishingTabProps) => {
   const [providers, setProviders] = useState<PublishingProvider[]>([]);
   const [destinations, setDestinations] = useState<PublishingDestination[]>([]);
   const [jobs, setJobs] = useState<PublishJob[]>([]);
-  const [platform, setPlatform] = useState<PlatformTarget | ''>('');
-  const [topic, setTopic] = useState('');
+  const [platform, setPlatform] = useState<PlatformTarget | ''>(profile?.platforms[0] ?? '');
+  const [topic, setTopic] = useState(profile?.contentType ?? '');
   const [scheduledInput, setScheduledInput] = useState(nowPlusOneDay());
   const [packageResult, setPackageResult] = useState<PublishingPackage | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -54,27 +54,31 @@ export const PublishingTab = ({ profileId }: PublishingTabProps) => {
   const visibleJobs = useMemo(() => jobs.filter(job => job.status !== 'archived'), [jobs]);
 
   useEffect(() => {
-    setPlatform(profile?.platforms[0] ?? '');
-    setTopic(profile?.contentType ?? '');
-    setPackageResult(null);
-  }, [profile, selectedScript?.id]);
-
-  useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-    Promise.all([
-      listPublishingProviders(),
-      listPublishingDestinations(profileId),
-      listPublishJobs(profileId),
-    ])
-      .then(([providerResponse, destinationResponse, jobResponse]) => {
+    let ignore = false;
+    const loadPublishing = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const [providerResponse, destinationResponse, jobResponse] = await Promise.all([
+          listPublishingProviders(),
+          listPublishingDestinations(profileId),
+          listPublishJobs(profileId),
+        ]);
+        if (ignore) return;
         setProviders(providerResponse.providers);
         setDestinations(destinationResponse.destinations);
         setJobs(jobResponse.jobs);
-      })
-      .catch(error => setError(error instanceof Error ? error.message : 'Could not load publishing data'))
-      .finally(() => setIsLoading(false));
+      } catch (error) {
+        if (!ignore) setError(error instanceof Error ? error.message : 'Could not load publishing data');
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+    void loadPublishing();
+    return () => { ignore = true; };
   }, [profileId]);
+
+  const selectedPlatform = platform || profile?.platforms[0] || '';
 
   const handleGeneratePackage = async () => {
     if (!selectedScript?.content.trim()) return;
@@ -85,7 +89,7 @@ export const PublishingTab = ({ profileId }: PublishingTabProps) => {
         script: selectedScript.content,
         title: selectedScript.title,
         topic,
-        platform: platform || null,
+        platform: selectedPlatform || null,
       }));
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Could not generate publishing package');
@@ -114,12 +118,12 @@ export const PublishingTab = ({ profileId }: PublishingTabProps) => {
   };
 
   const handleCreateJob = async () => {
-    if (!packageResult || !platform) return;
+    if (!packageResult || !selectedPlatform) return;
     setIsSaving(true);
     setError(null);
     try {
       const created = await createPublishJob(profileId, {
-        platform,
+        platform: selectedPlatform,
         title: packageResult.title,
         package: packageResult,
         scheduledAt: toIso(scheduledInput),
@@ -194,7 +198,7 @@ export const PublishingTab = ({ profileId }: PublishingTabProps) => {
             </label>
             <label>
               Platform
-              <select value={platform} onChange={event => setPlatform(event.target.value as PlatformTarget)}>
+              <select value={selectedPlatform} onChange={event => setPlatform(event.target.value as PlatformTarget)}>
                 {(profile?.platforms ?? []).map(option => (
                   <option key={option} value={option}>{option.replaceAll('_', ' ')}</option>
                 ))}
@@ -216,7 +220,7 @@ export const PublishingTab = ({ profileId }: PublishingTabProps) => {
               Schedule time
               <input type="datetime-local" value={scheduledInput} onChange={event => setScheduledInput(event.target.value)} />
             </label>
-            <button className="btn-secondary" onClick={() => void handleCreateJob()} disabled={isSaving || !platform}>
+            <button className="btn-secondary" onClick={() => void handleCreateJob()} disabled={isSaving || !selectedPlatform}>
               Queue Publish Job
             </button>
           </div>

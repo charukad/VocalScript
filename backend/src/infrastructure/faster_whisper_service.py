@@ -2,6 +2,7 @@ from backend.src.domain.interfaces.transcriber import ITranscriber
 from backend.src.domain.models.transcription import TranscriptionResult, TranscriptionSegment
 from faster_whisper import WhisperModel
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +19,16 @@ class FasterWhisperService(ITranscriber):
         self.model = WhisperModel(model_size, device=device, compute_type=compute_type)
         logger.info("Model loaded successfully")
 
-    def transcribe(self, audio_file: str) -> TranscriptionResult:
+    def transcribe(self, audio_file: str, language: Optional[str] = None) -> TranscriptionResult:
         logger.info(f"Transcribing audio file: {audio_file}")
         
         # We use word_timestamps=False to keep things fast, but it can be enabled if needed.
-        segments, info = self.model.transcribe(audio_file, beam_size=5)
+        segments, info = self.model.transcribe(
+            audio_file,
+            beam_size=5,
+            language=language,
+            task="transcribe",
+        )
         
         result_segments = []
         # 'segments' is a generator, so we iterate to get all segments

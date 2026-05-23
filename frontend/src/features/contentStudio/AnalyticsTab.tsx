@@ -51,33 +51,36 @@ export const AnalyticsTab = ({ profileId }: AnalyticsTabProps) => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setDraft(current => ({
-      ...current,
-      platform: profile?.platforms.includes(current.platform)
-        ? current.platform
-        : profile?.platforms[0] ?? 'youtube_shorts',
-    }));
-  }, [profile]);
-
-  useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-    Promise.all([
-      listAnalyticsConnections(profileId),
-      listContentPerformance(profileId),
-      listProfileLearnings(profileId),
-    ])
-      .then(([connectionResponse, performanceResponse, learningResponse]) => {
+    let ignore = false;
+    const loadAnalytics = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const [connectionResponse, performanceResponse, learningResponse] = await Promise.all([
+          listAnalyticsConnections(profileId),
+          listContentPerformance(profileId),
+          listProfileLearnings(profileId),
+        ]);
+        if (ignore) return;
         setConnections(connectionResponse.connections);
         setPerformance(performanceResponse.performance);
         setLearnings(learningResponse.learnings);
         setConnectionDrafts(Object.fromEntries(
           connectionResponse.connections.map(connection => [connection.platform, connection.status]),
         ));
-      })
-      .catch(error => setError(error instanceof Error ? error.message : 'Could not load analytics data'))
-      .finally(() => setIsLoading(false));
+      } catch (error) {
+        if (!ignore) setError(error instanceof Error ? error.message : 'Could not load analytics data');
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+    void loadAnalytics();
+    return () => { ignore = true; };
   }, [profileId]);
+
+  const selectedPlatform = profile?.platforms.includes(draft.platform)
+    ? draft.platform
+    : profile?.platforms[0] ?? 'youtube_shorts';
 
   const connectionByPlatform = useMemo(
     () => new Map(connections.map(connection => [connection.platform, connection])),
@@ -115,7 +118,7 @@ export const AnalyticsTab = ({ profileId }: AnalyticsTabProps) => {
     setIsSaving(true);
     setError(null);
     try {
-      const imported = await importManualPerformance(profileId, draft);
+      const imported = await importManualPerformance(profileId, { ...draft, platform: selectedPlatform });
       setPerformance(current => [imported, ...current]);
       setDraft(current => ({ ...current, title: '', metrics: EMPTY_METRICS }));
       await loadProfiles();
@@ -194,7 +197,7 @@ export const AnalyticsTab = ({ profileId }: AnalyticsTabProps) => {
           <label>
             Platform
             <select
-              value={draft.platform}
+              value={selectedPlatform}
               onChange={event => setDraft(current => ({ ...current, platform: event.target.value as ManualPerformanceInput['platform'] }))}
             >
               {profile.platforms.map(platform => (

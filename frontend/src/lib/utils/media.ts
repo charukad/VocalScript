@@ -1,5 +1,18 @@
 import type { MediaType } from '../../types';
 
+type BrowserAudioContextWindow = Window & typeof globalThis & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
+const createAudioContext = (): AudioContext => {
+  const AudioContextConstructor = window.AudioContext
+    || (window as BrowserAudioContextWindow).webkitAudioContext;
+  if (!AudioContextConstructor) {
+    throw new Error('Audio decoding is not supported in this browser.');
+  }
+  return new AudioContextConstructor();
+};
+
 export const getMediaDuration = (file: File, type: MediaType): Promise<number> => {
   return new Promise((resolve) => {
     if (type === 'visual' && file.type.startsWith('image/')) {
@@ -80,7 +93,7 @@ export const generateWaveform = async (file: File, samples: number = 200): Promi
   let audioContext: AudioContext | undefined;
   try {
     const arrayBuffer = await file.arrayBuffer();
-    audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    audioContext = createAudioContext();
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
     const requestedSamples = Math.max(1, Math.round(samples));
     const blockSize = Math.max(1, Math.ceil(audioBuffer.length / requestedSamples));
@@ -160,7 +173,7 @@ export const extractAudioSegment = async (
   let audioContext: AudioContext | undefined;
   try {
     const arrayBuffer = await file.arrayBuffer();
-    audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    audioContext = createAudioContext();
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
     const safeStart = Math.max(0, Math.min(audioBuffer.duration, startSeconds || 0));
     const safeEnd = Math.max(

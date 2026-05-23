@@ -61,6 +61,7 @@ import {
   storeRemoteGenerationJob,
   transcribeMedia,
   uploadProjectAsset,
+  type TranscriptionLanguage,
 } from '../lib/api/client';
 import { clampKeyframeTime, getClipPropertyValue, getKeyframedValue } from '../lib/utils/keyframes';
 import { getShortDraftCandidates } from '../lib/utils/editorInsights';
@@ -229,6 +230,11 @@ type StoredMissingMediaRecord = MissingMediaRecord & {
   clips: SerializableClip[];
 };
 
+type SavedProjectWorkspace = Omit<Partial<EditorState>, 'assets' | 'clips'> & {
+  assets?: SerializableAsset[];
+  clips?: SerializableClip[];
+};
+
 const HISTORY_LIMIT = 50;
 const SNAP_THRESHOLD = 0.25;
 
@@ -324,6 +330,10 @@ const captionsToVtt = (captions: CaptionSegment[]) => `WEBVTT\n\n${captions.map(
 ].join('\n')).join('\n')}`;
 
 const makeTextDownloadUrl = (text: string, type: string) => window.URL.createObjectURL(new Blob([text], { type }));
+const getErrorMessage = (error: unknown, fallback: string) => (
+  error instanceof Error && error.message ? error.message : fallback
+);
+const isAbortError = (error: unknown) => error instanceof Error && error.name === 'AbortError';
 
 const projectSummary = (project: ProjectSummary | ProjectDetail): ProjectSummary => ({
   id: project.id,
@@ -571,6 +581,8 @@ export type EditorState = {
   vttDownloadUrl: string | null;
   captions: CaptionSegment[];
   mediaUrl: string | null;
+  transcriptLanguage: TranscriptionLanguage;
+  setTranscriptLanguage: (language: TranscriptionLanguage) => void;
   exportSequence: () => Promise<void>;
   transcribeSelectedMedia: () => Promise<void>;
   cancelExport: () => void;
@@ -1303,7 +1315,7 @@ const generatedMediaAssetFromJob = (job: GenerationJob): GeneratedMediaAsset => 
 });
 
 const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<EditorState>> => {
-  const saved = project.state as any;
+  const saved = project.state as SavedProjectWorkspace;
   const tracks = Array.isArray(saved?.tracks) ? saved.tracks as TimelineTrack[] : makeDefaultTracks();
   const markers = Array.isArray(saved?.markers) ? saved.markers as TimelineMarker[] : [];
   const captions = Array.isArray(saved?.captions) ? saved.captions as CaptionSegment[] : [];
@@ -1425,7 +1437,8 @@ const restoreProjectWorkspace = async (project: ProjectDetail): Promise<Partial<
     animationAssetJobs,
     currentAnimationBatchId: saved?.currentAnimationBatchId ?? null,
     projectVersions: Array.isArray(saved?.projectVersions) ? saved.projectVersions as ProjectVersion[] : [],
-    approvalState: ['draft', 'in_review', 'approved', 'changes_requested'].includes(saved?.approvalState)
+    approvalState: saved.approvalState
+      && ['draft', 'in_review', 'approved', 'changes_requested'].includes(saved.approvalState)
       ? saved.approvalState as ProjectApprovalState
       : 'draft',
     reviewComments: Array.isArray(saved?.reviewComments) ? saved.reviewComments as ReviewComment[] : [],
@@ -1939,9 +1952,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         projectDirectory: directory,
         projectStatus: `Selected folder: ${directory}`,
       });
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Directory selection failed');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Directory selection failed'));
       set({ projectStatus: 'Directory selection canceled.' });
     } finally {
       set({ isLoadingProjects: false });
@@ -2004,9 +2017,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         reviewComments: [],
       } as Partial<EditorState>);
       return project;
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Project creation failed');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Project creation failed'));
       set({ projectStatus: 'Project creation failed.' });
       return null;
     } finally {
@@ -2018,9 +2031,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       const response = await listProjectRecords();
       set({ availableProjects: response.projects });
-    } catch (err: any) {
-      console.error(err);
-      set({ projectStatus: err.message || 'Could not load previous projects.' });
+    } catch (error) {
+      console.error(error);
+      set({ projectStatus: getErrorMessage(error, 'Could not load previous projects.') });
     } finally {
       set({ isLoadingProjects: false });
     }
@@ -2032,9 +2045,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const restored = await restoreProjectWorkspace(project);
       rememberProjectPointer(projectSummary(project));
       set(restored);
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Project load failed');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Project load failed'));
       set({ projectStatus: 'Project load failed.' });
     } finally {
       set({ isLoadingProjects: false });
@@ -2052,9 +2065,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       rememberProjectPointer(projectSummary(project));
       set(restored);
       await get().refreshProjects();
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Project load failed');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Project load failed'));
       set({ projectStatus: 'Project load failed.' });
     } finally {
       set({ isLoadingProjects: false });
@@ -2134,9 +2147,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         lastSavedAt: savedProject.updatedAt,
       });
       return savedProject;
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Project save failed');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Project save failed'));
       set({ projectStatus: 'Project save failed.' });
       return null;
     } finally {
@@ -2478,14 +2491,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     if (!targetTrackId) return;
 
-    let targetStartTime = 0;
-    if (startTimeX !== undefined) {
-      targetStartTime = startTimeX / state.zoom;
-    } else {
-      const trackClips = state.clips.filter(c => c.trackId === targetTrackId);
-      targetStartTime = trackClips.reduce((max, clip) => Math.max(max, clip.startTime + clip.duration), 0);
-    }
-    targetStartTime = snapTime(state, targetStartTime);
+    const unsnappedStartTime = startTimeX !== undefined
+      ? startTimeX / state.zoom
+      : state.clips
+        .filter(c => c.trackId === targetTrackId)
+        .reduce((max, clip) => Math.max(max, clip.startTime + clip.duration), 0);
+    const targetStartTime = snapTime(state, unsnappedStartTime);
 
     const newClip: TimelineClip = {
       id: Math.random().toString(36).substring(7),
@@ -3478,6 +3489,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   vttDownloadUrl: null,
   captions: [],
   mediaUrl: null,
+  transcriptLanguage: 'auto',
+  setTranscriptLanguage: (transcriptLanguage) => set({ transcriptLanguage }),
   storyboardSettings: DEFAULT_STORYBOARD_SETTINGS,
   storyboardScenes: [],
   currentGenerationBatchId: null,
@@ -3508,12 +3521,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const srtUrl = makeTextDownloadUrl(srtContent, 'text/plain');
       const vttUrl = makeTextDownloadUrl(vttContent, 'text/vtt');
       set({ captions, srtContent, mediaUrl: data.mediaUrl, srtDownloadUrl: srtUrl, vttDownloadUrl: vttUrl, exportStatus: 'Export complete.' });
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
+    } catch (error) {
+      if (isAbortError(error)) {
         set({ exportStatus: 'Export canceled.' });
       } else {
-        console.error(err);
-        alert(err.message || 'An error occurred during export');
+        console.error(error);
+        alert(getErrorMessage(error, 'An error occurred during export'));
         set({ exportStatus: 'Export failed.' });
       }
     } finally {
@@ -3537,7 +3550,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     } as Partial<EditorState>);
 
     try {
-      const data = await transcribeMedia(sourceClip.file, abortController.signal);
+      const data = await transcribeMedia(sourceClip.file, state.transcriptLanguage, abortController.signal);
       const captions = data.segments.map((segment, index) => ({
         ...segment,
         id: segment.id || `caption-${index + 1}`,
@@ -3552,12 +3565,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         vttDownloadUrl: makeTextDownloadUrl(vttContent, 'text/vtt'),
         exportStatus: captions.length > 0 ? 'Transcript ready.' : 'No speech found in this media.',
       });
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
+    } catch (error) {
+      if (isAbortError(error)) {
         set({ exportStatus: 'Transcript canceled.' });
       } else {
-        console.error(err);
-        alert(err.message || 'An error occurred during transcription');
+        console.error(error);
+        alert(getErrorMessage(error, 'An error occurred during transcription'));
         set({ exportStatus: 'Transcript failed.' });
       }
     } finally {
@@ -3701,9 +3714,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         },
         storyboardStatus: `Storyboard ready: ${scenes.length} scenes (${response.usedLlmMode}).`,
       });
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Storyboard generation failed');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Storyboard generation failed'));
       set({ storyboardStatus: 'Storyboard generation failed.' });
     } finally {
       set({ isGeneratingStoryboard: false } as Partial<EditorState>);
@@ -3824,9 +3837,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       });
       void get().saveProject();
       void get().syncGenerationBatch(true);
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Generation job creation failed');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Generation job creation failed'));
       set({ storyboardStatus: 'Generation job creation failed.' });
     }
   },
@@ -3848,9 +3861,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         storyboardScenes: mergeSceneStatuses(state.storyboardScenes, response.jobs, state.clips, batchId),
         storyboardStatus: `Generation jobs refreshed: ${response.jobs.length} total.`,
       }));
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Could not refresh generation jobs');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Could not refresh generation jobs'));
       set({ storyboardStatus: 'Generation job refresh failed.' });
     }
   },
@@ -3872,9 +3885,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         storyboardStatus: 'Generation batch paused. Running provider work may finish, but no new jobs will be claimed.',
       }));
       if (get().currentProject) void get().saveProject();
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Could not pause generation batch');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Could not pause generation batch'));
       set({ storyboardStatus: 'Generation batch pause failed.' });
     }
   },
@@ -3897,9 +3910,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }));
       if (get().currentProject) void get().saveProject();
       void get().syncGenerationBatch(true);
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Could not resume generation batch');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Could not resume generation batch'));
       set({ storyboardStatus: 'Generation batch resume failed.' });
     }
   },
@@ -3936,9 +3949,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       });
       if (get().currentProject) void get().saveProject();
       void get().syncGenerationBatch(true);
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Could not retry generation job');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Could not retry generation job'));
       set({ storyboardStatus: 'Scene retry failed.' });
     }
   },
@@ -3977,9 +3990,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       });
       if (get().currentProject) void get().saveProject();
       void get().syncGenerationBatch(true);
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Could not auto retry generation job');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Could not auto retry generation job'));
       set({ storyboardStatus: 'Auto retry failed.' });
     }
   },
@@ -4036,9 +4049,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       });
       if (get().currentProject) void get().saveProject();
       void get().syncGenerationBatch(true);
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Could not regenerate scene');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Could not regenerate scene'));
       set({ storyboardStatus: 'Scene regeneration failed.' });
     }
   },
@@ -4265,9 +4278,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         };
       });
       if (get().currentProject) void get().saveProject();
-    } catch (err: any) {
-      console.error(err);
-      if (!silent) alert(err.message || 'Generated media import failed');
+    } catch (error) {
+      console.error(error);
+      if (!silent) alert(getErrorMessage(error, 'Generated media import failed'));
       set({ storyboardStatus: silent ? 'Auto import paused after an error.' : 'Generated media import failed.' });
     } finally {
       set({ isSyncingGeneration: false });
@@ -4422,9 +4435,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }));
       }
       if (get().currentProject) void get().saveProject();
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Could not import selected result');
+    } catch (error) {
+      console.error(error);
+      alert(getErrorMessage(error, 'Could not import selected result'));
       set({ storyboardStatus: 'Selected result import failed.' });
     } finally {
       set({ isSyncingGeneration: false });

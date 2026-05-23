@@ -167,8 +167,21 @@ def generate_vtt(segments) -> str:
         lines.append("")
     return "\n".join(lines)
 
+def _normalize_transcription_language(language: Optional[str]) -> Optional[str]:
+    if not language:
+        return None
+    normalized = language.strip().lower()
+    if normalized in {"", "auto"}:
+        return None
+    if not normalized.replace("-", "").isalnum() or len(normalized) > 12:
+        raise HTTPException(status_code=400, detail="Invalid transcription language code")
+    return normalized
+
 @app.post("/api/transcribe")
-async def transcribe_media(file: UploadFile = File(...)):
+async def transcribe_media(
+    file: UploadFile = File(...),
+    language: Optional[str] = Form(None),
+):
     """
     Generate transcript/captions from one uploaded audio or video file without exporting media.
     """
@@ -182,7 +195,8 @@ async def transcribe_media(file: UploadFile = File(...)):
         with open(temp_path, "wb") as output:
             shutil.copyfileobj(file.file, output)
 
-        transcription_result = whisper_engine.transcribe(temp_path)
+        transcription_language = _normalize_transcription_language(language)
+        transcription_result = whisper_engine.transcribe(temp_path, language=transcription_language)
         segments = [
             {
                 "id": f"caption-{index}",

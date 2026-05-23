@@ -7,7 +7,7 @@ type VoiceTabProps = {
   profileId: string;
 };
 
-export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
+export const VoiceTab = ({ profileId }: VoiceTabProps) => {
   const {
     scripts,
     selectedScriptId,
@@ -27,20 +27,6 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
   const [voiceMode, setVoiceMode] = useState<VoiceGenerationMode>('line_by_line');
   const [voiceStyle, setVoiceStyle] = useState('');
   const [drafts, setDrafts] = useState<Record<string, NarrationLineUpdateInput>>({});
-
-  useEffect(() => {
-    setDrafts(
-      Object.fromEntries(
-        (selectedScript?.narrationLines ?? []).map(line => [line.id, {
-          text: line.text,
-          voiceStyle: line.voiceStyle,
-          emotion: line.emotion,
-          speed: line.speed,
-          pauseAfterSeconds: line.pauseAfterSeconds,
-        }]),
-      ),
-    );
-  }, [selectedScript]);
 
   useEffect(() => {
     if (!selectedScriptId) return;
@@ -93,7 +79,7 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
   }, [completedVoiceJobs, currentProject?.scriptId, importCompletedVoiceMedia, selectedScriptId]);
 
   return (
-    <div className="studio-voice-grid">
+    <div className="studio-voice-grid" data-profile-id={profileId}>
       <section className="studio-panel">
         <header>
           <h2>Scripts</h2>
@@ -198,7 +184,7 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
                   Text
                   <textarea
                     rows={3}
-                    value={String(drafts[line.id]?.text ?? '')}
+                    value={String(drafts[line.id]?.text ?? line.text)}
                     onChange={event => setDrafts(current => ({
                       ...current,
                       [line.id]: { ...current[line.id], text: event.target.value },
@@ -209,7 +195,7 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
                   <label>
                     Voice Style
                     <input
-                      value={String(drafts[line.id]?.voiceStyle ?? '')}
+                      value={String(drafts[line.id]?.voiceStyle ?? line.voiceStyle ?? '')}
                       onChange={event => setDrafts(current => ({
                         ...current,
                         [line.id]: { ...current[line.id], voiceStyle: event.target.value || null },
@@ -219,7 +205,7 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
                   <label>
                     Emotion
                     <input
-                      value={String(drafts[line.id]?.emotion ?? '')}
+                      value={String(drafts[line.id]?.emotion ?? line.emotion ?? '')}
                       onChange={event => setDrafts(current => ({
                         ...current,
                         [line.id]: { ...current[line.id], emotion: event.target.value || null },
@@ -229,7 +215,7 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
                   <label>
                     Speed
                     <input
-                      value={String(drafts[line.id]?.speed ?? '')}
+                      value={String(drafts[line.id]?.speed ?? line.speed ?? '')}
                       onChange={event => setDrafts(current => ({
                         ...current,
                         [line.id]: { ...current[line.id], speed: event.target.value || null },
@@ -242,7 +228,7 @@ export const VoiceTab = ({ profileId: _profileId }: VoiceTabProps) => {
                       type="number"
                       min={0}
                       step={0.1}
-                      value={drafts[line.id]?.pauseAfterSeconds ?? ''}
+                      value={drafts[line.id]?.pauseAfterSeconds ?? line.pauseAfterSeconds ?? ''}
                       onChange={event => setDrafts(current => ({
                         ...current,
                         [line.id]: {

@@ -39,12 +39,21 @@ export const PromptLibraryTab = ({ profileId }: PromptLibraryTabProps) => {
   );
 
   useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-    listPromptTemplates(profileId)
-      .then(response => setTemplates(response.templates))
-      .catch(error => setError(error instanceof Error ? error.message : 'Could not load prompt templates'))
-      .finally(() => setIsLoading(false));
+    let ignore = false;
+    const loadPromptTemplates = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await listPromptTemplates(profileId);
+        if (!ignore) setTemplates(response.templates);
+      } catch (error) {
+        if (!ignore) setError(error instanceof Error ? error.message : 'Could not load prompt templates');
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+    void loadPromptTemplates();
+    return () => { ignore = true; };
   }, [profileId]);
 
   const handleCreate = async () => {

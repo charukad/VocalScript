@@ -46,12 +46,21 @@ export const CharacterConsistencyTab = ({ profileId }: CharacterConsistencyTabPr
   );
 
   useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-    listCharacters(profileId)
-      .then(response => setCharacters(response.characters))
-      .catch(error => setError(error instanceof Error ? error.message : 'Could not load characters'))
-      .finally(() => setIsLoading(false));
+    let ignore = false;
+    const loadCharacters = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await listCharacters(profileId);
+        if (!ignore) setCharacters(response.characters);
+      } catch (error) {
+        if (!ignore) setError(error instanceof Error ? error.message : 'Could not load characters');
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+    void loadCharacters();
+    return () => { ignore = true; };
   }, [profileId]);
 
   const handleCreate = async () => {

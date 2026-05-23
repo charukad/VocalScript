@@ -13,24 +13,31 @@ export const CommentsTab = ({ profileId }: CommentsTabProps) => {
   const profile = profiles.find(item => item.id === profileId) ?? null;
   const [commentsText, setCommentsText] = useState('');
   const [sourceLabel, setSourceLabel] = useState('');
-  const [platform, setPlatform] = useState<PlatformTarget | ''>('');
+  const [platform, setPlatform] = useState<PlatformTarget | ''>(profile?.platforms[0] ?? '');
   const [runs, setRuns] = useState<CommentAnalysisRun[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setPlatform(profile?.platforms[0] ?? '');
-  }, [profile]);
-
-  useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-    listCommentAnalyses(profileId)
-      .then(response => setRuns(response.runs))
-      .catch(error => setError(error instanceof Error ? error.message : 'Could not load comment analyses'))
-      .finally(() => setIsLoading(false));
+    let ignore = false;
+    const loadCommentAnalyses = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await listCommentAnalyses(profileId);
+        if (!ignore) setRuns(response.runs);
+      } catch (error) {
+        if (!ignore) setError(error instanceof Error ? error.message : 'Could not load comment analyses');
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+    void loadCommentAnalyses();
+    return () => { ignore = true; };
   }, [profileId]);
+
+  const selectedPlatform = platform || profile?.platforms[0] || '';
 
   const handleAnalyze = async () => {
     const comments = commentsText.split('\n').map(item => item.trim()).filter(Boolean);
@@ -40,7 +47,7 @@ export const CommentsTab = ({ profileId }: CommentsTabProps) => {
     try {
       const run = await analyzeComments(profileId, {
         comments,
-        platform: platform || null,
+        platform: selectedPlatform || null,
         sourceLabel,
       });
       setRuns(current => [run, ...current]);
@@ -64,7 +71,7 @@ export const CommentsTab = ({ profileId }: CommentsTabProps) => {
         </label>
         <label>
           Platform
-          <select value={platform} onChange={event => setPlatform(event.target.value as PlatformTarget)}>
+          <select value={selectedPlatform} onChange={event => setPlatform(event.target.value as PlatformTarget)}>
             {(profile?.platforms ?? []).map(option => (
               <option key={option} value={option}>{option.replaceAll('_', ' ')}</option>
             ))}

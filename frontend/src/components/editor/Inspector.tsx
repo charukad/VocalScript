@@ -197,6 +197,8 @@ export const Inspector = () => {
     srtDownloadUrl,
     vttDownloadUrl,
     captions,
+    transcriptLanguage,
+    setTranscriptLanguage,
     updateCaptionText,
     createTextClipsFromCaptions,
     transcribeSelectedMedia,
@@ -1698,8 +1700,21 @@ export const Inspector = () => {
             disabled={isProcessing || !hasTranscriptSource}
             title={hasTranscriptSource ? 'Generate transcript from selected or first audio/video clip' : 'Add an audio or video clip first'}
           >
-            {isProcessing ? 'Processing...' : 'Generate Transcript'}
+            {isProcessing ? 'Processing...' : transcriptLanguage === 'si' ? 'Generate Sinhala Transcript' : 'Generate Transcript'}
           </button>
+          <label style={{ display: 'grid', gap: '0.35rem', marginBottom: '0.5rem', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+            Transcript language
+            <select
+              value={transcriptLanguage}
+              onChange={event => setTranscriptLanguage(event.target.value as typeof transcriptLanguage)}
+              disabled={isProcessing}
+              style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }}
+            >
+              <option value="auto">Auto detect</option>
+              <option value="si">Sinhala</option>
+              <option value="en">English</option>
+            </select>
+          </label>
           {srtDownloadUrl && (
             <a href={srtDownloadUrl} download="subtitles.srt" style={{ textDecoration: 'none' }}>
               <button className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>

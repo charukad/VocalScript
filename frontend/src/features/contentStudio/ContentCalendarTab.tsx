@@ -54,22 +54,26 @@ export const ContentCalendarTab = ({ profileId }: ContentCalendarTabProps) => {
   const visibleItems = useMemo(() => items.filter(item => item.status !== 'archived'), [items]);
 
   useEffect(() => {
-    setDraft(current => ({
-      ...current,
-      platform: current.platform && profile?.platforms.includes(current.platform)
-        ? current.platform
-        : profile?.platforms[0] ?? null,
-    }));
-  }, [profile]);
-
-  useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-    listCalendarItems(profileId)
-      .then(response => setItems(response.items))
-      .catch(error => setError(error instanceof Error ? error.message : 'Could not load calendar items'))
-      .finally(() => setIsLoading(false));
+    let ignore = false;
+    const loadCalendarItems = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await listCalendarItems(profileId);
+        if (!ignore) setItems(response.items);
+      } catch (error) {
+        if (!ignore) setError(error instanceof Error ? error.message : 'Could not load calendar items');
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+    void loadCalendarItems();
+    return () => { ignore = true; };
   }, [profileId]);
+
+  const selectedPlatform = draft.platform && profile?.platforms.includes(draft.platform)
+    ? draft.platform
+    : profile?.platforms[0] ?? null;
 
   const handleCreate = async () => {
     if (!draft.title.trim()) return;
@@ -78,6 +82,7 @@ export const ContentCalendarTab = ({ profileId }: ContentCalendarTabProps) => {
     try {
       const created = await createCalendarItem(profileId, {
         ...draft,
+        platform: selectedPlatform,
         scheduledAt: toIso(scheduledInput),
       });
       setItems(current => [...current, created].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt)));
@@ -149,7 +154,7 @@ export const ContentCalendarTab = ({ profileId }: ContentCalendarTabProps) => {
         <label>
           Platform
           <select
-            value={draft.platform ?? ''}
+            value={selectedPlatform ?? ''}
             onChange={event => setDraft(current => ({
               ...current,
               platform: (event.target.value || null) as CalendarItemInput['platform'],
