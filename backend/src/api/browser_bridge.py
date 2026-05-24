@@ -182,7 +182,7 @@ def build_browser_bridge_router(
             filename=file.filename or "screenshot.png",
             worker_id=worker_id,
             job_id=job_id or None,
-            provider=provider if provider in ("meta", "grok", "google_ai_studio") else None,
+            provider=provider if provider in ("meta", "grok", "google_ai_studio", "google_flow") else None,
             reason=reason,
             metadata={key: str(value) for key, value in parsed_metadata.items()} if isinstance(parsed_metadata, dict) else {},
         )

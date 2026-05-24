@@ -284,7 +284,7 @@ export type CaptionDesignPreset = {
   notes: string[];
 };
 
-export type ProviderName = 'meta' | 'grok' | 'google_ai_studio';
+export type ProviderName = 'meta' | 'grok' | 'google_ai_studio' | 'google_flow';
 
 export type GeneratedMediaType = 'image' | 'video' | 'audio';
 export type GenerationAspectRatio = '16:9' | '9:16' | '1:1' | '4:5';

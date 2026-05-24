@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS = {
   projectId: "",
   metaUrl: "https://www.meta.ai/create",
   googleAiStudioUrl: "https://aistudio.google.com/generate-speech",
+  googleFlowUrl: "https://flow.google",
   claimIntervalMs: 5000,
   providerDelayMs: 12000,
   jobTimeoutMs: 180000,
@@ -77,6 +78,10 @@ const PROVIDER_ADAPTERS = {
   [PROVIDERS.GOOGLE_AI_STUDIO]: {
     claimProvider: PROVIDERS.GOOGLE_AI_STUDIO,
     run: runGoogleAiStudioJob,
+  },
+  [PROVIDERS.GOOGLE_FLOW]: {
+    claimProvider: PROVIDERS.GOOGLE_FLOW,
+    run: runGoogleFlowJob,
   },
 };
 
@@ -163,6 +168,7 @@ function sanitizeSettings(settings) {
     projectId: String(settings.projectId || "").trim(),
     metaUrl: String(settings.metaUrl || DEFAULT_SETTINGS.metaUrl).trim(),
     googleAiStudioUrl: String(settings.googleAiStudioUrl || DEFAULT_SETTINGS.googleAiStudioUrl).trim(),
+    googleFlowUrl: String(settings.googleFlowUrl || DEFAULT_SETTINGS.googleFlowUrl).trim(),
     claimIntervalMs: Number(settings.claimIntervalMs || DEFAULT_SETTINGS.claimIntervalMs),
     providerDelayMs: Number(settings.providerDelayMs || DEFAULT_SETTINGS.providerDelayMs),
     jobTimeoutMs: Number(settings.jobTimeoutMs || DEFAULT_SETTINGS.jobTimeoutMs),
@@ -797,6 +803,12 @@ function classifyProviderIssue(message = "") {
   return "provider_error";
 }
 
+function providerHostHints(provider) {
+  if (provider === PROVIDERS.GOOGLE_AI_STUDIO) return ["aistudio.google.com"];
+  if (provider === PROVIDERS.GOOGLE_FLOW) return ["labs.google", "flow.google"];
+  return ["meta.ai"];
+}
+
 async function getProviderFailureStreak() {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.providerFailureStreak);
   return Math.max(0, Number(stored[STORAGE_KEYS.providerFailureStreak] || 0));
@@ -836,8 +848,8 @@ async function captureFailureScreenshot(settings, job, error) {
   const tab = await chrome.tabs.get(lastProviderTabId);
   const url = String(tab.url || "");
   const provider = job.provider || activeProviderFromSettings(settings);
-  const expectedHost = provider === PROVIDERS.GOOGLE_AI_STUDIO ? "aistudio.google.com" : "meta.ai";
-  if (!tab.windowId || !url.includes(expectedHost)) {
+  const expectedHosts = providerHostHints(provider);
+  if (!tab.windowId || !expectedHosts.some((host) => url.includes(host))) {
     throw new Error(`Skipped screenshot because provider tab is not a ${provider} page`);
   }
   if (/login|password|captcha|checkpoint|payment/i.test(url)) {
@@ -1017,6 +1029,48 @@ async function runGoogleAiStudioJob(job, settings) {
   return response.result;
 }
 
+async function runGoogleFlowJob(job, settings) {
+  await reportDebugEvent("provider_tab_opening", `Opening Google Flow for ${formatJobLabel(job)}`, {
+    provider: "google_flow",
+    jobId: job.id,
+    metadata: { promptLength: String((job.prompt || "").length), mediaType: job.mediaType || "video" },
+  });
+  const tab = await findOrOpenProviderTab(settings.googleFlowUrl, providerTabQueryUrls(PROVIDERS.GOOGLE_FLOW));
+  lastProviderTabId = tab.id || null;
+  await reportDebugEvent("provider_tab_ready_wait", "Waiting for Google Flow tab to finish loading", {
+    provider: "google_flow",
+    jobId: job.id,
+    metadata: { tabId: String(tab.id || ""), url: tab.url || "" },
+  });
+  await waitForTabReady(tab.id);
+  await ensureGoogleFlowContentScript(tab.id);
+  await reportDebugEvent("content_script_ready", "Google Flow content script is ready", {
+    provider: "google_flow",
+    jobId: job.id,
+  });
+  const response = await sendGoogleFlowRunJobMessage(tab.id, {
+    type: "provider.google_flow.runJob",
+    job,
+    options: {
+      timeoutMs: Math.max(settings.jobTimeoutMs, 300000),
+      httpBaseUrl: settings.httpBaseUrl,
+    },
+  });
+  if (!response?.ok) {
+    throw new Error(response?.error || "Google Flow provider adapter failed");
+  }
+  await reportDebugEvent("provider_job_completed", `Google Flow returned ${response.result?.mediaType || job.mediaType || "media"}`, {
+    provider: "google_flow",
+    jobId: job.id,
+    metadata: {
+      providerPageUrl: response.result?.metadata?.providerPageUrl || "",
+      capturedVia: response.result?.metadata?.capturedVia || "",
+      variantCount: String(response.result?.mediaVariants?.length || 0),
+    },
+  });
+  return response.result;
+}
+
 function isPromptMissingError(error) {
   return /prompt input|prompt box|textbox|contenteditable/i.test(error?.message || "");
 }
@@ -1076,20 +1130,12 @@ async function runProviderHealthCheck(settings, includeAdapterTest = false) {
 
 async function runSingleProviderHealthCheck(settings, provider, workerId, includeAdapterTest) {
   try {
-    const tab = provider === PROVIDERS.GOOGLE_AI_STUDIO
-      ? await findOrOpenProviderTab(settings.googleAiStudioUrl, "*://aistudio.google.com/*")
-      : await findOrOpenProviderTab(settings.metaUrl, "*://*.meta.ai/*");
+    const tab = await findOrOpenProviderTab(providerTargetUrl(settings, provider), providerTabQueryUrls(provider));
     lastProviderTabId = tab.id || null;
     await waitForTabReady(tab.id);
-    if (provider === PROVIDERS.GOOGLE_AI_STUDIO) {
-      await ensureGoogleAiStudioContentScript(tab.id);
-    } else {
-      await ensureMetaContentScript(tab.id);
-    }
+    await ensureProviderContentScript(tab.id, provider);
     const response = await sendTabMessage(tab.id, {
-      type: provider === PROVIDERS.GOOGLE_AI_STUDIO
-        ? "provider.google_ai_studio.healthCheck"
-        : "provider.meta.healthCheck",
+      type: providerHealthMessageType(provider),
       options: { includeAdapterTest },
     });
     if (!response?.ok) {
@@ -1122,25 +1168,15 @@ async function runSingleProviderHealthCheck(settings, provider, workerId, includ
 
 async function runProviderAdapterTest(settings, payload = {}) {
   const workerId = await getWorkerId();
-  const provider = payload.provider === PROVIDERS.GOOGLE_AI_STUDIO
-    ? PROVIDERS.GOOGLE_AI_STUDIO
-    : PROVIDERS.META;
+  const provider = PROVIDER_ADAPTERS[payload.provider] ? payload.provider : PROVIDERS.META;
   const submitFullTest = payload.submitFullTest === true || payload.submitFullTest === "true";
   try {
-    const tab = provider === PROVIDERS.GOOGLE_AI_STUDIO
-      ? await findOrOpenProviderTab(settings.googleAiStudioUrl, "*://aistudio.google.com/*")
-      : await findOrOpenProviderTab(settings.metaUrl, "*://*.meta.ai/*");
+    const tab = await findOrOpenProviderTab(providerTargetUrl(settings, provider), providerTabQueryUrls(provider));
     lastProviderTabId = tab.id || null;
     await waitForTabReady(tab.id);
-    if (provider === PROVIDERS.GOOGLE_AI_STUDIO) {
-      await ensureGoogleAiStudioContentScript(tab.id);
-    } else {
-      await ensureMetaContentScript(tab.id);
-    }
+    await ensureProviderContentScript(tab.id, provider);
     const response = await sendTabMessage(tab.id, {
-      type: provider === PROVIDERS.GOOGLE_AI_STUDIO
-        ? "provider.google_ai_studio.adapterTest"
-        : "provider.meta.adapterTest",
+      type: providerAdapterTestMessageType(provider),
       options: {
         includeAdapterTest: true,
         submitFullTest,
@@ -1182,8 +1218,52 @@ async function runProviderAdapterTest(settings, payload = {}) {
   }
 }
 
+function providerTargetUrl(settings, provider) {
+  if (provider === PROVIDERS.GOOGLE_AI_STUDIO) return settings.googleAiStudioUrl;
+  if (provider === PROVIDERS.GOOGLE_FLOW) return settings.googleFlowUrl;
+  return settings.metaUrl;
+}
+
+function providerTabQueryUrls(provider) {
+  if (provider === PROVIDERS.GOOGLE_AI_STUDIO) return ["*://aistudio.google.com/*"];
+  if (provider === PROVIDERS.GOOGLE_FLOW) return ["*://labs.google/*", "*://flow.google/*"];
+  return ["*://*.meta.ai/*"];
+}
+
+function providerHealthMessageType(provider) {
+  if (provider === PROVIDERS.GOOGLE_AI_STUDIO) return "provider.google_ai_studio.healthCheck";
+  if (provider === PROVIDERS.GOOGLE_FLOW) return "provider.google_flow.healthCheck";
+  return "provider.meta.healthCheck";
+}
+
+function providerAdapterTestMessageType(provider) {
+  if (provider === PROVIDERS.GOOGLE_AI_STUDIO) return "provider.google_ai_studio.adapterTest";
+  if (provider === PROVIDERS.GOOGLE_FLOW) return "provider.google_flow.adapterTest";
+  return "provider.meta.adapterTest";
+}
+
+async function ensureProviderContentScript(tabId, provider) {
+  if (provider === PROVIDERS.GOOGLE_AI_STUDIO) {
+    await ensureGoogleAiStudioContentScript(tabId);
+    return;
+  }
+  if (provider === PROVIDERS.GOOGLE_FLOW) {
+    await ensureGoogleFlowContentScript(tabId);
+    return;
+  }
+  await ensureMetaContentScript(tabId);
+}
+
 async function findOrOpenProviderTab(targetUrl, queryUrl) {
-  const tabs = await chrome.tabs.query({ url: queryUrl });
+  const queryUrls = Array.isArray(queryUrl) ? queryUrl : [queryUrl];
+  const tabsById = new Map();
+  for (const pattern of queryUrls) {
+    const matches = await chrome.tabs.query({ url: pattern });
+    matches.forEach((tab) => {
+      if (tab.id) tabsById.set(tab.id, tab);
+    });
+  }
+  const tabs = Array.from(tabsById.values());
   const existing = tabs.find((tab) => tab.url?.startsWith(targetUrl)) || tabs[0];
   if (existing?.id) {
     const shouldNavigate = !String(existing.url || "").startsWith(targetUrl);
@@ -1241,6 +1321,17 @@ async function ensureGoogleAiStudioContentScript(tabId) {
   }
 }
 
+async function ensureGoogleFlowContentScript(tabId) {
+  try {
+    await sendTabMessage(tabId, { type: "provider.google_flow.ping" });
+  } catch {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["providers/google-flow-content.js"],
+    });
+  }
+}
+
 async function sendMetaRunJobMessage(tabId, message) {
   let lastError = null;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -1291,6 +1382,26 @@ async function sendGoogleAiStudioRunJobMessage(tabId, message) {
     }
   }
   throw lastError || new Error("Google AI Studio provider adapter failed");
+}
+
+async function sendGoogleFlowRunJobMessage(tabId, message) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await sendTabMessage(tabId, message);
+      if (response) return response;
+      lastError = new Error("Google Flow provider adapter returned no response");
+    } catch (error) {
+      lastError = error;
+      const retryable = /message channel closed|back\/forward cache|bfcache|receiving end does not exist|extension context invalidated/i.test(error.message || "");
+      if (!retryable || attempt === 3) break;
+      await chrome.tabs.reload(tabId).catch(() => {});
+      await waitForTabReady(tabId).catch(() => {});
+      await ensureGoogleFlowContentScript(tabId).catch(() => {});
+      await sleep(1200 * attempt);
+    }
+  }
+  throw lastError || new Error("Google Flow provider adapter failed");
 }
 
 function sleep(ms) {

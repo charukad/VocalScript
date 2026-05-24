@@ -3,7 +3,7 @@ from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-ProviderName = Literal["meta", "grok", "google_ai_studio"]
+ProviderName = Literal["meta", "grok", "google_ai_studio", "google_flow"]
 GeneratedMediaType = Literal["image", "video", "audio"]
 GenerationAspectRatio = Literal["16:9", "9:16", "1:1", "4:5"]
 StoryboardSceneDensity = Literal["low", "medium", "high", "extra_high"]

@@ -229,6 +229,9 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Add voice job creation and result storage endpoints.
 - `[x]` Extend bridge protocol/capabilities for voice generation.
 - `[x]` Add Google AI Studio provider adapter/content script.
+- `[x]` Harden Google AI Studio adapter selectors for the refreshed UI.
+- `[x]` Add Google Flow visual-generation provider adapter inside the active bridge.
+- `[x]` Add Google Flow provider selection in the bridge side panel and editor monitor.
 - `[x]` Support `full_script` generation mode.
 - `[x]` Support preferred `line_by_line` generation mode.
 - `[x]` Add audio result reporting and backend import flow.
@@ -240,7 +243,7 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - `[x]` Voice jobs can be created, claimed, completed, and failed locally.
 - `[x]` Generated narration audio appears in NeuralScribe assets locally.
 - `[x]` Line-by-line outputs can be placed in order on the timeline locally.
-- `[!]` Live Google AI Studio selector/audio validation still needs a signed-in provider session.
+- `[!]` Live Google AI Studio and Google Flow selector/media validation still needs signed-in provider sessions.
 
 ## Phase 10: AI Timeline Builder
 
@@ -341,7 +344,7 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 
 ### Batch F: External Completion
 
-- `[!]` Validate Google AI Studio selectors and real audio capture in a signed-in browser session.
+- `[!]` Validate Google AI Studio selectors/audio capture and Google Flow selectors/media capture in signed-in browser sessions.
 - `[!]` Configure real OAuth credentials, secure token references, and provider approvals before claiming live direct publishing is complete.
 
 ## Current Risks And Unknowns To Resolve Early
@@ -349,8 +352,8 @@ Upgrade NeuralScribe from a local-first AI-assisted video editor into a local-fi
 - Current generation jobs only model `image` and `video`; voice jobs will need either a generalized media/job type or a separate queue contract.
 - `ProjectDetail` stores a broad JSON `state` blob while SQLite also persists normalized per-project tables; new profile/project links need a clear source-of-truth rule.
 - The app currently has no project-owned automated tests visible outside dependency folders, so regression checks will need to be added or documented.
-- The active bridge now supports provider-aware adapter testing for Meta and Google AI Studio; live Google AI Studio validation still depends on an authenticated provider session.
-- Google AI Studio live automation remains the main external unknown: the local queue/import path, adapter-test path, and audio result reporting are implemented, but final selectors and real audio capture still need validation inside an authenticated AI Studio session.
+- The active bridge now supports provider-aware adapter testing for Meta, Google AI Studio, and Google Flow; live Google provider validation still depends on authenticated provider sessions.
+- Google AI Studio and Google Flow live automation remain the main external unknowns: the local queue/import path, adapter-test path, and result reporting are implemented, but final selectors and real media capture still need validation inside authenticated Google sessions.
 - SQLite connection lifecycle cleanup is complete; the backend suite now runs without the earlier repeated connection warnings.
 - Content Studio introduces app-level navigation beyond the current editor-first shell, so route/layout decisions should be made before large UI work starts.
 - Analytics credentials need a secure storage plan before real OAuth-backed integrations are claimed as complete.
