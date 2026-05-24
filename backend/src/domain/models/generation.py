@@ -161,6 +161,7 @@ class VoiceGenerationJobCreateRequest(ApiModel):
     project_name: Optional[str] = Field(default=None, alias="projectName")
     batch_id: Optional[str] = Field(default=None, alias="batchId")
     voice_style: Optional[str] = Field(default=None, alias="voiceStyle")
+    line_ids: List[str] = Field(default_factory=list, alias="lineIds")
 
 
 class GenerationJobListResponse(ApiModel):

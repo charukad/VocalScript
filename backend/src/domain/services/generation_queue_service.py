@@ -122,8 +122,15 @@ class GenerationQueueService:
         project_id: Optional[str] = None,
         project_name: Optional[str] = None,
         voice_style: Optional[str] = None,
+        line_ids: Optional[List[str]] = None,
     ) -> List[GenerationJob]:
         resolved_batch_id = batch_id or f"voice-batch-{uuid.uuid4().hex[:12]}"
+        selected_line_ids = set(line_ids or [])
+        selected_lines = [
+            line
+            for line in narration_lines
+            if not selected_line_ids or line.id in selected_line_ids
+        ]
         jobs: List[GenerationJob] = []
         if mode == "full_script":
             candidates = [{
@@ -149,7 +156,7 @@ class GenerationQueueService:
                         **({"pauseAfterSeconds": str(line.pause_after_seconds)} if line.pause_after_seconds is not None else {}),
                     },
                 }
-                for line in narration_lines
+                for line in selected_lines
             ]
 
         for candidate in candidates:

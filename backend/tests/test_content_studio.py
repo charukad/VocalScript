@@ -224,6 +224,29 @@ class ContentStudioTests(unittest.TestCase):
         self.assertEqual(failed_sync.status, "failed")
         self.assertEqual(failed_sync.error, "provider failed")
 
+    def test_voice_jobs_can_target_one_narration_clip(self) -> None:
+        script = self.studio_service.create_script(
+            self.profile.id,
+            ScriptCreateRequest(title="Voice clips", content="Opening line. Middle line. Payoff line."),
+        )
+        lines = self.studio_service.split_script_into_lines(script.id, ScriptSplitLinesRequest())
+        self.assertIsNotNone(lines)
+        assert lines is not None
+
+        jobs = self.queue_service.create_voice_jobs(
+            script_id=script.id,
+            script_text=script.content,
+            narration_lines=lines,
+            mode="line_by_line",
+            line_ids=[lines[1].id],
+        )
+
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0].scene_id, lines[1].id)
+        self.assertEqual(jobs[0].prompt, "Middle line.")
+        self.assertEqual(jobs[0].metadata["narrationLineId"], lines[1].id)
+        self.assertEqual(jobs[0].metadata["lineIndex"], "1")
+
     def test_voice_jobs_can_be_claimed_completed_and_synced(self) -> None:
         script = self.studio_service.create_script(
             self.profile.id,
