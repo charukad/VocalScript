@@ -4,6 +4,7 @@ export const PROVIDERS = Object.freeze({
   META: "meta",
   GROK: "grok",
   GOOGLE_AI_STUDIO: "google_ai_studio",
+  GOOGLE_FLOW: "google_flow",
 });
 
 export const MEDIA_TYPES = Object.freeze({
@@ -56,11 +57,11 @@ export const DEFAULT_BRIDGE = Object.freeze({
 export function createProviderCapabilities(providers) {
   return providers.map((provider) => ({
     provider,
-    canGenerateImage: provider === PROVIDERS.META || provider === PROVIDERS.GROK,
-    canGenerateVideo: provider === PROVIDERS.META || provider === PROVIDERS.GROK,
+    canGenerateImage: provider === PROVIDERS.META || provider === PROVIDERS.GROK || provider === PROVIDERS.GOOGLE_FLOW,
+    canGenerateVideo: provider === PROVIDERS.META || provider === PROVIDERS.GROK || provider === PROVIDERS.GOOGLE_FLOW,
     canGenerateAudio: provider === PROVIDERS.GOOGLE_AI_STUDIO,
     canExtendVideo: false,
-    supportsVariants: provider === PROVIDERS.META,
+    supportsVariants: provider === PROVIDERS.META || provider === PROVIDERS.GOOGLE_FLOW,
     supportsUpload: true,
     supportsDownload: true,
     metadata: {},

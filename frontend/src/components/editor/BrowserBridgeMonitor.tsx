@@ -59,8 +59,8 @@ const queueStatuses: GenerationJobStatus[] = [
 
 const failedQueueStatuses: GenerationJobStatus[] = ['failed', 'manual_action_required', 'canceled'];
 const finishedQueueStatuses: GenerationJobStatus[] = ['completed', 'failed', 'manual_action_required', 'canceled'];
-const bridgeProviders: ProviderName[] = ['meta', 'grok', 'google_ai_studio'];
-const runnableBridgeProviders: ProviderName[] = ['meta', 'google_ai_studio'];
+const bridgeProviders: ProviderName[] = ['meta', 'grok', 'google_ai_studio', 'google_flow'];
+const runnableBridgeProviders: ProviderName[] = ['meta', 'google_ai_studio', 'google_flow'];
 
 const statusLabel = (status: BridgeWorkerSnapshot['status']) => status.replaceAll('_', ' ');
 
@@ -127,12 +127,15 @@ const capabilityText = (capability: ProviderCapability): string => {
 
 const providerDisplayName = (provider: ProviderName): string => {
   if (provider === 'google_ai_studio') return 'Google AI Studio';
+  if (provider === 'google_flow') return 'Google Flow';
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 };
 
 const defaultAdapterPrompt = (provider: ProviderName): string =>
   provider === 'google_ai_studio'
     ? 'Read this sentence clearly for a NeuralScribe adapter test.'
+    : provider === 'google_flow'
+      ? 'Create a cinematic five-second vertical video of a glowing neural network forming a play button.'
     : 'NeuralScribe adapter test image, simple blue geometric logo, no text';
 
 const healthLabel = (health: ProviderHealthSnapshot): string =>
@@ -677,6 +680,7 @@ export const BrowserBridgeMonitor = ({ onClose }: BrowserBridgeMonitorProps) => 
                 <option value="meta">Meta</option>
                 <option value="grok">Grok</option>
                 <option value="google_ai_studio">Google AI Studio</option>
+                <option value="google_flow">Google Flow</option>
               </select>
             </label>
             <label>

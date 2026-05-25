@@ -122,8 +122,15 @@ class GenerationQueueService:
         project_id: Optional[str] = None,
         project_name: Optional[str] = None,
         voice_style: Optional[str] = None,
+        line_ids: Optional[List[str]] = None,
     ) -> List[GenerationJob]:
         resolved_batch_id = batch_id or f"voice-batch-{uuid.uuid4().hex[:12]}"
+        selected_line_ids = set(line_ids or [])
+        selected_lines = [
+            line
+            for line in narration_lines
+            if not selected_line_ids or line.id in selected_line_ids
+        ]
         jobs: List[GenerationJob] = []
         if mode == "full_script":
             candidates = [{
@@ -149,7 +156,7 @@ class GenerationQueueService:
                         **({"pauseAfterSeconds": str(line.pause_after_seconds)} if line.pause_after_seconds is not None else {}),
                     },
                 }
-                for line in narration_lines
+                for line in selected_lines
             ]
 
         for candidate in candidates:
@@ -323,12 +330,26 @@ class GenerationQueueService:
                 self._jobs[claimed.id] = claimed
                 if claimed.id not in self._job_order:
                     self._job_order.append(claimed.id)
-            return claimed
+                return claimed
+            if project_id:
+                return None
+            return self._claim_next_in_memory_job(provider=provider, worker_id=worker_id, legacy_only=True)
 
+        return self._claim_next_in_memory_job(provider=provider, worker_id=worker_id, project_id=project_id)
+
+    def _claim_next_in_memory_job(
+        self,
+        provider: Optional[ProviderName] = None,
+        worker_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        legacy_only: bool = False,
+    ) -> Optional[GenerationJob]:
         self._recover_stale_running_jobs(provider=provider, project_id=project_id)
         for job_id in self._job_order:
             job = self._jobs[job_id]
             if job.status != "queued":
+                continue
+            if legacy_only and job.project_id:
                 continue
             if provider and job.provider != provider:
                 continue
@@ -932,12 +953,38 @@ class GenerationQueueService:
     def _refresh_from_store(self) -> None:
         if not self.store:
             return
+        legacy_jobs = {
+            job_id: job
+            for job_id in self._job_order
+            if (job := self._jobs.get(job_id)) and not job.project_id
+        }
+        legacy_order = [job_id for job_id in self._job_order if job_id in legacy_jobs]
+        legacy_paused_batches = {key for key in self._paused_batches if key.startswith("legacy:")}
+        backup_state = self._read_state_payload(self._local_state_file())
+        for item in backup_state.get("jobs", []):
+            try:
+                job = GenerationJob(**item)
+            except ValueError:
+                continue
+            if job.project_id or job.id in legacy_jobs:
+                continue
+            legacy_jobs[job.id] = job
+            legacy_order.append(job.id)
+        legacy_paused_batches.update(
+            str(key) for key in backup_state.get("pausedBatches", []) if str(key).startswith("legacy:")
+        )
+
         stored_jobs, stored_order, paused_batches = self.store.load_generation_state()
         self._jobs = {job.id: job for job in stored_jobs}
         self._job_order = [job_id for job_id in stored_order if job_id in self._jobs]
         missing_ids = [job.id for job in stored_jobs if job.id not in self._job_order]
         self._job_order.extend(missing_ids)
-        self._paused_batches = set(paused_batches)
+        for job_id in legacy_order:
+            job = legacy_jobs.get(job_id)
+            if job and job_id not in self._jobs:
+                self._jobs[job_id] = job
+                self._job_order.append(job_id)
+        self._paused_batches = set(paused_batches) | legacy_paused_batches
 
     def _load_state(self) -> None:
         changed = False
@@ -952,15 +999,7 @@ class GenerationQueueService:
                 self._paused_batches = set(paused_batches)
                 loaded_from_store = True
 
-        if loaded_from_store:
-            raw = {}
-        elif not self.state_file.exists():
-            raw = {}
-        else:
-            try:
-                raw = json.loads(self.state_file.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                raw = {}
+        raw = self._read_state_payload(self._local_state_file())
 
         if raw:
             jobs: Dict[str, GenerationJob] = dict(self._jobs)
@@ -968,6 +1007,8 @@ class GenerationQueueService:
                 try:
                     job = GenerationJob(**item)
                 except ValueError:
+                    continue
+                if self.store and job.project_id:
                     continue
                 if job.id in jobs:
                     continue
@@ -982,7 +1023,11 @@ class GenerationQueueService:
             missing_ids = [job_id for job_id in jobs if job_id not in ordered_ids]
             self._jobs = jobs
             self._job_order = ordered_ids + missing_ids
-            raw_paused_batches = {str(key) for key in raw.get("pausedBatches", [])}
+            raw_paused_batches = {
+                str(key)
+                for key in raw.get("pausedBatches", [])
+                if not self.store or str(key).startswith("legacy:")
+            }
             if raw_paused_batches - self._paused_batches:
                 changed = True
             self._paused_batches.update(raw_paused_batches)
@@ -993,7 +1038,7 @@ class GenerationQueueService:
             self._save_state()
 
     def _save_state(self) -> None:
-        state_file = self.state_file.with_name("generation_state.backup.json") if self.store else self.state_file
+        state_file = self._local_state_file()
         state_file.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "version": 1,
@@ -1018,6 +1063,18 @@ class GenerationQueueService:
                 ],
                 self._paused_batches,
             )
+
+    def _local_state_file(self) -> Path:
+        return self.state_file.with_name("generation_state.backup.json") if self.store else self.state_file
+
+    def _read_state_payload(self, state_file: Path) -> dict:
+        if not state_file.exists():
+            return {}
+        try:
+            raw = json.loads(state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return raw if isinstance(raw, dict) else {}
 
     def _batch_key(self, batch_id: str, project_id: Optional[str] = None) -> str:
         return f"{project_id or 'legacy'}:{batch_id}"

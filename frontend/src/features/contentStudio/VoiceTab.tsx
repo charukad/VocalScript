@@ -44,6 +44,10 @@ export const VoiceTab = ({ profileId }: VoiceTabProps) => {
   }, [refreshVoiceJobs, selectedScriptId, shouldPollVoiceJobs]);
 
   const lines = useMemo(() => selectedScript?.narrationLines ?? [], [selectedScript]);
+  const pendingClipIds = useMemo(
+    () => lines.filter(line => line.status !== 'done').map(line => line.id),
+    [lines],
+  );
 
   const handleAddLine = async () => {
     if (!selectedScript || !newLineText.trim()) return;
@@ -56,16 +60,24 @@ export const VoiceTab = ({ profileId }: VoiceTabProps) => {
     await updateNarrationLine(lineId, drafts[lineId] ?? {});
   };
 
-  const handleQueueVoiceJobs = async () => {
+  const handleQueueVoiceJobs = async (lineIds?: string[]) => {
     if (!selectedScript) return;
     const linkedProject = currentProject?.scriptId === selectedScript.id ? currentProject : null;
     await queueVoiceJobs(selectedScript.id, {
-      mode: voiceMode,
+      mode: lineIds?.length ? 'line_by_line' : voiceMode,
       provider: 'google_ai_studio',
       projectId: linkedProject?.id ?? null,
       projectName: linkedProject?.name ?? null,
       voiceStyle: voiceStyle || null,
+      lineIds,
     });
+  };
+
+  const handleQueueClip = async (lineId: string) => {
+    if (drafts[lineId]) {
+      await handleSaveLine(lineId);
+    }
+    await handleQueueVoiceJobs([lineId]);
   };
 
   const completedVoiceJobs = useMemo(
@@ -116,7 +128,7 @@ export const VoiceTab = ({ profileId }: VoiceTabProps) => {
               <label>
                 Mode
                 <select value={voiceMode} onChange={event => setVoiceMode(event.target.value as VoiceGenerationMode)}>
-                  <option value="line_by_line">Line by line</option>
+                  <option value="line_by_line">Clip by clip</option>
                   <option value="full_script">Full script</option>
                 </select>
               </label>
@@ -133,7 +145,14 @@ export const VoiceTab = ({ profileId }: VoiceTabProps) => {
                 onClick={() => void handleQueueVoiceJobs()}
                 disabled={isSaving || (voiceMode === 'line_by_line' && lines.length === 0)}
               >
-                Queue Voice Jobs
+                {voiceMode === 'line_by_line' ? 'Queue All Clips' : 'Queue Full Script'}
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => void handleQueueVoiceJobs(pendingClipIds)}
+                disabled={isSaving || pendingClipIds.length === 0}
+              >
+                Queue Pending Clips
               </button>
             </div>
             {voiceJobs && (
@@ -243,8 +262,11 @@ export const VoiceTab = ({ profileId }: VoiceTabProps) => {
                   <button className="btn-secondary" onClick={() => void handleSaveLine(line.id)} disabled={isSaving}>
                     Save Line
                   </button>
+                  <button className="btn-primary" onClick={() => void handleQueueClip(line.id)} disabled={isSaving || !line.text.trim()}>
+                    Queue Clip
+                  </button>
                   <button className="btn-secondary" onClick={() => void regenerateNarrationLine(line.id)} disabled={isSaving}>
-                    Regenerate Later
+                    Reset Clip
                   </button>
                 </div>
               </article>

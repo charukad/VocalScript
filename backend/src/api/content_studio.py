@@ -187,18 +187,24 @@ def build_content_studio_router(
         script = content_studio_service.get_script_detail(script_id)
         if not script:
             raise HTTPException(status_code=404, detail="Script not found")
-        if request.mode == "line_by_line" and not script.narration_lines:
-            raise HTTPException(status_code=400, detail="Narration lines are required for line-by-line voice jobs")
+        narration_lines = script.narration_lines
+        if request.mode == "line_by_line" and request.line_ids:
+            requested_line_ids = set(request.line_ids)
+            narration_lines = [line for line in narration_lines if line.id in requested_line_ids]
+        if request.mode == "line_by_line" and not narration_lines:
+            detail = "Selected narration clips were not found" if request.line_ids else "Narration lines are required for clip-by-clip voice jobs"
+            raise HTTPException(status_code=400, detail=detail)
         jobs = generation_queue_service.create_voice_jobs(
             script_id=script.id,
             script_text=script.content,
-            narration_lines=script.narration_lines,
+            narration_lines=narration_lines,
             provider=request.provider,
             mode=request.mode,
             batch_id=request.batch_id,
             project_id=request.project_id,
             project_name=request.project_name,
             voice_style=request.voice_style,
+            line_ids=request.line_ids,
         )
         if not jobs:
             raise HTTPException(status_code=400, detail="No voice jobs were created")

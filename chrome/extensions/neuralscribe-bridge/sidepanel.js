@@ -15,11 +15,13 @@ const elements = {
   sessionToken: document.getElementById("sessionToken"),
   metaUrl: document.getElementById("metaUrl"),
   googleAiStudioUrl: document.getElementById("googleAiStudioUrl"),
+  googleFlowUrl: document.getElementById("googleFlowUrl"),
   jobTimeoutSeconds: document.getElementById("jobTimeoutSeconds"),
   providerDelaySeconds: document.getElementById("providerDelaySeconds"),
   providerMeta: document.getElementById("providerMeta"),
   providerGrok: document.getElementById("providerGrok"),
   providerGoogleAiStudio: document.getElementById("providerGoogleAiStudio"),
+  providerGoogleFlow: document.getElementById("providerGoogleFlow"),
   captureFailureScreenshots: document.getElementById("captureFailureScreenshots"),
   saveBtn: document.getElementById("saveBtn"),
   connectBtn: document.getElementById("connectBtn"),
@@ -114,6 +116,7 @@ function readSettings() {
   if (elements.providerMeta.checked) providers.push("meta");
   if (elements.providerGrok.checked) providers.push("grok");
   if (elements.providerGoogleAiStudio.checked) providers.push("google_ai_studio");
+  if (elements.providerGoogleFlow.checked) providers.push("google_flow");
   return {
     wsUrl: elements.wsUrl.value,
     httpBaseUrl: elements.httpBaseUrl.value,
@@ -123,6 +126,7 @@ function readSettings() {
     sessionToken: elements.sessionToken.value,
     metaUrl: elements.metaUrl.value,
     googleAiStudioUrl: elements.googleAiStudioUrl.value,
+    googleFlowUrl: elements.googleFlowUrl.value,
     jobTimeoutMs: Math.max(30, Number(elements.jobTimeoutSeconds.value) || 180) * 1000,
     providerDelayMs: Math.max(0, Number(elements.providerDelaySeconds.value) || 0) * 1000,
     captureFailureScreenshots: elements.captureFailureScreenshots.checked,
@@ -141,11 +145,13 @@ function renderSettings(settings) {
   elements.sessionToken.value = settings.sessionToken || "";
   elements.metaUrl.value = settings.metaUrl || "";
   elements.googleAiStudioUrl.value = settings.googleAiStudioUrl || "";
+  elements.googleFlowUrl.value = settings.googleFlowUrl || "";
   elements.jobTimeoutSeconds.value = Math.round((settings.jobTimeoutMs || 180000) / 1000);
   elements.providerDelaySeconds.value = Math.round((settings.providerDelayMs || 12000) / 1000);
   elements.providerMeta.checked = (settings.providers || []).includes("meta");
   elements.providerGrok.checked = (settings.providers || []).includes("grok");
   elements.providerGoogleAiStudio.checked = (settings.providers || []).includes("google_ai_studio");
+  elements.providerGoogleFlow.checked = (settings.providers || []).includes("google_flow");
   elements.captureFailureScreenshots.checked = settings.captureFailureScreenshots !== false;
 }
 
@@ -326,6 +332,8 @@ function selectedProviderFilter() {
   const providers = [];
   if (elements.providerMeta.checked) providers.push("meta");
   if (elements.providerGrok.checked) providers.push("grok");
+  if (elements.providerGoogleAiStudio.checked) providers.push("google_ai_studio");
+  if (elements.providerGoogleFlow.checked) providers.push("google_flow");
   return providers.length === 1 ? providers[0] : "";
 }
 

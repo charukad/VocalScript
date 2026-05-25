@@ -29,6 +29,7 @@ const formatSeconds = (seconds: number): string => `${Number(seconds.toFixed(2))
 const providerOptions: { value: ProviderName; label: string }[] = [
   { value: 'meta', label: 'Meta' },
   { value: 'grok', label: 'Grok' },
+  { value: 'google_flow', label: 'Google Flow' },
 ];
 
 const mediaTypeOptions: { value: GeneratedMediaType; label: string }[] = [

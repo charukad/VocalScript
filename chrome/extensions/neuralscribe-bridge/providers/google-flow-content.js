@@ -1,53 +1,50 @@
-const GOOGLE_AI_STUDIO_PROVIDER = "google_ai_studio";
+const GOOGLE_FLOW_PROVIDER = "google_flow";
 
-const GOOGLE_AI_STUDIO_SELECTORS = {
+const GOOGLE_FLOW_SELECTORS = {
   promptBox: [
-    "[aria-label*='speech block' i]",
-    "[aria-label*='speech' i][role='textbox']",
-    "[aria-label*='narration' i][role='textbox']",
-    "[aria-label*='dialogue' i][role='textbox']",
     "textarea",
-    "textarea[aria-label*='text' i]",
     "textarea[aria-label*='prompt' i]",
-    "textarea[aria-label*='script' i]",
-    "textarea[aria-label*='speech' i]",
-    "textarea[aria-label*='narration' i]",
-    "textarea[placeholder*='text' i]",
     "textarea[placeholder*='prompt' i]",
-    "textarea[placeholder*='script' i]",
-    "textarea[placeholder*='speech' i]",
-    "textarea[placeholder*='narration' i]",
+    "textarea[aria-label*='describe' i]",
+    "textarea[placeholder*='describe' i]",
     "input[type='text'][aria-label*='prompt' i]",
     "input[type='text'][placeholder*='prompt' i]",
+    "input[type='text'][aria-label*='describe' i]",
+    "input[type='text'][placeholder*='describe' i]",
     "[contenteditable='true'][role='textbox']",
     "[contenteditable='true'][aria-label*='prompt' i]",
-    "[contenteditable='true'][aria-label*='speech' i]",
-    "[contenteditable='true'][aria-label*='narration' i]",
+    "[contenteditable='true'][aria-label*='describe' i]",
     "[contenteditable='true']",
     "[role='textbox']",
     "[aria-label*='prompt' i]",
-    "[aria-label*='sample context' i]",
-    "[aria-label*='scene' i]",
     "[data-testid*='prompt' i]",
   ],
   generateButton: [
     "button",
     "[role='button']",
   ],
-  audio: [
-    "audio",
-    "audio[src]",
-    "audio source[src]",
-    "source[type*='audio' i]",
-    "source[src][type*='audio' i]",
-    "a[href*='.wav' i]",
-    "a[href*='.mp3' i]",
-    "a[href*='.m4a' i]",
-    "a[href*='.ogg' i]",
+  media: [
+    "video",
+    "video[src]",
+    "video source[src]",
+    "source[src][type*='video' i]",
+    "img[src]",
+    "img[srcset]",
+    "source[srcset]",
+    "a[href*='.mp4' i]",
+    "a[href*='.webm' i]",
+    "a[href*='.mov' i]",
+    "a[href*='.png' i]",
+    "a[href*='.jpg' i]",
+    "a[href*='.jpeg' i]",
+    "a[href*='.webp' i]",
     "a[href^='blob:']",
-    "a[href^='data:audio']",
-    "a[href*='audio' i]",
+    "a[href^='data:image']",
+    "a[href^='data:video']",
     "a[download]",
+    "[data-video-url]",
+    "[data-image-url]",
+    "[style*='background']",
   ],
   manualAction: [
     "input[type='password']",
@@ -59,33 +56,33 @@ const GOOGLE_AI_STUDIO_SELECTORS = {
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type === "provider.google_ai_studio.ping") {
+  if (message?.type === "provider.google_flow.ping") {
     sendResponse({ ok: true });
     return false;
   }
-  if (message?.type === "provider.google_ai_studio.healthCheck") {
-    runGoogleAiStudioHealthCheck()
+  if (message?.type === "provider.google_flow.healthCheck") {
+    runGoogleFlowHealthCheck()
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
-  if (message?.type === "provider.google_ai_studio.adapterTest") {
-    runGoogleAiStudioAdapterTest(message.options || {})
+  if (message?.type === "provider.google_flow.adapterTest") {
+    runGoogleFlowAdapterTest(message.options || {})
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
-  if (message?.type !== "provider.google_ai_studio.runJob") return false;
-  runGoogleAiStudioJob(message.job, message.options || {})
+  if (message?.type !== "provider.google_flow.runJob") return false;
+  runGoogleFlowJob(message.job, message.options || {})
     .then((result) => sendResponse({ ok: true, result }))
     .catch((error) => sendResponse({ ok: false, error: error.message }));
   return true;
 });
 
-async function runGoogleAiStudioHealthCheck() {
+async function runGoogleFlowHealthCheck() {
   const promptBox = await waitForPromptBox(2500);
   const generateButton = findGenerateButton(promptBox);
-  const audioCandidates = findAudioCandidates();
+  const mediaCandidates = findMediaCandidates();
   const manualActionRequired = hasManualActionElement();
   const status = manualActionRequired
     ? "manual_action_required"
@@ -94,23 +91,23 @@ async function runGoogleAiStudioHealthCheck() {
       : "needs_login";
   return {
     health: {
-      provider: GOOGLE_AI_STUDIO_PROVIDER,
+      provider: GOOGLE_FLOW_PROVIDER,
       status,
       checkedAt: new Date().toISOString(),
       pageUrl: location.href,
       pageTitle: document.title,
       message: manualActionRequired
-        ? "Google AI Studio needs login, captcha, or another manual action."
+        ? "Google Flow needs login, captcha, or another manual action."
         : promptBox
-          ? "Google AI Studio speech controls were detected."
-          : "Google AI Studio speech prompt input was not detected.",
+          ? "Google Flow prompt controls were detected."
+          : "Google Flow prompt input was not detected.",
       manualActionRequired,
       canFindPrompt: Boolean(promptBox),
       canFindGenerateButton: Boolean(generateButton),
-      canDetectMedia: audioCandidates.length > 0,
+      canDetectMedia: mediaCandidates.length > 0,
       canExtendVideo: false,
       metadata: {
-        audioCandidateCount: String(audioCandidates.length),
+        mediaCandidateCount: String(mediaCandidates.length),
         promptSelector: promptBox ? selectorHint(promptBox) : "",
         generateButtonSelector: generateButton ? selectorHint(generateButton) : "",
         generateButtonLabel: generateButton ? elementLabel(generateButton).slice(0, 120) : "",
@@ -118,12 +115,12 @@ async function runGoogleAiStudioHealthCheck() {
       },
     },
     capability: {
-      provider: GOOGLE_AI_STUDIO_PROVIDER,
-      canGenerateImage: false,
-      canGenerateVideo: false,
-      canGenerateAudio: Boolean(promptBox) && !manualActionRequired,
+      provider: GOOGLE_FLOW_PROVIDER,
+      canGenerateImage: Boolean(promptBox) && !manualActionRequired,
+      canGenerateVideo: Boolean(promptBox) && !manualActionRequired,
+      canGenerateAudio: false,
       canExtendVideo: false,
-      supportsVariants: false,
+      supportsVariants: true,
       supportsUpload: true,
       supportsDownload: true,
       metadata: {
@@ -133,73 +130,72 @@ async function runGoogleAiStudioHealthCheck() {
   };
 }
 
-async function runGoogleAiStudioJob(job, options = {}) {
-  const timeoutMs = Number(options.timeoutMs || 180000);
+async function runGoogleFlowJob(job, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || 300000);
+  const requestedMediaType = job.mediaType === "image" ? "image" : "video";
   const promptBox = await waitForPromptBox(30000);
   if (!promptBox) {
     if (hasManualActionElement()) {
-      return manualActionResult("Google AI Studio needs login or manual action before narration can start.");
+      return manualActionResult("Google Flow needs login or manual action before generation can start.");
     }
-    throw new Error(`Could not find Google AI Studio speech prompt input. ${uiDebugSummary()}`);
+    throw new Error(`Could not find Google Flow prompt input. ${uiDebugSummary()}`);
   }
 
   const prompt = buildPrompt(job);
-  await fillTtsContextFields(job, promptBox);
   await fillPrompt(promptBox, prompt);
   const generateButton = await waitForGenerateButton(15000, promptBox);
   if (!generateButton) {
-    return manualActionResult(`Google AI Studio generate button was not detected or is disabled. ${uiDebugSummary()}`);
+    return manualActionResult(`Google Flow generate button was not detected or is disabled. ${uiDebugSummary()}`);
   }
 
-  const beforeCandidates = findAudioCandidates();
+  const beforeCandidates = findMediaCandidates({ mediaType: requestedMediaType });
   const before = new Set(beforeCandidates.map((candidate) => candidate.url));
   clickElement(generateButton);
-  const audio = await waitForNewAudio(before, timeoutMs);
-  if (!audio) {
+  const media = await waitForNewMedia(before, timeoutMs, requestedMediaType);
+  if (!media) {
     if (hasManualActionElement()) {
-      return manualActionResult("Google AI Studio needs manual action before audio is available.");
+      return manualActionResult("Google Flow needs manual action before generated media is available.");
     }
-    throw new Error(`Timed out waiting for generated Google AI Studio audio. ${uiDebugSummary()}`);
+    throw new Error(`Timed out waiting for generated Google Flow media. ${uiDebugSummary()}`);
   }
 
-  const capture = await captureAudioResult(job, audio, options.httpBaseUrl, {
+  const capture = await captureMediaResult(job, media, options.httpBaseUrl, {
     adapterTestId: options.adapterTestId || "",
   });
   const mediaUrl = capture.mediaUrl;
   const localPath = capture.localPath;
-  const durationSeconds = await readAudioDuration(audio.element);
 
   return {
     status: "completed",
     mediaUrl,
-    mediaType: "audio",
+    mediaType: media.mediaType,
     mediaVariants: [{
-      id: "audio-1",
+      id: "google-flow-1",
       url: mediaUrl,
-      mediaType: "audio",
+      mediaType: media.mediaType,
       localPath,
       source: localPath ? "backend" : "provider",
     }],
     metadata: {
-      provider: GOOGLE_AI_STUDIO_PROVIDER,
+      provider: GOOGLE_FLOW_PROVIDER,
       providerPageUrl: location.href,
-      voiceMode: job.metadata?.voiceMode || "",
-      narrationLineId: job.metadata?.narrationLineId || "",
       capturedVia: capture.capturedVia,
-      audioUrlKind: capture.audioUrlKind,
-      audioCandidateCountBefore: String(beforeCandidates.length),
-      audioCandidateCountAfter: String(findAudioCandidates().length),
-      ...(durationSeconds ? { durationSeconds: String(durationSeconds) } : {}),
+      mediaUrlKind: capture.mediaUrlKind,
+      requestedMediaType,
+      mediaCandidateCountBefore: String(beforeCandidates.length),
+      mediaCandidateCountAfter: String(findMediaCandidates({ mediaType: requestedMediaType }).length),
+      resultSelector: selectorHint(media.element),
     },
   };
 }
 
-async function runGoogleAiStudioAdapterTest(options = {}) {
+async function runGoogleFlowAdapterTest(options = {}) {
   const submitFullTest = Boolean(options.submitFullTest);
   const testPrompt = String(
-    options.fullTestPrompt || "Read this sentence clearly for a NeuralScribe adapter test."
+    options.fullTestPrompt || "Create a cinematic five-second vertical video of a glowing neural network forming a play button."
   ).trim();
-  const base = await runGoogleAiStudioHealthCheck();
+  const mediaType = options.mediaType === "image" ? "image" : "video";
+  const base = await runGoogleFlowHealthCheck();
   const promptBox = await waitForPromptBox(10000);
   let promptInserted = false;
   let generateButton = null;
@@ -213,27 +209,27 @@ async function runGoogleAiStudioAdapterTest(options = {}) {
 
   if (submitFullTest) {
     if (!promptBox || !promptInserted) {
-      throw new Error(`Full Google AI Studio adapter test could not insert the prompt. ${uiDebugSummary()}`);
+      throw new Error(`Full Google Flow adapter test could not insert the prompt. ${uiDebugSummary()}`);
     }
     if (!generateButton) {
-      throw new Error(`Full Google AI Studio adapter test could not find an enabled generate button. ${uiDebugSummary()}`);
+      throw new Error(`Full Google Flow adapter test could not find an enabled generate button. ${uiDebugSummary()}`);
     }
-    result = await runGoogleAiStudioJob(
+    result = await runGoogleFlowJob(
       {
         id: options.adapterTestId || `adapter-test-${Date.now()}`,
         sceneId: "adapter-test",
         projectId: "",
-        provider: GOOGLE_AI_STUDIO_PROVIDER,
-        mediaType: "audio",
+        provider: GOOGLE_FLOW_PROVIDER,
+        mediaType,
         prompt: testPrompt,
         negativePrompt: "",
         metadata: {
-          voiceMode: "adapter_test",
           jobType: "adapter_test",
+          aspectRatio: "9:16",
         },
       },
       {
-        timeoutMs: 180000,
+        timeoutMs: 300000,
         httpBaseUrl: options.httpBaseUrl,
         adapterTestId: options.adapterTestId || "adapter-test",
       }
@@ -248,19 +244,8 @@ async function runGoogleAiStudioAdapterTest(options = {}) {
       ? "ready"
       : base.health.status;
   const message = submitFullTest
-    ? `Full Google AI Studio adapter test ${result?.mediaUrl ? "generated audio successfully" : "completed"}.`
-    : `Safe Google AI Studio adapter test ${promptInserted ? "inserted prompt" : "could not insert prompt"} and ${generateButton ? "found generate button" : "did not find generate button"}.`;
-  const adapterMetadata = {
-    ...base.health.metadata,
-    adapterTest: "true",
-    adapterTestId: options.adapterTestId || "",
-    submitFullTest: String(submitFullTest),
-    promptInserted: String(promptInserted),
-    generateButtonFound: String(Boolean(generateButton)),
-    adapterResultUrl: result?.mediaUrl || "",
-    adapterVariantCount: String(result?.mediaVariants?.length || 0),
-    uiSummary: uiDebugSummary(),
-  };
+    ? `Full Google Flow adapter test ${result?.mediaUrl ? "generated media successfully" : "completed"}.`
+    : `Safe Google Flow adapter test ${promptInserted ? "inserted prompt" : "could not insert prompt"} and ${generateButton ? "found generate button" : "did not find generate button"}.`;
 
   return {
     health: {
@@ -270,11 +255,22 @@ async function runGoogleAiStudioAdapterTest(options = {}) {
       canFindPrompt: Boolean(promptBox),
       canFindGenerateButton: Boolean(generateButton),
       canDetectMedia: base.health.canDetectMedia || Boolean(result?.mediaUrl),
-      metadata: adapterMetadata,
+      metadata: {
+        ...base.health.metadata,
+        adapterTest: "true",
+        adapterTestId: options.adapterTestId || "",
+        submitFullTest: String(submitFullTest),
+        promptInserted: String(promptInserted),
+        generateButtonFound: String(Boolean(generateButton)),
+        adapterResultUrl: result?.mediaUrl || "",
+        adapterVariantCount: String(result?.mediaVariants?.length || 0),
+        uiSummary: uiDebugSummary(),
+      },
     },
     capability: {
       ...base.capability,
-      canGenerateAudio: Boolean(promptBox) && !base.health.manualActionRequired,
+      canGenerateImage: Boolean(promptBox) && !base.health.manualActionRequired,
+      canGenerateVideo: Boolean(promptBox) && !base.health.manualActionRequired,
       metadata: {
         ...base.capability.metadata,
         adapterTest: "true",
@@ -286,50 +282,11 @@ async function runGoogleAiStudioAdapterTest(options = {}) {
 }
 
 function buildPrompt(job) {
-  return String(job.prompt || "").trim();
-}
-
-function buildTtsContext(job) {
-  const details = [];
-  if (job.metadata?.voiceStyle) details.push(`Voice style: ${job.metadata.voiceStyle}.`);
-  if (job.metadata?.emotion) details.push(`Emotion: ${job.metadata.emotion}.`);
-  if (job.metadata?.speed) details.push(`Speed: ${job.metadata.speed}.`);
-  if (job.metadata?.voiceMode) details.push(`Mode: ${job.metadata.voiceMode.replace(/_/g, " ")}.`);
-  return details.join(" ").trim();
-}
-
-async function fillTtsContextFields(job, promptBox) {
-  const fields = findTtsFields();
-  const sceneText = buildTtsScene(job);
-  const contextText = buildTtsContext(job);
-  if (fields.scene && fields.scene !== promptBox && sceneText) {
-    await fillPrompt(fields.scene, sceneText);
-  }
-  if (fields.sampleContext && fields.sampleContext !== promptBox && contextText) {
-    await fillPrompt(fields.sampleContext, contextText);
-  }
-}
-
-function buildTtsScene(job) {
-  const projectName = job.metadata?.projectName || job.projectId || "";
-  const mode = job.metadata?.voiceMode === "line_by_line" ? "clip-by-clip narration" : "full-script narration";
-  return projectName
-    ? `NeuralScribe ${mode} for ${projectName}.`
-    : `NeuralScribe ${mode}.`;
-}
-
-function findTtsFields() {
-  const candidates = queryAll(GOOGLE_AI_STUDIO_SELECTORS.promptBox)
-    .filter((element) => isVisibleElement(element) && isEditableTextElement(element));
-  return {
-    scene: findEditableByLabel(candidates, /(^|\b)scene\b/i),
-    sampleContext: findEditableByLabel(candidates, /sample context|context/i),
-    speechBlock: findEditableByLabel(candidates, /speech block|speech block text|speech text|dialogue|narration/i),
-  };
-}
-
-function findEditableByLabel(candidates, pattern) {
-  return candidates.find((element) => pattern.test(elementLabel(element))) || null;
+  const lines = [String(job.prompt || "").trim()].filter(Boolean);
+  if (job.metadata?.aspectRatio) lines.push(`Aspect ratio: ${job.metadata.aspectRatio}.`);
+  if (job.metadata?.durationSeconds) lines.push(`Duration: ${job.metadata.durationSeconds} seconds.`);
+  if (job.negativePrompt) lines.push(`Avoid: ${job.negativePrompt}.`);
+  return lines.join("\n").trim();
 }
 
 async function waitForPromptBox(timeoutMs) {
@@ -343,9 +300,7 @@ async function waitForPromptBox(timeoutMs) {
 }
 
 function findPromptBox() {
-  const fields = findTtsFields();
-  if (fields.speechBlock) return fields.speechBlock;
-  const candidates = queryAll(GOOGLE_AI_STUDIO_SELECTORS.promptBox)
+  const candidates = queryAll(GOOGLE_FLOW_SELECTORS.promptBox)
     .filter((element) => isVisibleElement(element) && isEditableTextElement(element))
     .map((element) => ({ element, score: scorePromptBox(element) }))
     .filter((item) => item.score > 0)
@@ -356,12 +311,10 @@ function findPromptBox() {
 function scorePromptBox(element) {
   const label = elementLabel(element);
   let score = 0;
-  if (/speech block|speech block text|speech text|dialogue|narration/i.test(label)) score += 24;
-  if (/sample context|scene\b|model selection|api key/i.test(label)) score -= 16;
   if (element.matches?.("textarea")) score += 10;
   if (element.matches?.("[contenteditable='true']")) score += 8;
   if (element.matches?.("[role='textbox']")) score += 7;
-  if (/prompt|script|text|speech|voice|narration|say/i.test(label)) score += 8;
+  if (/prompt|describe|image|video|scene|flow|idea/i.test(label)) score += 8;
   if (/search|filter|email|password|name/i.test(label)) score -= 12;
   const rect = element.getBoundingClientRect();
   if (rect.width >= 240) score += 4;
@@ -370,7 +323,7 @@ function scorePromptBox(element) {
 }
 
 function findGenerateButton(promptBox = null) {
-  const buttons = queryAll(GOOGLE_AI_STUDIO_SELECTORS.generateButton)
+  const buttons = queryAll(GOOGLE_FLOW_SELECTORS.generateButton)
     .filter((button) => isVisibleElement(button) && !isDisabledControl(button))
     .map((button) => ({ button, score: scoreGenerateButton(button, promptBox) }))
     .filter((item) => item.score >= 6)
@@ -381,7 +334,7 @@ function findGenerateButton(promptBox = null) {
 function scoreGenerateButton(button, promptBox) {
   const label = elementLabel(button);
   let score = 0;
-  if (/generate|speak|create audio|create speech|run|submit|send|play|start|render/i.test(label)) score += 12;
+  if (/generate|create|submit|send|run|make|flow|video|image|render/i.test(label)) score += 12;
   if (/download|share|copy|close|cancel|delete|remove|like|dislike|menu|settings|profile|login|sign in|sign out/i.test(label)) score -= 30;
   if (button.matches?.("button")) score += 2;
   if (button.getAttribute("type") === "submit") score += 4;
@@ -411,22 +364,30 @@ async function waitForPromptText(element, expected, timeoutMs) {
   return false;
 }
 
-function findAudioCandidates() {
+function findMediaCandidates(options = {}) {
+  const requestedMediaType = options.mediaType || "";
   const candidates = [];
-  queryAll(GOOGLE_AI_STUDIO_SELECTORS.audio).forEach((element) => {
+  queryAll(GOOGLE_FLOW_SELECTORS.media).forEach((element) => {
     const url = mediaUrlFromElement(element);
     if (!url) return;
-    if (!looksLikeAudioUrl(url, element)) return;
-    candidates.push({ url, element });
+    const mediaType = classifyMediaType(url, element, requestedMediaType);
+    if (!mediaType) return;
+    if (requestedMediaType && mediaType !== requestedMediaType) return;
+    if (!isUsableMediaCandidate(element, mediaType, url)) return;
+    candidates.push({ url, element, mediaType });
   });
   return dedupeCandidates(candidates);
 }
 
-async function waitForNewAudio(before, timeoutMs) {
+async function waitForNewMedia(before, timeoutMs, requestedMediaType) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const candidate = findAudioCandidates().find((item) => !before.has(item.url));
-    if (candidate) return candidate;
+    const candidate = findMediaCandidates({ mediaType: requestedMediaType })
+      .find((item) => !before.has(item.url));
+    if (candidate) {
+      await waitForMediaReady(candidate.element, candidate.mediaType);
+      return candidate;
+    }
     await sleep(1000);
   }
   return null;
@@ -472,42 +433,42 @@ function setNativeValue(element, value) {
   }
 }
 
-async function captureAudioResult(job, audio, httpBaseUrl, options = {}) {
-  const audioUrlKind = classifyAudioUrl(audio.url);
+async function captureMediaResult(job, media, httpBaseUrl, options = {}) {
+  const mediaUrlKind = classifyMediaUrl(media.url);
   try {
     const metadata = {
-      capturedVia: isLocalObjectUrl(audio.url) ? "content-script-blob-upload" : "content-script-fetch-upload",
-      audioUrlKind,
+      capturedVia: isLocalObjectUrl(media.url) ? "content-script-blob-upload" : "content-script-fetch-upload",
+      mediaUrlKind,
     };
     const uploaded = options.adapterTestId
-      ? await uploadAdapterTestAudioFromUrl(options.adapterTestId, audio.url, httpBaseUrl)
-      : await uploadAudioFromUrl(job, audio.url, httpBaseUrl, metadata);
+      ? await uploadAdapterTestMediaFromUrl(options.adapterTestId, media.url, media.mediaType, httpBaseUrl)
+      : await uploadMediaFromUrl(job, media.url, media.mediaType, httpBaseUrl, metadata);
     return {
       mediaUrl: uploaded.resultUrl,
       localPath: uploaded.localPath || "",
-      capturedVia: isLocalObjectUrl(audio.url) ? "content-script-blob-upload" : "content-script-fetch-upload",
-      audioUrlKind,
+      capturedVia: isLocalObjectUrl(media.url) ? "content-script-blob-upload" : "content-script-fetch-upload",
+      mediaUrlKind,
     };
   } catch (error) {
-    if (isLocalObjectUrl(audio.url) || String(audio.url || "").startsWith("data:")) {
+    if (isLocalObjectUrl(media.url) || String(media.url || "").startsWith("data:")) {
       throw error;
     }
     return {
-      mediaUrl: audio.url,
+      mediaUrl: media.url,
       localPath: "",
       capturedVia: "provider-url",
-      audioUrlKind,
+      mediaUrlKind,
     };
   }
 }
 
-async function uploadAdapterTestAudioFromUrl(testId, mediaUrl, httpBaseUrl) {
+async function uploadAdapterTestMediaFromUrl(testId, mediaUrl, mediaType, httpBaseUrl) {
   const response = await fetch(mediaUrl);
   if (!response.ok) {
-    throw new Error("Captured Google AI Studio adapter audio, but could not read it.");
+    throw new Error("Captured Google Flow adapter media, but could not read it.");
   }
   const blob = await response.blob();
-  const extension = extensionFromBlob(blob, "audio");
+  const extension = extensionFromBlob(blob, mediaType);
   const formData = new FormData();
   formData.append("files", blob, `${testId}.${extension}`);
   const baseUrl = String(httpBaseUrl || "http://127.0.0.1:8000").replace(/\/$/, "");
@@ -516,7 +477,7 @@ async function uploadAdapterTestAudioFromUrl(testId, mediaUrl, httpBaseUrl) {
     body: formData,
   });
   if (!uploadResponse.ok) {
-    throw new Error(`Adapter audio upload failed: ${await uploadResponse.text()}`);
+    throw new Error(`Adapter media upload failed: ${await uploadResponse.text()}`);
   }
   const payload = await uploadResponse.json();
   return {
@@ -525,20 +486,18 @@ async function uploadAdapterTestAudioFromUrl(testId, mediaUrl, httpBaseUrl) {
   };
 }
 
-async function uploadAudioFromUrl(job, mediaUrl, httpBaseUrl, metadata = {}) {
+async function uploadMediaFromUrl(job, mediaUrl, mediaType, httpBaseUrl, metadata = {}) {
   const response = await fetch(mediaUrl);
   if (!response.ok) {
-    throw new Error("Captured Google AI Studio audio blob, but could not read it.");
+    throw new Error("Captured Google Flow media blob, but could not read it.");
   }
   const blob = await response.blob();
-  const extension = extensionFromBlob(blob, "audio");
+  const extension = extensionFromBlob(blob, mediaType);
   const formData = new FormData();
-  formData.append("mediaType", "audio");
+  formData.append("mediaType", mediaType);
   formData.append("metadata", JSON.stringify({
-    provider: GOOGLE_AI_STUDIO_PROVIDER,
+    provider: GOOGLE_FLOW_PROVIDER,
     providerPageUrl: location.href,
-    voiceMode: job.metadata?.voiceMode || "",
-    narrationLineId: job.metadata?.narrationLineId || "",
     ...metadata,
   }));
   formData.append("file", blob, `${job.id}.${extension}`);
@@ -548,29 +507,9 @@ async function uploadAudioFromUrl(job, mediaUrl, httpBaseUrl, metadata = {}) {
     body: formData,
   });
   if (!uploadResponse.ok) {
-    throw new Error(`Generated audio upload failed: ${await uploadResponse.text()}`);
+    throw new Error(`Generated media upload failed: ${await uploadResponse.text()}`);
   }
   return uploadResponse.json();
-}
-
-async function readAudioDuration(element) {
-  const mediaElement = element instanceof HTMLMediaElement
-    ? element
-    : element.closest?.("audio, video");
-  if (!(mediaElement instanceof HTMLMediaElement)) return null;
-  if (Number.isFinite(mediaElement.duration) && mediaElement.duration > 0) {
-    return Number(mediaElement.duration.toFixed(3));
-  }
-  await new Promise((resolve) => {
-    const timeoutId = window.setTimeout(resolve, 1500);
-    mediaElement.addEventListener("loadedmetadata", () => {
-      window.clearTimeout(timeoutId);
-      resolve();
-    }, { once: true });
-  });
-  return Number.isFinite(mediaElement.duration) && mediaElement.duration > 0
-    ? Number(mediaElement.duration.toFixed(3))
-    : null;
 }
 
 function manualActionResult(message) {
@@ -578,7 +517,7 @@ function manualActionResult(message) {
     status: "manual_action_required",
     message,
     metadata: {
-      provider: GOOGLE_AI_STUDIO_PROVIDER,
+      provider: GOOGLE_FLOW_PROVIDER,
       providerPageUrl: location.href,
       uiSummary: uiDebugSummary(),
     },
@@ -586,7 +525,7 @@ function manualActionResult(message) {
 }
 
 function hasManualActionElement() {
-  if (queryFirst(GOOGLE_AI_STUDIO_SELECTORS.manualAction, true)) return true;
+  if (queryFirst(GOOGLE_FLOW_SELECTORS.manualAction, true)) return true;
   return /sign in|login|captcha|verify you are human|access denied|permission|not available/i.test(deepTextContent(document));
 }
 
@@ -656,7 +595,7 @@ function elementLabel(element) {
     element.getAttribute?.("placeholder") || "",
     element.getAttribute?.("title") || "",
     element.getAttribute?.("data-testid") || "",
-    element.getAttribute?.("type") || "",
+    element.getAttribute?.("download") || "",
     element.innerText || element.textContent || "",
   ].join(" "));
 }
@@ -667,14 +606,20 @@ function normalizeText(value) {
 
 function mediaUrlFromElement(element) {
   if (!element) return "";
+  const dataVideo = element.getAttribute?.("data-video-url");
+  if (dataVideo) return dataVideo;
+  const dataImage = element.getAttribute?.("data-image-url");
+  if (dataImage) return dataImage;
   const srcset = element.getAttribute?.("srcset");
   if (srcset) return parseSrcsetUrl(srcset);
-  return element.currentSrc ||
+  const direct = element.currentSrc ||
     element.src ||
     element.href ||
     element.getAttribute?.("src") ||
     element.getAttribute?.("href") ||
     "";
+  if (direct) return direct;
+  return backgroundImageUrl(element);
 }
 
 function parseSrcsetUrl(srcset) {
@@ -685,16 +630,49 @@ function parseSrcsetUrl(srcset) {
   return candidates[candidates.length - 1] || "";
 }
 
-function looksLikeAudioUrl(url, element) {
+function backgroundImageUrl(element) {
+  const value = window.getComputedStyle(element).backgroundImage || "";
+  const match = value.match(/url\((['"]?)(.*?)\1\)/);
+  return match ? match[2] : "";
+}
+
+function classifyMediaType(url, element, requestedMediaType = "") {
   const value = String(url || "");
   const type = element.getAttribute?.("type") || "";
-  const download = element.getAttribute?.("download") || "";
-  return (
-    value.startsWith("blob:") ||
-    value.startsWith("data:audio") ||
-    /\.(wav|mp3|m4a|ogg|aac)(\?|#|$)/i.test(value) ||
-    /audio/i.test(`${value} ${type} ${download} ${elementLabel(element)}`)
-  );
+  if (requestedMediaType && (value.startsWith("blob:") || value.startsWith("data:"))) return requestedMediaType;
+  if (element instanceof HTMLVideoElement || /video/i.test(type)) return "video";
+  if (element instanceof HTMLImageElement) return "image";
+  if (value.startsWith("data:video") || /\.(mp4|webm|mov)(\?|#|$)/i.test(value)) return "video";
+  if (value.startsWith("data:image") || /\.(png|jpg|jpeg|webp|gif)(\?|#|$)/i.test(value)) return "image";
+  if (requestedMediaType && /download|result|media|asset/i.test(elementLabel(element))) return requestedMediaType;
+  return "";
+}
+
+function isUsableMediaCandidate(element, mediaType, url) {
+  if (!isVisibleElement(element) && !String(url || "").startsWith("blob:") && !String(url || "").startsWith("data:")) {
+    return false;
+  }
+  if (mediaType === "image" && element instanceof HTMLImageElement) {
+    const width = element.naturalWidth || element.getBoundingClientRect().width;
+    const height = element.naturalHeight || element.getBoundingClientRect().height;
+    if (width > 0 && height > 0 && (width < 96 || height < 96)) return false;
+  }
+  if (/logo|avatar|profile|icon|favicon/i.test(`${url} ${elementLabel(element)}`)) return false;
+  return true;
+}
+
+async function waitForMediaReady(element, mediaType) {
+  if (mediaType !== "video") return;
+  const video = element instanceof HTMLVideoElement ? element : element.closest?.("video");
+  if (!(video instanceof HTMLVideoElement)) return;
+  if (video.readyState >= 2 || Number.isFinite(video.duration)) return;
+  await new Promise((resolve) => {
+    const timeoutId = window.setTimeout(resolve, 3000);
+    video.addEventListener("loadedmetadata", () => {
+      window.clearTimeout(timeoutId);
+      resolve();
+    }, { once: true });
+  });
 }
 
 function selectorHint(element) {
@@ -716,7 +694,7 @@ function isLocalObjectUrl(url) {
   return String(url || "").startsWith("blob:");
 }
 
-function classifyAudioUrl(url) {
+function classifyMediaUrl(url) {
   const value = String(url || "");
   if (value.startsWith("blob:")) return "blob";
   if (value.startsWith("data:")) return "data";
@@ -726,11 +704,13 @@ function classifyAudioUrl(url) {
 
 function extensionFromBlob(blob, fallbackMediaType) {
   const type = String(blob?.type || "").toLowerCase();
-  if (type.includes("wav")) return "wav";
-  if (type.includes("mpeg") || type.includes("mp3")) return "mp3";
-  if (type.includes("mp4") || type.includes("m4a")) return "m4a";
-  if (type.includes("ogg")) return "ogg";
-  return fallbackMediaType === "audio" ? "mp3" : "bin";
+  if (type.includes("webm")) return "webm";
+  if (type.includes("quicktime")) return "mov";
+  if (type.includes("mp4")) return "mp4";
+  if (type.includes("png")) return "png";
+  if (type.includes("jpeg") || type.includes("jpg")) return "jpg";
+  if (type.includes("webp")) return "webp";
+  return fallbackMediaType === "video" ? "mp4" : "png";
 }
 
 function isEditableTextElement(element) {
@@ -819,11 +799,11 @@ function deepTextContent(root = document) {
 }
 
 function uiDebugSummary() {
-  const visibleButtons = queryAll(GOOGLE_AI_STUDIO_SELECTORS.generateButton)
+  const visibleButtons = queryAll(GOOGLE_FLOW_SELECTORS.generateButton)
     .filter(isVisibleElement)
     .slice(0, 8)
     .map((button) => elementLabel(button).slice(0, 48) || selectorHint(button));
-  const visibleInputs = queryAll(GOOGLE_AI_STUDIO_SELECTORS.promptBox)
+  const visibleInputs = queryAll(GOOGLE_FLOW_SELECTORS.promptBox)
     .filter(isVisibleElement)
     .slice(0, 6)
     .map(selectorHint);

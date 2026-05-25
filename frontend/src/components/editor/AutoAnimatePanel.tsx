@@ -28,6 +28,7 @@ const aspectRatioOptions: { value: GenerationAspectRatio; label: string }[] = [
 const providerOptions: { value: ProviderName; label: string }[] = [
   { value: 'meta', label: 'Meta' },
   { value: 'grok', label: 'Grok' },
+  { value: 'google_flow', label: 'Google Flow' },
 ];
 
 const densityOptions: { value: StoryboardSceneDensity; label: string }[] = [

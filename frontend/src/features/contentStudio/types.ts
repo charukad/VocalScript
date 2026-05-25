@@ -561,6 +561,7 @@ export type VoiceJobCreateInput = {
   projectName?: string | null;
   batchId?: string | null;
   voiceStyle?: string | null;
+  lineIds?: string[];
 };
 
 export type VoiceJobBatch = {
