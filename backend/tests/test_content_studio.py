@@ -287,6 +287,51 @@ class ContentStudioTests(unittest.TestCase):
         self.assertEqual(synced.audio_asset_id, f"generated-{claimed.id}")
         self.assertEqual(synced.duration_seconds, 1.75)
 
+    def test_unlinked_voice_jobs_can_be_claimed_when_sqlite_store_is_enabled(self) -> None:
+        queue_service = GenerationQueueService(
+            str(self.root / "stored-generated"),
+            projects_dir=str(self.root / "stored-projects"),
+            store=self.store,
+        )
+        script = self.studio_service.create_script(
+            self.profile.id,
+            ScriptCreateRequest(title="Unlinked voice queue", content="Opening line. Payoff line."),
+        )
+        lines = self.studio_service.split_script_into_lines(script.id, ScriptSplitLinesRequest())
+        self.assertIsNotNone(lines)
+        assert lines is not None
+
+        jobs = queue_service.create_voice_jobs(
+            script_id=script.id,
+            script_text=script.content,
+            narration_lines=lines,
+            mode="line_by_line",
+            line_ids=[lines[0].id],
+        )
+
+        self.assertEqual(len(jobs), 1)
+        claimed = queue_service.claim_next_job(provider="google_ai_studio", worker_id="worker-1")
+        self.assertIsNotNone(claimed)
+        assert claimed is not None
+        self.assertEqual(claimed.id, jobs[0].id)
+        self.assertIsNone(claimed.project_id)
+        self.assertEqual(claimed.status, "running")
+
+        reloaded_queue_service = GenerationQueueService(
+            str(self.root / "stored-generated"),
+            projects_dir=str(self.root / "stored-projects"),
+            store=self.store,
+        )
+        reloaded = reloaded_queue_service.get_job(claimed.id)
+        self.assertIsNotNone(reloaded)
+        assert reloaded is not None
+        self.assertEqual(reloaded.status, "queued")
+        reclaimed = reloaded_queue_service.claim_next_job(provider="google_ai_studio", worker_id="worker-2")
+        self.assertIsNotNone(reclaimed)
+        assert reclaimed is not None
+        self.assertEqual(reclaimed.id, claimed.id)
+        self.assertEqual(reclaimed.status, "running")
+
     def test_timeline_draft_uses_narration_storyboard_and_generated_media(self) -> None:
         script = self.studio_service.create_script(
             self.profile.id,

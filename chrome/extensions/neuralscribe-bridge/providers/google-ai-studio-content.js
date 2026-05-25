@@ -2,20 +2,32 @@ const GOOGLE_AI_STUDIO_PROVIDER = "google_ai_studio";
 
 const GOOGLE_AI_STUDIO_SELECTORS = {
   promptBox: [
+    "[aria-label*='speech block' i]",
+    "[aria-label*='speech' i][role='textbox']",
+    "[aria-label*='narration' i][role='textbox']",
+    "[aria-label*='dialogue' i][role='textbox']",
     "textarea",
     "textarea[aria-label*='text' i]",
     "textarea[aria-label*='prompt' i]",
     "textarea[aria-label*='script' i]",
+    "textarea[aria-label*='speech' i]",
+    "textarea[aria-label*='narration' i]",
     "textarea[placeholder*='text' i]",
     "textarea[placeholder*='prompt' i]",
     "textarea[placeholder*='script' i]",
+    "textarea[placeholder*='speech' i]",
+    "textarea[placeholder*='narration' i]",
     "input[type='text'][aria-label*='prompt' i]",
     "input[type='text'][placeholder*='prompt' i]",
     "[contenteditable='true'][role='textbox']",
     "[contenteditable='true'][aria-label*='prompt' i]",
+    "[contenteditable='true'][aria-label*='speech' i]",
+    "[contenteditable='true'][aria-label*='narration' i]",
     "[contenteditable='true']",
     "[role='textbox']",
     "[aria-label*='prompt' i]",
+    "[aria-label*='sample context' i]",
+    "[aria-label*='scene' i]",
     "[data-testid*='prompt' i]",
   ],
   generateButton: [
@@ -23,8 +35,10 @@ const GOOGLE_AI_STUDIO_SELECTORS = {
     "[role='button']",
   ],
   audio: [
+    "audio",
     "audio[src]",
     "audio source[src]",
+    "source[type*='audio' i]",
     "source[src][type*='audio' i]",
     "a[href*='.wav' i]",
     "a[href*='.mp3' i]",
@@ -130,6 +144,7 @@ async function runGoogleAiStudioJob(job, options = {}) {
   }
 
   const prompt = buildPrompt(job);
+  await fillTtsContextFields(job, promptBox);
   await fillPrompt(promptBox, prompt);
   const generateButton = await waitForGenerateButton(15000, promptBox);
   if (!generateButton) {
@@ -271,10 +286,50 @@ async function runGoogleAiStudioAdapterTest(options = {}) {
 }
 
 function buildPrompt(job) {
-  const voiceStyle = job.metadata?.voiceStyle ? `Voice style: ${job.metadata.voiceStyle}. ` : "";
-  const emotion = job.metadata?.emotion ? `Emotion: ${job.metadata.emotion}. ` : "";
-  const speed = job.metadata?.speed ? `Speed: ${job.metadata.speed}. ` : "";
-  return `${voiceStyle}${emotion}${speed}${String(job.prompt || "").trim()}`.trim();
+  return String(job.prompt || "").trim();
+}
+
+function buildTtsContext(job) {
+  const details = [];
+  if (job.metadata?.voiceStyle) details.push(`Voice style: ${job.metadata.voiceStyle}.`);
+  if (job.metadata?.emotion) details.push(`Emotion: ${job.metadata.emotion}.`);
+  if (job.metadata?.speed) details.push(`Speed: ${job.metadata.speed}.`);
+  if (job.metadata?.voiceMode) details.push(`Mode: ${job.metadata.voiceMode.replace(/_/g, " ")}.`);
+  return details.join(" ").trim();
+}
+
+async function fillTtsContextFields(job, promptBox) {
+  const fields = findTtsFields();
+  const sceneText = buildTtsScene(job);
+  const contextText = buildTtsContext(job);
+  if (fields.scene && fields.scene !== promptBox && sceneText) {
+    await fillPrompt(fields.scene, sceneText);
+  }
+  if (fields.sampleContext && fields.sampleContext !== promptBox && contextText) {
+    await fillPrompt(fields.sampleContext, contextText);
+  }
+}
+
+function buildTtsScene(job) {
+  const projectName = job.metadata?.projectName || job.projectId || "";
+  const mode = job.metadata?.voiceMode === "line_by_line" ? "clip-by-clip narration" : "full-script narration";
+  return projectName
+    ? `NeuralScribe ${mode} for ${projectName}.`
+    : `NeuralScribe ${mode}.`;
+}
+
+function findTtsFields() {
+  const candidates = queryAll(GOOGLE_AI_STUDIO_SELECTORS.promptBox)
+    .filter((element) => isVisibleElement(element) && isEditableTextElement(element));
+  return {
+    scene: findEditableByLabel(candidates, /(^|\b)scene\b/i),
+    sampleContext: findEditableByLabel(candidates, /sample context|context/i),
+    speechBlock: findEditableByLabel(candidates, /speech block|speech block text|speech text|dialogue|narration/i),
+  };
+}
+
+function findEditableByLabel(candidates, pattern) {
+  return candidates.find((element) => pattern.test(elementLabel(element))) || null;
 }
 
 async function waitForPromptBox(timeoutMs) {
@@ -288,6 +343,8 @@ async function waitForPromptBox(timeoutMs) {
 }
 
 function findPromptBox() {
+  const fields = findTtsFields();
+  if (fields.speechBlock) return fields.speechBlock;
   const candidates = queryAll(GOOGLE_AI_STUDIO_SELECTORS.promptBox)
     .filter((element) => isVisibleElement(element) && isEditableTextElement(element))
     .map((element) => ({ element, score: scorePromptBox(element) }))
@@ -299,6 +356,8 @@ function findPromptBox() {
 function scorePromptBox(element) {
   const label = elementLabel(element);
   let score = 0;
+  if (/speech block|speech block text|speech text|dialogue|narration/i.test(label)) score += 24;
+  if (/sample context|scene\b|model selection|api key/i.test(label)) score -= 16;
   if (element.matches?.("textarea")) score += 10;
   if (element.matches?.("[contenteditable='true']")) score += 8;
   if (element.matches?.("[role='textbox']")) score += 7;
