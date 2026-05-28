@@ -53,6 +53,15 @@ const GOOGLE_FLOW_SELECTORS = {
     "[data-testid*='captcha' i]",
     "[aria-label*='captcha' i]",
   ],
+  workspaceLinks: [
+    "a[href*='/fx/tools/flow/project/']",
+    "a[href*='/flow/project/']",
+    "a[href*='/tools/flow/project/']",
+  ],
+  workspaceButtons: [
+    "button",
+    "[role='button']",
+  ],
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -80,7 +89,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 async function runGoogleFlowHealthCheck() {
-  const promptBox = await waitForPromptBox(2500);
+  const prepared = await prepareGoogleFlowWorkspace({ allowNavigation: true, timeoutMs: 8000 });
+  const promptBox = prepared.promptBox || await waitForPromptBox(2500);
   const generateButton = findGenerateButton(promptBox);
   const mediaCandidates = findMediaCandidates();
   const manualActionRequired = hasManualActionElement();
@@ -111,6 +121,7 @@ async function runGoogleFlowHealthCheck() {
         promptSelector: promptBox ? selectorHint(promptBox) : "",
         generateButtonSelector: generateButton ? selectorHint(generateButton) : "",
         generateButtonLabel: generateButton ? elementLabel(generateButton).slice(0, 120) : "",
+        workspaceAction: prepared.action || "",
         uiSummary: uiDebugSummary(),
       },
     },
@@ -132,8 +143,10 @@ async function runGoogleFlowHealthCheck() {
 
 async function runGoogleFlowJob(job, options = {}) {
   const timeoutMs = Number(options.timeoutMs || 300000);
-  const requestedMediaType = job.mediaType === "image" ? "image" : "video";
-  const promptBox = await waitForPromptBox(30000);
+  const mediaPlan = resolveFlowMediaPlan(job);
+  const requestedMediaType = mediaPlan.mediaType;
+  const prepared = await prepareGoogleFlowWorkspace({ allowNavigation: true, timeoutMs: 45000 });
+  let promptBox = prepared.promptBox || await waitForPromptBox(10000);
   if (!promptBox) {
     if (hasManualActionElement()) {
       return manualActionResult("Google Flow needs login or manual action before generation can start.");
@@ -141,8 +154,11 @@ async function runGoogleFlowJob(job, options = {}) {
     throw new Error(`Could not find Google Flow prompt input. ${uiDebugSummary()}`);
   }
 
+  const modeResult = await configureGoogleFlowGenerationMode(requestedMediaType, job.metadata?.aspectRatio, promptBox);
+  promptBox = await waitForPromptBox(10000) || promptBox;
   const prompt = buildPrompt(job);
   await fillPrompt(promptBox, prompt);
+  await waitForPromptText(promptBox, prompt, 4000);
   const generateButton = await waitForGenerateButton(15000, promptBox);
   if (!generateButton) {
     return manualActionResult(`Google Flow generate button was not detected or is disabled. ${uiDebugSummary()}`);
@@ -182,9 +198,13 @@ async function runGoogleFlowJob(job, options = {}) {
       capturedVia: capture.capturedVia,
       mediaUrlKind: capture.mediaUrlKind,
       requestedMediaType,
+      workspaceAction: prepared.action || "",
       mediaCandidateCountBefore: String(beforeCandidates.length),
       mediaCandidateCountAfter: String(findMediaCandidates({ mediaType: requestedMediaType }).length),
       resultSelector: selectorHint(media.element),
+      flowMediaMode: requestedMediaType,
+      mediaTypeFallbackReason: mediaPlan.fallbackReason,
+      modeAction: modeResult.action,
     },
   };
 }
@@ -196,7 +216,8 @@ async function runGoogleFlowAdapterTest(options = {}) {
   ).trim();
   const mediaType = options.mediaType === "image" ? "image" : "video";
   const base = await runGoogleFlowHealthCheck();
-  const promptBox = await waitForPromptBox(10000);
+  const prepared = await prepareGoogleFlowWorkspace({ allowNavigation: true, timeoutMs: 20000 });
+  const promptBox = prepared.promptBox || await waitForPromptBox(10000);
   let promptInserted = false;
   let generateButton = null;
   let result = null;
@@ -262,6 +283,7 @@ async function runGoogleFlowAdapterTest(options = {}) {
         submitFullTest: String(submitFullTest),
         promptInserted: String(promptInserted),
         generateButtonFound: String(Boolean(generateButton)),
+        workspaceAction: prepared.action || "",
         adapterResultUrl: result?.mediaUrl || "",
         adapterVariantCount: String(result?.mediaVariants?.length || 0),
         uiSummary: uiDebugSummary(),
@@ -287,6 +309,162 @@ function buildPrompt(job) {
   if (job.metadata?.durationSeconds) lines.push(`Duration: ${job.metadata.durationSeconds} seconds.`);
   if (job.negativePrompt) lines.push(`Avoid: ${job.negativePrompt}.`);
   return lines.join("\n").trim();
+}
+
+function resolveFlowMediaPlan(job) {
+  if (job.mediaType === "image") {
+    return { mediaType: "image", fallbackReason: "" };
+  }
+  if (job.metadata?.flowGenerationMode === "video_frames" || job.metadata?.startImageUrl) {
+    return { mediaType: "video", fallbackReason: "" };
+  }
+  return {
+    mediaType: "image",
+    fallbackReason: "google_flow_text_video_requires_start_or_end_frames",
+  };
+}
+
+async function configureGoogleFlowGenerationMode(mediaType, aspectRatio, promptBox) {
+  const modeButton = findGenerationSettingsButton(promptBox);
+  if (!modeButton) return { action: "mode_button_not_found" };
+
+  const actions = [];
+  clickElement(modeButton);
+  await sleep(500);
+
+  if (clickGenerationOption(mediaType === "image" ? /(?:^|\s)image$/i : /(?:^|\s)video$/i, promptBox)) {
+    actions.push(mediaType);
+    await sleep(350);
+  }
+
+  const normalizedAspectRatio = normalizeAspectRatio(aspectRatio);
+  if (normalizedAspectRatio && clickGenerationOption(new RegExp(`(?:^|\\s)${escapeRegex(normalizedAspectRatio)}$`, "i"), promptBox)) {
+    actions.push(normalizedAspectRatio);
+    await sleep(250);
+  }
+
+  if (clickGenerationOption(/(?:^|\s)1x$/i, promptBox)) {
+    actions.push("1x");
+    await sleep(150);
+  }
+
+  closeGenerationSettings(promptBox);
+  return { action: actions.join(",") || "opened_mode_menu" };
+}
+
+function findGenerationSettingsButton(promptBox) {
+  const candidates = queryAll(["button", "[role='button']"])
+    .filter((button) => isVisibleElement(button) && !isDisabledControl(button))
+    .map((button) => ({ button, score: scoreGenerationSettingsButton(button, promptBox) }))
+    .filter((item) => item.score > 0)
+    .sort((first, second) => second.score - first.score);
+  return candidates[0]?.button || null;
+}
+
+function scoreGenerationSettingsButton(button, promptBox) {
+  const label = elementLabel(button);
+  let score = 0;
+  if (/crop_(?:16_9|9_16|landscape|portrait|square)|\b(?:16:9|9:16|4:3|3:4|1:1|1x|x2|x3|x4)\b/i.test(label)) score += 12;
+  if (/veo|nano banana|banana|image|video/i.test(label)) score += 6;
+  if (/create|add_2|arrow_forward|agent|settings|instructions|help|filter|sort|profile|media/i.test(label)) score -= 8;
+  if (promptBox && isNearPromptSubmitPosition(button, promptBox)) score += 6;
+  return score;
+}
+
+function clickGenerationOption(labelPattern, promptBox) {
+  const options = queryAll(["[role='tab']", "button", "[role='button']"])
+    .filter((element) => isVisibleElement(element) && !isDisabledControl(element))
+    .map((element) => ({ element, label: elementLabel(element), distance: distanceFromPrompt(element, promptBox) }))
+    .filter(({ label }) => labelPattern.test(label))
+    .sort((first, second) => first.distance - second.distance);
+  if (!options[0]) return false;
+  clickElement(options[0].element);
+  return true;
+}
+
+function normalizeAspectRatio(aspectRatio) {
+  const value = String(aspectRatio || "").trim();
+  if (/9\s*:\s*16/.test(value)) return "9:16";
+  if (/16\s*:\s*9/.test(value)) return "16:9";
+  if (/4\s*:\s*3/.test(value)) return "4:3";
+  if (/3\s*:\s*4/.test(value)) return "3:4";
+  if (/1\s*:\s*1/.test(value)) return "1:1";
+  return "";
+}
+
+function closeGenerationSettings(promptBox) {
+  const eventOptions = { key: "Escape", code: "Escape", bubbles: true, cancelable: true };
+  document.dispatchEvent(new KeyboardEvent("keydown", eventOptions));
+  document.dispatchEvent(new KeyboardEvent("keyup", eventOptions));
+  promptBox?.focus?.();
+}
+
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function prepareGoogleFlowWorkspace(options = {}) {
+  const timeoutMs = Number(options.timeoutMs || 30000);
+  const allowNavigation = options.allowNavigation !== false;
+  const startedAt = Date.now();
+  let action = "";
+
+  while (Date.now() - startedAt < timeoutMs) {
+    dismissFlowOverlays();
+
+    const promptBox = findPromptBox();
+    if (promptBox) {
+      return { promptBox, action };
+    }
+
+    if (allowNavigation && !action) {
+      const entry = findWorkspaceEntryAction();
+      if (entry) {
+        action = entry.action;
+        clickElement(entry.element);
+        await sleep(2500);
+        continue;
+      }
+    }
+
+    await sleep(300);
+  }
+
+  return { promptBox: null, action };
+}
+
+function findWorkspaceEntryAction() {
+  const projectLink = queryAll(GOOGLE_FLOW_SELECTORS.workspaceLinks)
+    .filter((element) => isVisibleElement(element))
+    .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+    .filter(({ rect }) => rect.width > 0 && rect.height > 0)
+    .sort((first, second) => first.rect.top - second.rect.top)[0]?.element;
+  if (projectLink) {
+    return { element: projectLink, action: "open_existing_project" };
+  }
+
+  const buttons = queryAll(GOOGLE_FLOW_SELECTORS.workspaceButtons)
+    .filter((element) => isVisibleElement(element) && !isDisabledControl(element))
+    .map((element) => ({ element, label: elementLabel(element) }))
+    .filter(({ label }) => /new project|get started|create project|start project|create$/i.test(label))
+    .filter(({ label }) => !/agent|help|delete|edit|profile|tv|banner|learn/i.test(label));
+  const newProjectButton = buttons[0]?.element || null;
+  if (newProjectButton) {
+    return { element: newProjectButton, action: "create_or_enter_project" };
+  }
+
+  return null;
+}
+
+function dismissFlowOverlays() {
+  const labels = [
+    /^(got it|done|close|dismiss|skip|maybe later|not now)$/i,
+    /^(continue|next)$/i,
+  ];
+  const buttons = queryAll(["button", "[role='button']", "[aria-label]"])
+    .filter((element) => isVisibleElement(element) && !isDisabledControl(element))
+    .filter((element) => labels.some((pattern) => pattern.test(elementLabel(element))));
+  buttons.slice(0, 2).forEach((button) => clickElement(button));
 }
 
 async function waitForPromptBox(timeoutMs) {
@@ -334,8 +512,11 @@ function findGenerateButton(promptBox = null) {
 function scoreGenerateButton(button, promptBox) {
   const label = elementLabel(button);
   let score = 0;
+  if (/add_2|crop_(?:16_9|9_16|landscape|portrait|square)|\b(?:16:9|9:16|4:3|3:4|1:1|1x|x2|x3|x4)\b|veo|nano banana|banana|frames|ingredients|agent instructions|settings|sort|filter/i.test(label)) score -= 30;
+  if (/^(image|video)$/i.test(label.replace(/^(image|play_circle)\s+/i, ""))) score -= 30;
   if (/generate|create|submit|send|run|make|flow|video|image|render/i.test(label)) score += 12;
   if (/download|share|copy|close|cancel|delete|remove|like|dislike|menu|settings|profile|login|sign in|sign out/i.test(label)) score -= 30;
+  if (/arrow_forward/i.test(label)) score += 12;
   if (button.matches?.("button")) score += 2;
   if (button.getAttribute("type") === "submit") score += 4;
   if (button.querySelector?.("svg, mat-icon, [class*='icon' i]")) score += 2;
@@ -394,31 +575,77 @@ async function waitForNewMedia(before, timeoutMs, requestedMediaType) {
 }
 
 async function fillPrompt(element, value) {
-  element.scrollIntoView({ block: "center", inline: "nearest" });
-  element.focus();
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-    setNativeValue(element, value);
-    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
-    element.dispatchEvent(new Event("change", { bubbles: true }));
+  const target = editableTextTarget(element);
+  target.scrollIntoView({ block: "center", inline: "nearest" });
+  target.focus();
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    setNativeValue(target, value);
+    dispatchTextChangeEvents(target, value);
     return;
   }
-  if (element.isContentEditable) {
+
+  if (target.isContentEditable || target.getAttribute?.("role") === "textbox") {
     const selection = window.getSelection();
     const range = document.createRange();
-    range.selectNodeContents(element);
+    range.selectNodeContents(target);
     selection?.removeAllRanges();
     selection?.addRange(range);
-    const inserted = document.execCommand?.("insertText", false, value);
-    if (!inserted) {
-      element.textContent = value;
+    document.execCommand?.("delete", false);
+    dispatchPasteText(target, value);
+    await sleep(50);
+    if (normalizeText(readElementText(target)) !== normalizeText(value)) {
+      const inserted = document.execCommand?.("insertText", false, value);
+      if (!inserted) {
+        target.textContent = value;
+      }
     }
-    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
-    element.dispatchEvent(new Event("change", { bubbles: true }));
+    dispatchTextChangeEvents(target, value);
     return;
   }
-  element.textContent = value;
-  element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
-  element.dispatchEvent(new Event("change", { bubbles: true }));
+
+  target.textContent = value;
+  dispatchTextChangeEvents(target, value);
+}
+
+function editableTextTarget(element) {
+  if (!element) return document.body;
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return element;
+  if (element.isContentEditable || element.getAttribute?.("role") === "textbox") return element;
+  return element.querySelector?.("textarea, input[type='text'], [contenteditable='true'], [role='textbox']") || element;
+}
+
+function dispatchPasteText(element, value) {
+  try {
+    const data = new DataTransfer();
+    data.setData("text/plain", value);
+    element.dispatchEvent(new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: data,
+    }));
+  } catch {
+    // ClipboardEvent/DataTransfer support differs across Chromium extension worlds.
+  }
+}
+
+function dispatchTextChangeEvents(element, value) {
+  const inputOptions = { bubbles: true, cancelable: true, inputType: "insertText", data: value };
+  const eventTargets = [element, element.parentElement, element.closest?.("[role='textbox']")].filter(Boolean);
+  uniqueElements(eventTargets).forEach((target) => {
+    try {
+      target.dispatchEvent(new InputEvent("beforeinput", inputOptions));
+    } catch {
+      target.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
+    }
+    try {
+      target.dispatchEvent(new InputEvent("input", inputOptions));
+    } catch {
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+    target.dispatchEvent(new KeyboardEvent("keydown", { key: " ", code: "Space", bubbles: true }));
+    target.dispatchEvent(new KeyboardEvent("keyup", { key: " ", code: "Space", bubbles: true }));
+  });
 }
 
 function setNativeValue(element, value) {
@@ -755,6 +982,17 @@ function isNearPromptSubmitPosition(button, promptBox) {
   const verticallyAligned = Math.abs(buttonCenterY - promptCenterY) <= Math.max(150, promptRect.height * 3);
   const sharedDepth = sharedAncestorDepth(promptBox, button, 8);
   return sharedDepth >= 0 && verticallyAligned && (nearRightEdge || closeToRightEdge);
+}
+
+function distanceFromPrompt(element, promptBox) {
+  if (!promptBox) return 0;
+  const promptRect = promptBox.getBoundingClientRect();
+  const rect = element.getBoundingClientRect();
+  const promptCenterX = (promptRect.left + promptRect.right) / 2;
+  const promptCenterY = (promptRect.top + promptRect.bottom) / 2;
+  const elementCenterX = (rect.left + rect.right) / 2;
+  const elementCenterY = (rect.top + rect.bottom) / 2;
+  return Math.hypot(elementCenterX - promptCenterX, elementCenterY - promptCenterY);
 }
 
 function sharedAncestorDepth(first, second, maxDepth) {

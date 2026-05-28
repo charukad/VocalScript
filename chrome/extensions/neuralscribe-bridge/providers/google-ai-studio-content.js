@@ -83,6 +83,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 async function runGoogleAiStudioHealthCheck() {
+  await dismissBlockingDialogs();
   const promptBox = await waitForPromptBox(2500);
   const generateButton = findGenerateButton(promptBox);
   const audioCandidates = findAudioCandidates();
@@ -135,6 +136,7 @@ async function runGoogleAiStudioHealthCheck() {
 
 async function runGoogleAiStudioJob(job, options = {}) {
   const timeoutMs = Number(options.timeoutMs || 180000);
+  await dismissBlockingDialogs();
   const promptBox = await waitForPromptBox(30000);
   if (!promptBox) {
     if (hasManualActionElement()) {
@@ -164,6 +166,7 @@ async function runGoogleAiStudioJob(job, options = {}) {
 
   const capture = await captureAudioResult(job, audio, options.httpBaseUrl, {
     adapterTestId: options.adapterTestId || "",
+    captureMode: options.captureMode || "",
   });
   const mediaUrl = capture.mediaUrl;
   const localPath = capture.localPath;
@@ -180,6 +183,9 @@ async function runGoogleAiStudioJob(job, options = {}) {
       localPath,
       source: localPath ? "backend" : "provider",
     }],
+    mediaDataUrl: capture.mediaDataUrl || "",
+    mimeType: capture.mimeType || "",
+    fileExtension: capture.fileExtension || "",
     metadata: {
       provider: GOOGLE_AI_STUDIO_PROVIDER,
       providerPageUrl: location.href,
@@ -334,12 +340,79 @@ function findEditableByLabel(candidates, pattern) {
 
 async function waitForPromptBox(timeoutMs) {
   const startedAt = Date.now();
+  let lastDialogDismissedAt = 0;
+  let templateActivated = false;
   while (Date.now() - startedAt < timeoutMs) {
+    if (Date.now() - lastDialogDismissedAt > 1500) {
+      const dismissed = await dismissBlockingDialogs();
+      if (dismissed) lastDialogDismissedAt = Date.now();
+    }
     const box = findPromptBox();
     if (box) return box;
+    if (!templateActivated) {
+      templateActivated = await activateSpeechTemplate();
+      if (templateActivated) {
+        await sleep(1200);
+        continue;
+      }
+    }
     await sleep(250);
   }
   return null;
+}
+
+async function activateSpeechTemplate() {
+  const templateButton = findSpeechTemplateButton();
+  if (!templateButton) return false;
+  clickElement(templateButton);
+  return true;
+}
+
+function findSpeechTemplateButton() {
+  const buttons = queryAll(GOOGLE_AI_STUDIO_SELECTORS.generateButton)
+    .filter((button) => isVisibleElement(button) && !isDisabledControl(button))
+    .map((button) => ({ button, label: elementLabel(button) }));
+  const preferred = [
+    /master storyteller/i,
+    /ad voiceover/i,
+    /everyday assistant/i,
+    /training guide/i,
+  ];
+  for (const pattern of preferred) {
+    const match = buttons.find((item) => pattern.test(item.label));
+    if (match) return match.button;
+  }
+  return buttons.find((item) => /speech|voice|story|narrat/i.test(item.label))?.button || null;
+}
+
+async function dismissBlockingDialogs() {
+  let dismissed = false;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const button = findBlockingDialogButton();
+    if (!button) break;
+    clickElement(button);
+    dismissed = true;
+    await sleep(800);
+  }
+  return dismissed;
+}
+
+function findBlockingDialogButton() {
+  const dialogRoots = queryAll([
+    "[role='dialog']",
+    "[aria-modal='true']",
+    "mat-dialog-container",
+    ".mat-mdc-dialog-container",
+    ".cdk-overlay-pane",
+  ]).filter(isVisibleElement);
+  const buttons = queryAll(GOOGLE_AI_STUDIO_SELECTORS.generateButton)
+    .filter((button) => isVisibleElement(button) && !isDisabledControl(button))
+    .filter((button) => dialogRoots.length === 0 || dialogRoots.some((root) => containsDeep(root, button)));
+  return buttons.find((button) => {
+    const label = elementLabel(button);
+    if (/accept permissions|remove extension/i.test(label)) return false;
+    return /^(continue|got it|ok|okay|close|dismiss)$/i.test(label) || /close dialog/i.test(label);
+  }) || null;
 }
 
 function findPromptBox() {
@@ -475,13 +548,26 @@ function setNativeValue(element, value) {
 async function captureAudioResult(job, audio, httpBaseUrl, options = {}) {
   const audioUrlKind = classifyAudioUrl(audio.url);
   try {
+    const blob = await blobFromMediaUrl(audio.url);
+    const extension = extensionFromBlob(blob, "audio");
     const metadata = {
       capturedVia: isLocalObjectUrl(audio.url) ? "content-script-blob-upload" : "content-script-fetch-upload",
       audioUrlKind,
     };
+    if (options.captureMode === "background_upload" && !options.adapterTestId) {
+      return {
+        mediaUrl: "",
+        localPath: "",
+        mediaDataUrl: await blobToDataUrl(blob),
+        mimeType: blob.type || "audio/mpeg",
+        fileExtension: extension,
+        capturedVia: isLocalObjectUrl(audio.url) ? "content-script-blob-background-upload" : "content-script-fetch-background-upload",
+        audioUrlKind,
+      };
+    }
     const uploaded = options.adapterTestId
-      ? await uploadAdapterTestAudioFromUrl(options.adapterTestId, audio.url, httpBaseUrl)
-      : await uploadAudioFromUrl(job, audio.url, httpBaseUrl, metadata);
+      ? await uploadAdapterTestAudioBlob(options.adapterTestId, blob, extension, httpBaseUrl)
+      : await uploadAudioBlob(job, blob, extension, httpBaseUrl, metadata);
     return {
       mediaUrl: uploaded.resultUrl,
       localPath: uploaded.localPath || "",
@@ -502,12 +588,12 @@ async function captureAudioResult(job, audio, httpBaseUrl, options = {}) {
 }
 
 async function uploadAdapterTestAudioFromUrl(testId, mediaUrl, httpBaseUrl) {
-  const response = await fetch(mediaUrl);
-  if (!response.ok) {
-    throw new Error("Captured Google AI Studio adapter audio, but could not read it.");
-  }
-  const blob = await response.blob();
+  const blob = await blobFromMediaUrl(mediaUrl);
   const extension = extensionFromBlob(blob, "audio");
+  return uploadAdapterTestAudioBlob(testId, blob, extension, httpBaseUrl);
+}
+
+async function uploadAdapterTestAudioBlob(testId, blob, extension, httpBaseUrl) {
   const formData = new FormData();
   formData.append("files", blob, `${testId}.${extension}`);
   const baseUrl = String(httpBaseUrl || "http://127.0.0.1:8000").replace(/\/$/, "");
@@ -526,12 +612,12 @@ async function uploadAdapterTestAudioFromUrl(testId, mediaUrl, httpBaseUrl) {
 }
 
 async function uploadAudioFromUrl(job, mediaUrl, httpBaseUrl, metadata = {}) {
-  const response = await fetch(mediaUrl);
-  if (!response.ok) {
-    throw new Error("Captured Google AI Studio audio blob, but could not read it.");
-  }
-  const blob = await response.blob();
+  const blob = await blobFromMediaUrl(mediaUrl);
   const extension = extensionFromBlob(blob, "audio");
+  return uploadAudioBlob(job, blob, extension, httpBaseUrl, metadata);
+}
+
+async function uploadAudioBlob(job, blob, extension, httpBaseUrl, metadata = {}) {
   const formData = new FormData();
   formData.append("mediaType", "audio");
   formData.append("metadata", JSON.stringify({
@@ -551,6 +637,23 @@ async function uploadAudioFromUrl(job, mediaUrl, httpBaseUrl, metadata = {}) {
     throw new Error(`Generated audio upload failed: ${await uploadResponse.text()}`);
   }
   return uploadResponse.json();
+}
+
+async function blobFromMediaUrl(mediaUrl) {
+  const response = await fetch(mediaUrl);
+  if (!response.ok) {
+    throw new Error("Captured Google AI Studio audio, but could not read it.");
+  }
+  return response.blob();
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not encode generated audio."));
+    reader.readAsDataURL(blob);
+  });
 }
 
 async function readAudioDuration(element) {

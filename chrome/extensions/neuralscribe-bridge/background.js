@@ -9,16 +9,17 @@ import {
 } from "./shared/protocol.js";
 
 const DEFAULT_SETTINGS = {
+  settingsVersion: "content-platform-2026-05",
   wsUrl: DEFAULT_BRIDGE.WS_URL,
   httpBaseUrl: DEFAULT_BRIDGE.HTTP_BASE_URL,
   sessionToken: DEFAULT_BRIDGE.SESSION_TOKEN,
-  providers: [PROVIDERS.META],
+  providers: [PROVIDERS.GOOGLE_AI_STUDIO, PROVIDERS.GOOGLE_FLOW],
   accountLabel: "",
   chromeProfileLabel: "",
   projectId: "",
   metaUrl: "https://www.meta.ai/create",
   googleAiStudioUrl: "https://aistudio.google.com/generate-speech",
-  googleFlowUrl: "https://flow.google",
+  googleFlowUrl: "https://labs.google/fx/tools/flow",
   claimIntervalMs: 5000,
   providerDelayMs: 12000,
   jobTimeoutMs: 180000,
@@ -152,11 +153,27 @@ async function handleRuntimeMessage(message) {
 
 async function getSettings() {
   const stored = await chrome.storage.local.get(Object.keys(DEFAULT_SETTINGS));
-  return { ...DEFAULT_SETTINGS, ...stored };
+  const settings = sanitizeSettings({ ...DEFAULT_SETTINGS, ...stored });
+  if (stored.settingsVersion !== DEFAULT_SETTINGS.settingsVersion) {
+    const migrated = sanitizeSettings({
+      ...settings,
+      settingsVersion: DEFAULT_SETTINGS.settingsVersion,
+      providers: DEFAULT_SETTINGS.providers,
+      googleAiStudioUrl: settings.googleAiStudioUrl || DEFAULT_SETTINGS.googleAiStudioUrl,
+      googleFlowUrl: settings.googleFlowUrl || DEFAULT_SETTINGS.googleFlowUrl,
+    });
+    await chrome.storage.local.set(migrated);
+    return migrated;
+  }
+  if (hasSettingsChanged(stored, settings)) {
+    await chrome.storage.local.set(settings);
+  }
+  return settings;
 }
 
 function sanitizeSettings(settings) {
   return {
+    settingsVersion: String(settings.settingsVersion || DEFAULT_SETTINGS.settingsVersion).trim(),
     wsUrl: String(settings.wsUrl || DEFAULT_SETTINGS.wsUrl).trim(),
     httpBaseUrl: String(settings.httpBaseUrl || DEFAULT_SETTINGS.httpBaseUrl).trim(),
     sessionToken: String(settings.sessionToken || DEFAULT_SETTINGS.sessionToken).trim(),
@@ -167,13 +184,45 @@ function sanitizeSettings(settings) {
     chromeProfileLabel: String(settings.chromeProfileLabel || "").trim(),
     projectId: String(settings.projectId || "").trim(),
     metaUrl: String(settings.metaUrl || DEFAULT_SETTINGS.metaUrl).trim(),
-    googleAiStudioUrl: String(settings.googleAiStudioUrl || DEFAULT_SETTINGS.googleAiStudioUrl).trim(),
-    googleFlowUrl: String(settings.googleFlowUrl || DEFAULT_SETTINGS.googleFlowUrl).trim(),
+    googleAiStudioUrl: normalizeGoogleAiStudioUrl(settings.googleAiStudioUrl),
+    googleFlowUrl: normalizeGoogleFlowUrl(settings.googleFlowUrl),
     claimIntervalMs: Number(settings.claimIntervalMs || DEFAULT_SETTINGS.claimIntervalMs),
     providerDelayMs: Number(settings.providerDelayMs || DEFAULT_SETTINGS.providerDelayMs),
     jobTimeoutMs: Number(settings.jobTimeoutMs || DEFAULT_SETTINGS.jobTimeoutMs),
     captureFailureScreenshots: settings.captureFailureScreenshots !== false,
   };
+}
+
+function hasSettingsChanged(stored, settings) {
+  return Object.keys(DEFAULT_SETTINGS).some((key) => JSON.stringify(stored[key]) !== JSON.stringify(settings[key]));
+}
+
+function normalizeGoogleAiStudioUrl(value) {
+  const raw = String(value || DEFAULT_SETTINGS.googleAiStudioUrl).trim();
+  if (!raw) return DEFAULT_SETTINGS.googleAiStudioUrl;
+  try {
+    const url = new URL(raw);
+    if (url.hostname.endsWith("aistudio.google.com")) return url.toString();
+  } catch {
+    return DEFAULT_SETTINGS.googleAiStudioUrl;
+  }
+  return DEFAULT_SETTINGS.googleAiStudioUrl;
+}
+
+function normalizeGoogleFlowUrl(value) {
+  const raw = String(value || DEFAULT_SETTINGS.googleFlowUrl).trim();
+  if (!raw) return DEFAULT_SETTINGS.googleFlowUrl;
+  const flowPath = "labs.google/fx/tools/flow";
+  if (raw.includes(flowPath)) return DEFAULT_SETTINGS.googleFlowUrl;
+  try {
+    const url = new URL(raw);
+    if (url.hostname.endsWith("labs.google") && url.pathname.includes("/fx/tools/flow")) {
+      return DEFAULT_SETTINGS.googleFlowUrl;
+    }
+  } catch {
+    return DEFAULT_SETTINGS.googleFlowUrl;
+  }
+  return DEFAULT_SETTINGS.googleFlowUrl;
 }
 
 async function connect() {
@@ -1011,22 +1060,80 @@ async function runGoogleAiStudioJob(job, settings) {
     options: {
       timeoutMs: settings.jobTimeoutMs,
       httpBaseUrl: settings.httpBaseUrl,
+      captureMode: "background_upload",
     },
   });
   if (!response?.ok) {
     throw new Error(response?.error || "Google AI Studio provider adapter failed");
   }
+  const result = response.result?.mediaDataUrl
+    ? await uploadGoogleAiStudioAudioResult(settings, job, response.result)
+    : response.result;
   await reportDebugEvent("provider_job_completed", "Google AI Studio returned audio", {
     provider: "google_ai_studio",
     jobId: job.id,
     metadata: {
-      providerPageUrl: response.result?.metadata?.providerPageUrl || "",
-      narrationLineId: response.result?.metadata?.narrationLineId || "",
-      capturedVia: response.result?.metadata?.capturedVia || "",
-      durationSeconds: response.result?.metadata?.durationSeconds || "",
+      providerPageUrl: result?.metadata?.providerPageUrl || "",
+      narrationLineId: result?.metadata?.narrationLineId || "",
+      capturedVia: result?.metadata?.capturedVia || "",
+      durationSeconds: result?.metadata?.durationSeconds || "",
     },
   });
-  return response.result;
+  return result;
+}
+
+async function uploadGoogleAiStudioAudioResult(settings, job, result) {
+  const blob = await blobFromDataUrl(result.mediaDataUrl);
+  const extension = String(result.fileExtension || extensionFromMimeType(blob.type, "audio")).replace(/^\./, "") || "mp3";
+  const formData = new FormData();
+  formData.append("mediaType", "audio");
+  formData.append("metadata", JSON.stringify({
+    ...(result.metadata || {}),
+    provider: "google_ai_studio",
+    capturedVia: result.metadata?.capturedVia || "background-upload",
+    backgroundUploaded: "true",
+  }));
+  formData.append("file", blob, `${job.id}.${extension}`);
+  const response = await fetch(`${settings.httpBaseUrl}/api/generation/jobs/${encodeURIComponent(job.id)}/result/upload`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(`Generated audio upload failed: ${await responseText(response)}`);
+  }
+  const uploaded = await response.json();
+  return {
+    ...result,
+    mediaDataUrl: "",
+    mediaUrl: uploaded.resultUrl,
+    mediaType: "audio",
+    mediaVariants: [{
+      id: "audio-1",
+      url: uploaded.resultUrl,
+      mediaType: "audio",
+      localPath: uploaded.localPath || "",
+      source: "backend",
+    }],
+    metadata: {
+      ...(result.metadata || {}),
+      localPath: uploaded.localPath || "",
+    },
+  };
+}
+
+async function blobFromDataUrl(dataUrl) {
+  const response = await fetch(dataUrl);
+  if (!response.ok) throw new Error("Could not decode generated audio data.");
+  return response.blob();
+}
+
+function extensionFromMimeType(mimeType, fallbackMediaType) {
+  const type = String(mimeType || "").toLowerCase();
+  if (type.includes("wav")) return "wav";
+  if (type.includes("mpeg") || type.includes("mp3")) return "mp3";
+  if (type.includes("mp4") || type.includes("m4a")) return "m4a";
+  if (type.includes("ogg")) return "ogg";
+  return fallbackMediaType === "audio" ? "mp3" : "bin";
 }
 
 async function runGoogleFlowJob(job, settings) {
